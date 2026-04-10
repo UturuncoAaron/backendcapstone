@@ -1,0 +1,50 @@
+import {
+    Entity, PrimaryGeneratedColumn, Column,
+    CreateDateColumn, UpdateDateColumn,
+    ManyToOne, JoinColumn,
+} from 'typeorm';
+import { User } from '../../users/entities/user.entity.js';
+import { Section } from '../../academic/entities/section.entity.js';
+import { Period } from '../../academic/entities/period.entity.js';
+
+@Entity('cursos')
+export class Course {
+    @PrimaryGeneratedColumn('uuid')
+    id: string;
+
+    @Column({ length: 150 })
+    nombre: string;
+
+    @Column({ type: 'text', nullable: true })
+    descripcion: string | null;
+
+    @Column({ name: 'docente_id' })
+    docente_id: string;
+
+    @ManyToOne(() => User, { onDelete: 'RESTRICT' })
+    @JoinColumn({ name: 'docente_id' })
+    docente: User;
+
+    @Column({ name: 'seccion_id' })
+    seccion_id: number;
+
+    @ManyToOne(() => Section, { onDelete: 'RESTRICT' })
+    @JoinColumn({ name: 'seccion_id' })
+    seccion: Section;
+
+    @Column({ name: 'periodo_id' })
+    periodo_id: number;
+
+    @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
+    @JoinColumn({ name: 'periodo_id' })
+    periodo: Period;
+
+    @Column({ default: true })
+    activo: boolean;
+
+    @CreateDateColumn({ name: 'created_at' })
+    created_at: Date;
+
+    @UpdateDateColumn({ name: 'updated_at' })
+    updated_at: Date;
+}
