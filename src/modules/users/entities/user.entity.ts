@@ -30,6 +30,10 @@ export class User {
     @Column({ name: 'foto_url', type: 'text', nullable: true })
     foto_url: string | null;
 
+    /** Clave del archivo de foto en Cloudflare R2 */
+    @Column({ name: 'foto_storage_key', type: 'text', nullable: true })
+    foto_storage_key: string | null;
+
     @Column({ name: 'password_hash' })
     password_hash: string;
 
@@ -45,27 +49,31 @@ export class User {
     @Column({ nullable: true, length: 20 })
     telefono: string | null;
 
-    // ── Alumno ──────────────────────────────────
+    // ── Alumno ──
     @Column({ name: 'codigo_estudiante', nullable: true, length: 20, unique: true })
     codigo_estudiante: string | null;
 
     @Column({ name: 'fecha_nacimiento', nullable: true, type: 'date' })
     fecha_nacimiento: Date | null;
 
-    // ── Docente ──────────────────────────────────
+    // ── Docente ──
     @Column({ nullable: true, length: 150 })
     especialidad: string | null;
 
     @Column({ name: 'titulo_profesional', nullable: true, length: 150 })
     titulo_profesional: string | null;
 
-    // ── Padre ──────────────────────────────────
+    // ── Padre ──
     @Column({ name: 'relacion_familiar', nullable: true, length: 20 })
     relacion_familiar: RelacionFamiliar | null;
 
-    // ── Admin ──────────────────────────────────
+    // ── Admin ──
     @Column({ nullable: true, length: 100 })
     cargo: string | null;
+
+    /** Actualizado en cada login exitoso */
+    @Column({ name: 'ultimo_acceso', type: 'timestamp', nullable: true })
+    ultimo_acceso: Date | null;
 
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;

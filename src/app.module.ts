@@ -14,6 +14,9 @@ import { ExamsModule } from './modules/exams/exams.module.js';
 import { TasksModule } from './modules/tasks/tasks.module.js';
 import { ForumModule } from './modules/forum/forum.module.js';
 import { GradesModule } from './modules/grades/grades.module.js';
+import { StorageModule } from './modules/storage/storage.module.js';
+import { LibretasModule } from './modules/libretas/libretas.module.js';
+import { ConfiguracionModule } from './modules/configuracion/configuracion.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -47,7 +50,8 @@ console.log('NODE_ENV:', process.env.NODE_ENV, '| isDev:', isDev);
     UsersModule,
     AcademicModule,
     CoursesModule,
-    MaterialsModule,ExamsModule,TasksModule,ForumModule,GradesModule,
+    MaterialsModule, ExamsModule, TasksModule, ForumModule, GradesModule, StorageModule, LibretasModule,
+    ConfiguracionModule,
   ],
   providers: [
     {

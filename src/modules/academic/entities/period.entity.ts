@@ -1,5 +1,6 @@
 import {
-    Entity, PrimaryGeneratedColumn, Column, CreateDateColumn,
+    Entity, PrimaryGeneratedColumn, Column,
+    CreateDateColumn, UpdateDateColumn,
 } from 'typeorm';
 
 @Entity('periodos')
@@ -7,6 +8,7 @@ export class Period {
     @PrimaryGeneratedColumn()
     id: number;
 
+    /** Ej: 'I Bimestre 2026' */
     @Column({ length: 100 })
     nombre: string;
 
@@ -27,4 +29,7 @@ export class Period {
 
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;
+
+    @UpdateDateColumn({ name: 'updated_at' })
+    updated_at: Date;
 }

@@ -24,14 +24,26 @@ export class Exam {
     @Column({ type: 'text', nullable: true })
     descripcion: string | null;
 
+    /** Bimestre al que pertenece (1-4) */
+    @Column({ nullable: true })
+    bimestre: number | null;
+
     @Column({ name: 'fecha_inicio', type: 'timestamp' })
     fecha_inicio: Date;
 
     @Column({ name: 'fecha_fin', type: 'timestamp' })
     fecha_fin: Date;
 
+    /** Minutos para completar el examen. NULL = sin límite. */
+    @Column({ name: 'duracion_min', nullable: true })
+    duracion_min: number | null;
+
     @Column({ name: 'puntos_total', default: 20 })
     puntos_total: number;
+
+    /** Cantidad de intentos permitidos por alumno */
+    @Column({ name: 'intentos_max', default: 1 })
+    intentos_max: number;
 
     @Column({ default: false })
     activo: boolean;

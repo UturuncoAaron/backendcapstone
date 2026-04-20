@@ -23,11 +23,27 @@ export class Task {
     @Column({ type: 'text', nullable: true })
     descripcion: string | null;
 
+    /** Bimestre al que pertenece (1-4) */
+    @Column({ nullable: true })
+    bimestre: number | null;
+
+    /** Semana dentro del bimestre (1-20) */
+    @Column({ nullable: true })
+    semana: number | null;
+
     @Column({ name: 'fecha_entrega', type: 'timestamp' })
     fecha_entrega: Date;
 
     @Column({ name: 'puntos_max', default: 20 })
     puntos_max: number;
+
+    /** El alumno puede subir un archivo como entrega */
+    @Column({ name: 'permite_archivo', default: true })
+    permite_archivo: boolean;
+
+    /** El alumno puede escribir respuesta en texto */
+    @Column({ name: 'permite_texto', default: true })
+    permite_texto: boolean;
 
     @Column({ default: true })
     activo: boolean;

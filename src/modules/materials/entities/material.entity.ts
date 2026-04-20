@@ -25,11 +25,24 @@ export class Material {
     @Column({ length: 20 })
     tipo: TipoMaterial;
 
-    @Column({ type: 'text' })
-    url: string;
+    /** URL para links externos (YouTube, Drive, etc.) */
+    @Column({ type: 'text', nullable: true })
+    url: string | null;
+
+    /** Clave del archivo en Cloudflare R2. Null si es link externo. */
+    @Column({ name: 'storage_key', type: 'text', nullable: true })
+    storage_key: string | null;
 
     @Column({ type: 'text', nullable: true })
     descripcion: string | null;
+
+    /** Bimestre al que pertenece (1-4) */
+    @Column({ nullable: true })
+    bimestre: number | null;
+
+    /** Semana dentro del bimestre (1-20) */
+    @Column({ nullable: true })
+    semana: number | null;
 
     @Column({ default: 0 })
     orden: number;

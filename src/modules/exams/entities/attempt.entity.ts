@@ -24,6 +24,9 @@ export class Attempt {
     @JoinColumn({ name: 'alumno_id' })
     alumno: User;
 
+    @Column({ default: 1 })
+    numero: number;
+
     @Column({ name: 'fecha_inicio', type: 'timestamp', default: () => 'NOW()' })
     fecha_inicio: Date;
 

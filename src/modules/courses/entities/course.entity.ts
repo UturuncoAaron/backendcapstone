@@ -39,6 +39,9 @@ export class Course {
     @JoinColumn({ name: 'periodo_id' })
     periodo: Period;
 
+    @Column({ length: 7, default: '#1976d2' })
+    color: string;
+
     @Column({ default: true })
     activo: boolean;
 

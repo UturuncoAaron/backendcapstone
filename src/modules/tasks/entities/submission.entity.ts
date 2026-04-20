@@ -25,8 +25,13 @@ export class Submission {
     @JoinColumn({ name: 'alumno_id' })
     alumno: User;
 
+    /** URL pública o link externo */
     @Column({ name: 'url_archivo', type: 'text', nullable: true })
     url_archivo: string | null;
+
+    /** Clave del archivo en Cloudflare R2 si fue subido directamente */
+    @Column({ name: 'storage_key', type: 'text', nullable: true })
+    storage_key: string | null;
 
     @Column({ name: 'respuesta_texto', type: 'text', nullable: true })
     respuesta_texto: string | null;
@@ -37,6 +42,7 @@ export class Submission {
     @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
     calificacion: number | null;
 
+    /** Feedback del docente al calificar */
     @Column({ type: 'text', nullable: true })
     comentario: string | null;
 

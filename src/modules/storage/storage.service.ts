@@ -1,0 +1,84 @@
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { randomUUID } from 'crypto';
+
+@Injectable()
+export class StorageService {
+  private readonly s3: S3Client;
+  private readonly bucket: string;
+  private readonly logger = new Logger(StorageService.name);
+
+  constructor() {
+    this.bucket = process.env.CLOUDFLARE_R2_BUCKET_NAME;
+    this.s3 = new S3Client({
+      region: 'auto',
+      endpoint: process.env.CLOUDFLARE_R2_ENDPOINT,
+      credentials: {
+        accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID,
+        secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
+      },
+    });
+  }
+
+  async uploadFile(
+    file: { buffer: Buffer; originalname: string; mimetype: string },
+    folder: string,
+  ): Promise<string> {
+    const ext = file.originalname.split('.').pop()?.toLowerCase();
+    const key = `${folder}/${randomUUID()}.${ext}`;
+
+    try {
+      await this.s3.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Body: file.buffer,
+          ContentType: file.mimetype,
+        }),
+      );
+      this.logger.log(`Archivo subido: ${key}`);
+      return key;
+    } catch (error) {
+      this.logger.error(`Error subiendo archivo: ${(error as Error).message}`);
+      throw new InternalServerErrorException('Error al subir el archivo');
+    }
+  }
+
+  async getSignedUrl(key: string, expiresIn = 3600): Promise<string> {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      });
+      return await getSignedUrl(this.s3, command, { expiresIn });
+    } catch (error) {
+      this.logger.error(`Error generando URL firmada: ${(error as Error).message}`);
+      throw new InternalServerErrorException('Error al generar URL de descarga');
+    }
+  }
+
+  async deleteFile(key: string): Promise<void> {
+    try {
+      await this.s3.send(
+        new DeleteObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+        }),
+      );
+      this.logger.log(`Archivo eliminado: ${key}`);
+    } catch (error) {
+      this.logger.error(`Error eliminando archivo: ${(error as Error).message}`);
+      throw new InternalServerErrorException('Error al eliminar el archivo');
+    }
+  }
+
+  getPublicUrl(key: string): string {
+    return `${process.env.CLOUDFLARE_R2_ENDPOINT}/${this.bucket}/${key}`;
+  }
+}

@@ -7,8 +7,8 @@ import { User } from '../../users/entities/user.entity.js';
 import { Course } from '../../courses/entities/course.entity.js';
 import { Period } from '../../academic/entities/period.entity.js';
 
-@Entity('notas')
-export class Grade {
+@Entity('libretas')
+export class Libreta {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
@@ -33,23 +33,25 @@ export class Grade {
     @JoinColumn({ name: 'periodo_id' })
     periodo: Period;
 
+    /** Bimestre al que corresponde la libreta (1-4) */
     @Column()
     bimestre: number;
 
-    @Column({ name: 'nota_examenes', type: 'decimal', precision: 4, scale: 2, nullable: true })
-    nota_examenes: number | null;
+    /** Clave del archivo PDF en Cloudflare R2 */
+    @Column({ name: 'storage_key', type: 'text' })
+    storage_key: string;
 
-    @Column({ name: 'nota_tareas', type: 'decimal', precision: 4, scale: 2, nullable: true })
-    nota_tareas: number | null;
+    /** Nombre original del archivo PDF */
+    @Column({ name: 'nombre_archivo', length: 255, nullable: true })
+    nombre_archivo: string | null;
 
-    @Column({ name: 'nota_participacion', type: 'decimal', precision: 4, scale: 2, nullable: true })
-    nota_participacion: number | null;
+    /** Usuario (docente o admin) que subió la libreta */
+    @Column({ name: 'subido_por' })
+    subido_por: string;
 
-    @Column({ name: 'nota_final', type: 'decimal', precision: 4, scale: 2, nullable: true })
-    nota_final: number | null;
-
-    @Column({ nullable: true, length: 5, insert: false, update: false })
-    escala: string | null;
+    @ManyToOne(() => User, { onDelete: 'RESTRICT' })
+    @JoinColumn({ name: 'subido_por' })
+    subidoPorUsuario: User;
 
     @Column({ type: 'text', nullable: true })
     observaciones: string | null;
