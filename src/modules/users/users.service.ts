@@ -103,4 +103,19 @@ export class UsersService {
         const { password_hash, ...safe } = user as any;
         return safe;
     }
+    async getStats() {
+        const [alumnos, docentes, padres, cursos] = await Promise.all([
+            this.userRepo.count({ where: { rol: 'alumno', activo: true } }),
+            this.userRepo.count({ where: { rol: 'docente', activo: true } }),
+            this.userRepo.count({ where: { rol: 'padre', activo: true } }),
+            this.userRepo.query(`SELECT COUNT(*) FROM cursos WHERE activo = true`),
+        ]);
+
+        return {
+            alumnos,
+            docentes,
+            padres,
+            cursos: parseInt(cursos[0].count),
+        };
+    }
 }

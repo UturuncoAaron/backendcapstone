@@ -22,7 +22,11 @@ export class UsersController {
     findAll(@Query('rol') rol?: string) {
         return this.usersService.findAll(rol);
     }
-
+    // GET /api/admin/stats
+    @Get('/stats')
+    getStats() {
+        return this.usersService.getStats();
+    }
     // GET /api/admin/users/:id
     @Get(':id')
     findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -53,4 +57,5 @@ export class UsersController {
     ) {
         return this.usersService.resetPassword(id, password);
     }
+
 }
