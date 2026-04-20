@@ -118,4 +118,32 @@ export class UsersService {
             cursos: parseInt(cursos[0].count),
         };
     }
+    async linkParentChild(padreDoc: string, alumnoDoc: string) {
+        const padre = await this.userRepo.findOne({
+            where: { numero_documento: padreDoc, rol: 'padre', activo: true },
+        });
+        if (!padre) throw new NotFoundException(`No se encontró padre con documento ${padreDoc}`);
+
+        const alumno = await this.userRepo.findOne({
+            where: { numero_documento: alumnoDoc, rol: 'alumno', activo: true },
+        });
+        if (!alumno) throw new NotFoundException(`No se encontró alumno con documento ${alumnoDoc}`);
+
+        const existing = await this.userRepo.query(
+            `SELECT id FROM padre_hijo WHERE padre_id = $1 AND alumno_id = $2`,
+            [padre.id, alumno.id],
+        );
+        if (existing.length) throw new ConflictException('Este vínculo ya existe');
+
+        await this.userRepo.query(
+            `INSERT INTO padre_hijo (padre_id, alumno_id) VALUES ($1, $2)`,
+            [padre.id, alumno.id],
+        );
+
+        return {
+            padre: `${padre.nombre} ${padre.apellido_paterno}`,
+            alumno: `${alumno.nombre} ${alumno.apellido_paterno}`,
+        };
+    }
+
 }

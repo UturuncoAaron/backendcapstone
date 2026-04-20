@@ -57,5 +57,11 @@ export class UsersController {
     ) {
         return this.usersService.resetPassword(id, password);
     }
-
+    // POST /api/admin/parent-child
+    @Post('parent-child')
+    async linkParentChild(
+        @Body() dto: { padre_doc: string; alumno_doc: string },
+    ) {
+        return this.usersService.linkParentChild(dto.padre_doc, dto.alumno_doc);
+    }
 }
