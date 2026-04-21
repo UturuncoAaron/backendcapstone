@@ -1,11 +1,12 @@
 import {
     Injectable, NotFoundException, ForbiddenException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Course } from './entities/course.entity.js';
 import { Enrollment } from './entities/enrollment.entity.js';
 import { Period } from '../academic/entities/period.entity.js';
+import { CURSOS_POR_GRADO, COLORES_CURSOS } from '../academic/course-template.js';
 
 @Injectable()
 export class CoursesService {
@@ -13,6 +14,7 @@ export class CoursesService {
         @InjectRepository(Course) private readonly courseRepo: Repository<Course>,
         @InjectRepository(Enrollment) private readonly enrollmentRepo: Repository<Enrollment>,
         @InjectRepository(Period) private readonly periodRepo: Repository<Period>,
+        @InjectDataSource() private readonly dataSource: DataSource,
     ) { }
 
     // ── CURSOS ──────────────────────────────────────────────────────
@@ -27,7 +29,6 @@ export class CoursesService {
         }
 
         if (rol === 'alumno') {
-            // Busca cursos por matrícula activa del alumno
             const enrollments = await this.enrollmentRepo.find({
                 where: { alumno_id: userId, activo: true },
                 relations: ['seccion'],
@@ -75,6 +76,7 @@ export class CoursesService {
         docente_id: string;
         seccion_id: number;
         periodo_id: number;
+        color?: string;
     }) {
         const course = this.courseRepo.create(dto);
         return this.courseRepo.save(course);
@@ -87,13 +89,97 @@ export class CoursesService {
         const course = await this.courseRepo.findOne({ where: { id, activo: true } });
         if (!course) throw new NotFoundException(`Curso ${id} no encontrado`);
 
-        // Solo el docente dueño o admin puede editar
         if (rol === 'docente' && course.docente_id !== docenteId) {
             throw new ForbiddenException('No tienes permiso para editar este curso');
         }
 
         Object.assign(course, dto);
         return this.courseRepo.save(course);
+    }
+
+    // ── ASIGNAR DOCENTE ─────────────────────────────────────────────
+
+    // PATCH /api/courses/:id/assign-teacher
+    async assignTeacher(cursoId: string, docenteId: string) {
+        const curso = await this.courseRepo.findOne({ where: { id: cursoId, activo: true } });
+        if (!curso) throw new NotFoundException(`Curso ${cursoId} no encontrado`);
+
+        // Verificar que el usuario es docente activo
+        const docente = await this.dataSource.query(
+            `SELECT id, nombre, apellido_paterno
+             FROM usuarios
+             WHERE id = $1 AND rol = 'docente' AND activo = true`,
+            [docenteId],
+        );
+        if (!docente.length) throw new NotFoundException(`Docente ${docenteId} no encontrado`);
+
+        curso.docente_id = docenteId;
+        await this.courseRepo.save(curso);
+
+        return {
+            curso: curso.nombre,
+            docente: `${docente[0].nombre} ${docente[0].apellido_paterno}`,
+        };
+    }
+
+    // ── GENERAR CURSOS DESDE PLANTILLA ──────────────────────────────
+
+    // POST /api/courses/generate/:seccionId/:periodoId
+    async generateCoursesFromTemplate(seccionId: number, periodoId: number) {
+        // Obtener sección con su grado
+        const seccion = await this.dataSource.query(
+            `SELECT s.id, s.nombre, g.id AS grado_id, g.nombre AS grado, g.orden
+             FROM secciones s
+             JOIN grados g ON g.id = s.grado_id
+             WHERE s.id = $1`,
+            [seccionId],
+        );
+        if (!seccion.length) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+
+        const { orden: gradoOrden, grado, nombre: seccionNombre } = seccion[0];
+
+        // Obtener plantilla del grado
+        const plantilla = CURSOS_POR_GRADO[gradoOrden];
+        if (!plantilla) {
+            throw new NotFoundException(
+                `No hay plantilla de cursos para el grado con orden ${gradoOrden}`,
+            );
+        }
+
+        // Cursos ya existentes en esta sección+periodo
+        const existentes = await this.dataSource.query(
+            `SELECT nombre FROM cursos WHERE seccion_id = $1 AND periodo_id = $2`,
+            [seccionId, periodoId],
+        );
+        const nombresExistentes = new Set(existentes.map((c: any) => c.nombre));
+
+        let creados = 0;
+        let omitidos = 0;
+
+        for (const nombreCurso of plantilla) {
+            if (nombresExistentes.has(nombreCurso)) {
+                omitidos++;
+                continue;
+            }
+
+            const color = COLORES_CURSOS[nombreCurso] ?? '#6B7280';
+
+            await this.dataSource.query(
+                `INSERT INTO cursos (nombre, seccion_id, periodo_id, color, activo, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, true, NOW(), NOW())`,
+                [nombreCurso, seccionId, periodoId, color],
+            );
+            creados++;
+        }
+
+        return {
+            grado,
+            seccion: seccionNombre,
+            total_plantilla: plantilla.length,
+            creados,
+            omitidos,
+            mensaje: `${creados} cursos creados, ${omitidos} ya existían`,
+        };
     }
 
     // ── MATRICULAS ──────────────────────────────────────────────────
@@ -104,7 +190,6 @@ export class CoursesService {
         });
 
         if (existing) {
-            // Si estaba inactiva, la reactiva
             if (!existing.activo) {
                 existing.activo = true;
                 return this.enrollmentRepo.save(existing);

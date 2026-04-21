@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
 import { ParentPortalService } from './parent-portal.service.js';
 
 // TODO: agregar JwtAuthGuard + Roles('padre') cuando se implemente JWT
@@ -6,22 +6,27 @@ import { ParentPortalService } from './parent-portal.service.js';
 export class ParentPortalController {
     constructor(private readonly service: ParentPortalService) { }
 
+    // GET /api/parent/children — padre ve sus hijos
     @Get('children')
-    async getChildren() {
-        // TODO: reemplazar 'hardcoded-id' con @CurrentUser() cuando JWT esté activo
-        // return this.service.getChildren(user.sub);
-        return { message: 'JWT pendiente — conectar con CurrentUser' };
+    getChildren() {
+        // TODO: reemplazar con CurrentUser cuando JWT esté activo
+        const padreId = 'hardcoded-padre-id-replace-with-jwt';
+        return this.service.getChildren(padreId);
     }
 
+    // GET /api/parent/children/:id/grades — padre ve notas de su hijo
     @Get('children/:id/grades')
-    async getChildGrades(@Param('id') alumnoId: string) {
-        // TODO: reemplazar con CurrentUser
-        return { message: 'JWT pendiente', alumnoId };
+    getChildGrades(@Param('id', ParseUUIDPipe) alumnoId: string) {
+        // TODO: reemplazar con CurrentUser cuando JWT esté activo
+        const padreId = 'hardcoded-padre-id-replace-with-jwt';
+        return this.service.getChildGrades(padreId, alumnoId);
     }
 
+    // GET /api/parent/children/:id/attendance — padre ve asistencia de su hijo
     @Get('children/:id/attendance')
-    async getChildAttendance(@Param('id') alumnoId: string) {
-        // TODO: reemplazar con CurrentUser
-        return { message: 'JWT pendiente', alumnoId };
+    getChildAttendance(@Param('id', ParseUUIDPipe) alumnoId: string) {
+        // TODO: reemplazar con CurrentUser cuando JWT esté activo
+        const padreId = 'hardcoded-padre-id-replace-with-jwt';
+        return this.service.getChildAttendance(padreId, alumnoId);
     }
 }
