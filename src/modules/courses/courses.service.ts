@@ -73,12 +73,12 @@ export class CoursesService {
     async create(dto: {
         nombre: string;
         descripcion?: string;
-        docente_id: string;
+        docente_id?: string;
         seccion_id: number;
         periodo_id: number;
         color?: string;
     }) {
-        const course = this.courseRepo.create(dto);
+        const course = this.courseRepo.create(dto as any);
         return this.courseRepo.save(course);
     }
 
@@ -99,12 +99,10 @@ export class CoursesService {
 
     // ── ASIGNAR DOCENTE ─────────────────────────────────────────────
 
-    // PATCH /api/courses/:id/assign-teacher
     async assignTeacher(cursoId: string, docenteId: string) {
         const curso = await this.courseRepo.findOne({ where: { id: cursoId, activo: true } });
         if (!curso) throw new NotFoundException(`Curso ${cursoId} no encontrado`);
 
-        // Verificar que el usuario es docente activo
         const docente = await this.dataSource.query(
             `SELECT id, nombre, apellido_paterno
              FROM usuarios
@@ -124,7 +122,6 @@ export class CoursesService {
 
     // ── GENERAR CURSOS DESDE PLANTILLA ──────────────────────────────
 
-    // POST /api/courses/generate/:seccionId/:periodoId
     async generateCoursesFromTemplate(seccionId: number, periodoId: number) {
         // Obtener sección con su grado
         const seccion = await this.dataSource.query(
@@ -136,14 +133,29 @@ export class CoursesService {
         );
         if (!seccion.length) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
 
-        const { orden: gradoOrden, grado, nombre: seccionNombre } = seccion[0];
+        const { orden: gradoOrden, grado_id: gradoId, grado, nombre: seccionNombre } = seccion[0];
 
-        // Obtener plantilla del grado
-        const plantilla = CURSOS_POR_GRADO[gradoOrden];
+        // Buscar plantilla por orden primero, si no existe buscar por grado_id
+        // Esto cubre casos donde el orden en BD no coincide con las claves del template
+        let plantilla = CURSOS_POR_GRADO[gradoOrden];
+
+        // Si no encontró por orden, usar la plantilla genérica de secundaria
+        // ya que todos los grados de secundaria tienen los mismos cursos
         if (!plantilla) {
-            throw new NotFoundException(
-                `No hay plantilla de cursos para el grado con orden ${gradoOrden}`,
-            );
+            // Todos los grados de secundaria tienen los mismos 11 cursos
+            plantilla = [
+                'Matemática',
+                'Comunicación',
+                'Inglés',
+                'Historia, Geografía y Economía',
+                'Formación Ciudadana y Cívica',
+                'Persona, Familia y Relaciones Humanas',
+                'Ciencia, Tecnología y Ambiente',
+                'Educación para el Trabajo',
+                'Educación Física',
+                'Arte y Cultura',
+                'Educación Religiosa',
+            ];
         }
 
         // Cursos ya existentes en esta sección+periodo

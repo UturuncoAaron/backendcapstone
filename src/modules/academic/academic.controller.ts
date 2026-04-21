@@ -33,8 +33,12 @@ export class AcademicController {
 
     // POST /api/academic/secciones
     @Post('secciones')
-    createSeccion(@Body() body: { gradoId: number; nombre: string; capacidad?: number }) {
-        return this.academicService.createSeccion(body.gradoId, body.nombre, body.capacidad);
+    createSeccion(@Body() body: { grado_id: number; nombre: string; capacidad?: number }) {
+        return this.academicService.createSeccion(
+            Number(body.grado_id), // ← Number() por si llega como string
+            body.nombre,
+            body.capacidad,
+        );
     }
 
     // ── PERIODOS ────────────────────────────────────────────────────

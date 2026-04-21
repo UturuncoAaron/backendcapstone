@@ -1,32 +1,32 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Param, Query, ParseUUIDPipe } from '@nestjs/common';
 import { ParentPortalService } from './parent-portal.service.js';
 
-// TODO: agregar JwtAuthGuard + Roles('padre') cuando se implemente JWT
+// TODO: reemplazar @Query('padreId') con @CurrentUser() cuando JWT esté activo
 @Controller('parent')
 export class ParentPortalController {
     constructor(private readonly service: ParentPortalService) { }
 
-    // GET /api/parent/children — padre ve sus hijos
+    // GET /api/parent/children?padreId=uuid
     @Get('children')
-    getChildren() {
-        // TODO: reemplazar con CurrentUser cuando JWT esté activo
-        const padreId = 'hardcoded-padre-id-replace-with-jwt';
+    getChildren(@Query('padreId') padreId: string) {
         return this.service.getChildren(padreId);
     }
 
-    // GET /api/parent/children/:id/grades — padre ve notas de su hijo
+    // GET /api/parent/children/:id/grades?padreId=uuid
     @Get('children/:id/grades')
-    getChildGrades(@Param('id', ParseUUIDPipe) alumnoId: string) {
-        // TODO: reemplazar con CurrentUser cuando JWT esté activo
-        const padreId = 'hardcoded-padre-id-replace-with-jwt';
+    getChildGrades(
+        @Param('id', ParseUUIDPipe) alumnoId: string,
+        @Query('padreId') padreId: string,
+    ) {
         return this.service.getChildGrades(padreId, alumnoId);
     }
 
-    // GET /api/parent/children/:id/attendance — padre ve asistencia de su hijo
+    // GET /api/parent/children/:id/attendance?padreId=uuid
     @Get('children/:id/attendance')
-    getChildAttendance(@Param('id', ParseUUIDPipe) alumnoId: string) {
-        // TODO: reemplazar con CurrentUser cuando JWT esté activo
-        const padreId = 'hardcoded-padre-id-replace-with-jwt';
+    getChildAttendance(
+        @Param('id', ParseUUIDPipe) alumnoId: string,
+        @Query('padreId') padreId: string,
+    ) {
         return this.service.getChildAttendance(padreId, alumnoId);
     }
 }

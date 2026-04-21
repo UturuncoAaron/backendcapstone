@@ -58,6 +58,28 @@ export class UsersService {
 
         return users.map(u => this.sanitize(u));
     }
+    async searchUsers(query: string, role: string) {
+        if (!query || query.length < 3) {
+            return { data: [] };
+        }
+        const users = await this.userRepo.find({
+            where: [
+                { numero_documento: ILike(`${query}%`), rol: role as any, activo: true },
+                { nombre: ILike(`%${query}%`), rol: role as any, activo: true },
+                { apellido_paterno: ILike(`%${query}%`), rol: role as any, activo: true }
+            ],
+            take: 10, 
+            select: ['numero_documento', 'nombre', 'apellido_paterno']
+        });
+
+        const formattedUsers = users.map(u => ({
+            documento: u.numero_documento,
+            nombres: u.nombre,
+            apellidos: u.apellido_paterno
+        }));
+
+        return { data: formattedUsers };
+    }
 
     async findOne(id: string): Promise<Omit<User, 'password_hash'>> {
         const user = await this.userRepo.findOne({
@@ -103,6 +125,7 @@ export class UsersService {
         const { password_hash, ...safe } = user as any;
         return safe;
     }
+
     async getStats() {
         const [alumnos, docentes, padres, cursos] = await Promise.all([
             this.userRepo.count({ where: { rol: 'alumno', activo: true } }),
@@ -118,6 +141,7 @@ export class UsersService {
             cursos: parseInt(cursos[0].count),
         };
     }
+
     async linkParentChild(padreDoc: string, alumnoDoc: string) {
         const padre = await this.userRepo.findOne({
             where: { numero_documento: padreDoc, rol: 'padre', activo: true },
@@ -145,5 +169,4 @@ export class UsersService {
             alumno: `${alumno.nombre} ${alumno.apellido_paterno}`,
         };
     }
-
 }

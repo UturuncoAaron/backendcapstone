@@ -18,12 +18,12 @@ export class Course {
     @Column({ type: 'text', nullable: true })
     descripcion: string | null;
 
-    @Column({ name: 'docente_id' })
-    docente_id: string;
+    @Column({ name: 'docente_id', nullable: true })
+    docente_id: string | null;
 
-    @ManyToOne(() => User, { onDelete: 'RESTRICT' })
+    @ManyToOne(() => User, { onDelete: 'RESTRICT', nullable: true })
     @JoinColumn({ name: 'docente_id' })
-    docente: User;
+    docente: User | null;
 
     @Column({ name: 'seccion_id' })
     seccion_id: number;

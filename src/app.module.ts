@@ -4,9 +4,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+
+// Módulos existentes
 import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
-import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
 import { AcademicModule } from './modules/academic/academic.module.js';
 import { CoursesModule } from './modules/courses/courses.module.js';
 import { MaterialsModule } from './modules/materials/materials.module.js';
@@ -17,6 +18,14 @@ import { GradesModule } from './modules/grades/grades.module.js';
 import { StorageModule } from './modules/storage/storage.module.js';
 import { LibretasModule } from './modules/libretas/libretas.module.js';
 import { ConfiguracionModule } from './modules/configuracion/configuracion.module.js';
+import { LiveClassesModule } from './modules/live-classes/live-classes.module.js';
+
+// Módulos nuevos
+import { AnnouncementsModule } from './modules/announcements/announcements.module.js';
+import { ReportsModule } from './modules/reports/reports.module.js';
+import { ParentPortalModule } from './modules/parent-portal/parent-portal.module.js';
+import { ImportModule } from './modules/import/import.module.js';
+import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -46,12 +55,37 @@ console.log('NODE_ENV:', process.env.NODE_ENV, '| isDev:', isDev);
         extra: { max: 10, idleTimeoutMillis: 30000 },
       }),
     }),
+
+    // ── Auth & Usuarios ──────────────────────────────────────────
     AuthModule,
     UsersModule,
+
+    // ── Académico ────────────────────────────────────────────────
     AcademicModule,
     CoursesModule,
-    MaterialsModule, ExamsModule, TasksModule, ForumModule, GradesModule, StorageModule, LibretasModule,
+
+    // ── Contenido educativo ──────────────────────────────────────
+    MaterialsModule,
+    ExamsModule,
+    TasksModule,
+    ForumModule,
+    GradesModule,
+    LiveClassesModule,
+    LibretasModule,
+
+    // ── Comunicación ─────────────────────────────────────────────
+    AnnouncementsModule,
+
+    // ── Portal padres ────────────────────────────────────────────
+    ParentPortalModule,
+
+    // ── Admin ────────────────────────────────────────────────────
+    ImportModule,
+    ReportsModule,
     ConfiguracionModule,
+
+    // ── Infraestructura ──────────────────────────────────────────
+    StorageModule,
   ],
   providers: [
     {

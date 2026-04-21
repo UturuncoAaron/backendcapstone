@@ -22,11 +22,22 @@ export class UsersController {
     findAll(@Query('rol') rol?: string) {
         return this.usersService.findAll(rol);
     }
-    // GET /api/admin/stats
-    @Get('/stats')
+
+    // GET /api/admin/users/stats (DEBE ESTAR ARRIBA DE :id)
+    @Get('stats')
     getStats() {
         return this.usersService.getStats();
     }
+
+    // 🚀 GET /api/admin/users/search (DEBE ESTAR ARRIBA DE :id)
+    @Get('search')
+    searchUsers(
+        @Query('q') query: string,
+        @Query('role') role: string
+    ) {
+        return this.usersService.searchUsers(query, role);
+    }
+
     // GET /api/admin/users/:id
     @Get(':id')
     findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -57,7 +68,8 @@ export class UsersController {
     ) {
         return this.usersService.resetPassword(id, password);
     }
-    // POST /api/admin/parent-child
+
+    // POST /api/admin/users/parent-child
     @Post('parent-child')
     async linkParentChild(
         @Body() dto: { padre_doc: string; alumno_doc: string },

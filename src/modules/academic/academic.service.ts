@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { GradeLevel } from './entities/grade-level.entity.js';
 import { Section } from './entities/section.entity.js';
 import { Period } from './entities/period.entity.js';
+import { CoursesService } from '../courses/courses.service.js';
 
 @Injectable()
 export class AcademicService {
@@ -13,6 +14,7 @@ export class AcademicService {
         @InjectRepository(GradeLevel) private readonly gradoRepo: Repository<GradeLevel>,
         @InjectRepository(Section) private readonly seccionRepo: Repository<Section>,
         @InjectRepository(Period) private readonly periodoRepo: Repository<Period>,
+        private readonly coursesService: CoursesService,
     ) { }
 
     // ── GRADOS ──────────────────────────────────────────────────────
@@ -46,8 +48,26 @@ export class AcademicService {
         });
         if (exists) throw new ConflictException(`Sección ${nombre} ya existe en ese grado`);
 
+        // 1. Crear la sección
         const seccion = this.seccionRepo.create({ grado_id: gradoId, nombre, capacidad });
-        return this.seccionRepo.save(seccion);
+        const saved = await this.seccionRepo.save(seccion);
+
+        // 2. Buscar periodo activo
+        const periodoActivo = await this.periodoRepo.findOne({ where: { activo: true } });
+
+        // 3. Si hay periodo activo, generar cursos automáticamente desde plantilla CNEB
+        let cursosGenerados = null;
+        if (periodoActivo) {
+            cursosGenerados = await this.coursesService.generateCoursesFromTemplate(
+                saved.id,
+                periodoActivo.id,
+            );
+        }
+
+        return {
+            seccion: saved,
+            cursos: cursosGenerados ?? { mensaje: 'No hay periodo activo — cursos no generados. Activa un periodo e invoca POST /api/courses/generate/:seccionId/:periodoId' },
+        };
     }
 
     // ── PERIODOS ────────────────────────────────────────────────────
@@ -77,6 +97,7 @@ export class AcademicService {
     }
 
     async activarPeriodo(id: number) {
+        // Desactiva todos
         await this.periodoRepo
             .createQueryBuilder()
             .update()

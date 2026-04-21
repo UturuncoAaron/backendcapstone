@@ -19,23 +19,46 @@ export class CoursesController {
         return this.coursesService.findMyCourses(userId, rol);
     }
 
-    // GET /api/courses/:id
-    @Get(':id')
-    findOne(@Param('id', ParseUUIDPipe) id: string) {
-        return this.coursesService.findOne(id);
-    }
-
     // POST /api/courses — admin crea curso manualmente
+    // ⚠️ Rutas estáticas POST primero, antes de las dinámicas
     @Post()
     create(@Body() dto: {
         nombre: string;
         descripcion?: string;
-        docente_id: string;
+        docente_id?: string;
         seccion_id: number;
         periodo_id: number;
         color?: string;
     }) {
         return this.coursesService.create(dto);
+    }
+
+    // POST /api/courses/enroll — matricular alumno en sección
+    @Post('enroll')
+    enroll(@Body() dto: { alumnoId: string; seccionId: number; periodoId: number }) {
+        return this.coursesService.enrollStudent(dto.alumnoId, dto.seccionId, dto.periodoId);
+    }
+
+    // POST /api/courses/generate/:seccionId/:periodoId
+    // ⚠️ Esta ruta estática debe estar ANTES de GET :id y PATCH :id
+    @Post('generate/:seccionId/:periodoId')
+    generateFromTemplate(
+        @Param('seccionId', ParseIntPipe) seccionId: number,
+        @Param('periodoId', ParseIntPipe) periodoId: number,
+    ) {
+        return this.coursesService.generateCoursesFromTemplate(seccionId, periodoId);
+    }
+
+    // GET /api/courses/seccion/:id/students
+    @Get('seccion/:id/students')
+    getStudents(@Param('id', ParseIntPipe) id: number) {
+        return this.coursesService.getEnrollmentsBySeccion(id);
+    }
+
+    // GET /api/courses/:id — rutas dinámicas al final
+    @Get(':id')
+    findOne(@Param('id', ParseUUIDPipe) id: string) {
+        return this.coursesService.findOne(id);
     }
 
     // PATCH /api/courses/:id
@@ -48,33 +71,12 @@ export class CoursesController {
         return this.coursesService.update(id, user?.sub ?? 'dev', user?.rol ?? 'admin', dto);
     }
 
-    // PATCH /api/courses/:id/assign-teacher — asignar docente a curso
+    // PATCH /api/courses/:id/assign-teacher
     @Patch(':id/assign-teacher')
     assignTeacher(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: AssignTeacherDto,
     ) {
         return this.coursesService.assignTeacher(id, dto.docente_id);
-    }
-
-    // POST /api/courses/generate/:seccionId/:periodoId — generar cursos desde plantilla CNEB
-    @Post('generate/:seccionId/:periodoId')
-    generateFromTemplate(
-        @Param('seccionId', ParseIntPipe) seccionId: number,
-        @Param('periodoId', ParseIntPipe) periodoId: number,
-    ) {
-        return this.coursesService.generateCoursesFromTemplate(seccionId, periodoId);
-    }
-
-    // POST /api/courses/enroll — matricular alumno en sección
-    @Post('enroll')
-    enroll(@Body() dto: { alumnoId: string; seccionId: number; periodoId: number }) {
-        return this.coursesService.enrollStudent(dto.alumnoId, dto.seccionId, dto.periodoId);
-    }
-
-    // GET /api/courses/seccion/:id/students — alumnos de una sección
-    @Get('seccion/:id/students')
-    getStudents(@Param('id', ParseIntPipe) id: number) {
-        return this.coursesService.getEnrollmentsBySeccion(id);
     }
 }
