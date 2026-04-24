@@ -4,21 +4,21 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from '../../users/entities/user.entity.js';
+import { Cuenta } from '../../users/entities/cuenta.entity.js';
 
 export interface JwtPayload {
     sub: string;
+    rol: string;
     tipo_documento: string;
     numero_documento: string;
-    rol: string;
 }
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
     constructor(
         cfg: ConfigService,
-        @InjectRepository(User)
-        private readonly userRepo: Repository<User>,
+        @InjectRepository(Cuenta)
+        private readonly cuentaRepo: Repository<Cuenta>,
     ) {
         super({
             jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -28,20 +28,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     async validate(payload: JwtPayload) {
-        const user = await this.userRepo.findOne({
+        const cuenta = await this.cuentaRepo.findOne({
             where: { id: payload.sub, activo: true },
         });
 
-        if (!user) {
+        if (!cuenta) {
             throw new UnauthorizedException('Token inválido o usuario inactivo');
         }
+
+        // Lo que queda disponible en @CurrentUser() y request.user
         return {
-            sub: user.id,
-            nombre: user.nombre,
-            apellido_paterno: user.apellido_paterno,
-            tipo_documento: user.tipo_documento,
-            numero_documento: user.numero_documento,
-            rol: user.rol,
+            sub: cuenta.id,
+            rol: cuenta.rol,
+            tipo_documento: cuenta.tipo_documento,
+            numero_documento: cuenta.numero_documento,
         };
     }
 }

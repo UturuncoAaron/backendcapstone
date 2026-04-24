@@ -2,7 +2,7 @@ import {
     Entity, PrimaryGeneratedColumn, Column,
     CreateDateColumn, ManyToOne, JoinColumn,
 } from 'typeorm';
-import { User } from '../../users/entities/user.entity.js';
+import { Alumno } from '../../users/entities/alumno.entity.js';
 import { Section } from '../../academic/entities/section.entity.js';
 import { Period } from '../../academic/entities/period.entity.js';
 
@@ -14,21 +14,21 @@ export class Enrollment {
     @Column({ name: 'alumno_id' })
     alumno_id: string;
 
-    @ManyToOne(() => User, { onDelete: 'CASCADE' })
+    @ManyToOne(() => Alumno, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'alumno_id' })
-    alumno: User;
+    alumno: Alumno;
 
     @Column({ name: 'seccion_id' })
     seccion_id: number;
 
-    @ManyToOne(() => Section, { onDelete: 'CASCADE' })
+    @ManyToOne(() => Section, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'seccion_id' })
     seccion: Section;
 
     @Column({ name: 'periodo_id' })
     periodo_id: number;
 
-    @ManyToOne(() => Period, { onDelete: 'CASCADE' })
+    @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'periodo_id' })
     periodo: Period;
 

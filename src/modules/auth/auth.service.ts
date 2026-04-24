@@ -1,68 +1,86 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+
 import { LoginDto } from './dto/login.dto.js';
-import { User } from '../users/entities/user.entity.js';
+import { UsersService } from '../users/users.service.js';
 
 @Injectable()
 export class AuthService {
     constructor(
-        @InjectRepository(User)
-        private readonly userRepo: Repository<User>,
+        private readonly usersService: UsersService,
         private readonly jwtService: JwtService,
+        private readonly dataSource: DataSource,
     ) { }
 
     async login(dto: LoginDto) {
-        // 1. Buscar usuario activo por tipo + número de documento
-        const user = await this.userRepo.findOne({
-            where: {
-                tipo_documento: dto.tipo_documento as any,
-                numero_documento: dto.numero_documento.trim(),
-                activo: true,
-            },
-        });
+        // 1. Buscar cuenta activa por documento
+        const cuenta = await this.usersService.findCuentaByDocumento(
+            dto.tipo_documento,
+            dto.numero_documento,
+        );
 
-        if (!user) {
+        if (!cuenta) {
             throw new UnauthorizedException('Documento o contraseña incorrectos');
         }
 
-        // 2. Verificar contraseña con bcrypt
-        const passwordOk = await bcrypt.compare(dto.password, user.password_hash);
+        // 2. Verificar contraseña
+        const passwordOk = await bcrypt.compare(dto.password, cuenta.password_hash);
         if (!passwordOk) {
             throw new UnauthorizedException('Documento o contraseña incorrectos');
         }
 
-        // 3. Generar JWT
+        // 3. Actualizar ultimo_acceso en background (no bloquea la respuesta)
+        this.usersService.updateUltimoAcceso(cuenta.id).catch(() => null);
+
+        // 4. Obtener perfil según rol
+        const perfil = await this.getPerfil(cuenta.id, cuenta.rol);
+
+        // 5. Generar JWT
         const payload = {
-            sub: user.id,
-            tipo_documento: user.tipo_documento,
-            numero_documento: user.numero_documento,
-            rol: user.rol,
+            sub: cuenta.id,
+            rol: cuenta.rol,
+            tipo_documento: cuenta.tipo_documento,
+            numero_documento: cuenta.numero_documento,
         };
 
         return {
             token: this.jwtService.sign(payload),
-            user: this.sanitizeUser(user),
+            user: perfil,
         };
     }
 
     async getProfile(userId: string) {
-        const user = await this.userRepo.findOne({
-            where: { id: userId, activo: true },
-        });
+        const [cuenta] = await this.dataSource.query(
+            `SELECT id, rol, activo FROM cuentas WHERE id = $1`,
+            [userId],
+        );
 
-        if (!user) {
-            throw new UnauthorizedException('Usuario no encontrado');
+        if (!cuenta || !cuenta.activo) {
+            throw new UnauthorizedException('Usuario no encontrado o inactivo');
         }
 
-        return this.sanitizeUser(user);
+        return this.getPerfil(cuenta.id, cuenta.rol);
     }
 
-    // Elimina password_hash de la respuesta
-    private sanitizeUser(user: User) {
-        const { password_hash, ...safe } = user as any;
-        return safe;
+    // Devuelve el perfil de la tabla correspondiente al rol
+    private async getPerfil(id: string, rol: string) {
+        const tablas: Record<string, string> = {
+            alumno: 'alumnos',
+            docente: 'docentes',
+            padre: 'padres',
+            admin: 'admins',
+        };
+
+        const tabla = tablas[rol];
+        if (!tabla) throw new UnauthorizedException('Rol no reconocido');
+
+        const [perfil] = await this.dataSource.query(
+            `SELECT * FROM ${tabla} WHERE id = $1`,
+            [id],
+        );
+
+        return { ...perfil, rol };
     }
 }

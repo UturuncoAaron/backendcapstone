@@ -8,6 +8,14 @@ import { Section } from './entities/section.entity.js';
 import { Period } from './entities/period.entity.js';
 import { CoursesService } from '../courses/courses.service.js';
 
+interface CreatePeriodoDto {
+    nombre: string;
+    anio: number;
+    bimestre: number;
+    fecha_inicio: string;
+    fecha_fin: string;
+}
+
 @Injectable()
 export class AcademicService {
     constructor(
@@ -17,7 +25,7 @@ export class AcademicService {
         private readonly coursesService: CoursesService,
     ) { }
 
-    // ── GRADOS ──────────────────────────────────────────────────────
+    // ── GRADOS ───────────────────────────────────────────────────
 
     findAllGrados() {
         return this.gradoRepo.find({ order: { orden: 'ASC' } });
@@ -27,14 +35,14 @@ export class AcademicService {
         return this.gradoRepo.findOne({ where: { id }, relations: ['secciones'] });
     }
 
-    // ── SECCIONES ───────────────────────────────────────────────────
+    // ── SECCIONES ────────────────────────────────────────────────
 
     findAllSecciones(gradoId?: number) {
         const where: any = {};
         if (gradoId) where.grado_id = gradoId;
         return this.seccionRepo.find({
             where,
-            relations: ['grado'],
+            relations: ['grado', 'tutor'],
             order: { nombre: 'ASC' },
         });
     }
@@ -48,29 +56,32 @@ export class AcademicService {
         });
         if (exists) throw new ConflictException(`Sección ${nombre} ya existe en ese grado`);
 
-        // 1. Crear la sección
         const seccion = this.seccionRepo.create({ grado_id: gradoId, nombre, capacidad });
         const saved = await this.seccionRepo.save(seccion);
 
-        // 2. Buscar periodo activo
+        // Si hay periodo activo, generar cursos automáticamente
         const periodoActivo = await this.periodoRepo.findOne({ where: { activo: true } });
 
-        // 3. Si hay periodo activo, generar cursos automáticamente desde plantilla CNEB
-        let cursosGenerados = null;
-        if (periodoActivo) {
-            cursosGenerados = await this.coursesService.generateCoursesFromTemplate(
-                saved.id,
-                periodoActivo.id,
-            );
-        }
+        const cursosGenerados = periodoActivo
+            ? await this.coursesService.generateCoursesFromTemplate(saved.id, periodoActivo.id)
+            : null;
 
         return {
             seccion: saved,
-            cursos: cursosGenerados ?? { mensaje: 'No hay periodo activo — cursos no generados. Activa un periodo e invoca POST /api/courses/generate/:seccionId/:periodoId' },
+            cursos: cursosGenerados ?? {
+                mensaje: 'No hay periodo activo — cursos no generados. Activa un periodo e invoca POST /api/courses/generate/:seccionId/:periodoId',
+            },
         };
     }
 
-    // ── PERIODOS ────────────────────────────────────────────────────
+    async asignarTutor(seccionId: number, tutorId: string) {
+        const seccion = await this.seccionRepo.findOne({ where: { id: seccionId } });
+        if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+        seccion.tutor_id = tutorId;
+        return this.seccionRepo.save(seccion);
+    }
+
+    // ── PERIODOS ─────────────────────────────────────────────────
 
     findAllPeriodos() {
         return this.periodoRepo.find({ order: { anio: 'DESC', bimestre: 'ASC' } });
@@ -80,24 +91,18 @@ export class AcademicService {
         return this.periodoRepo.findOne({ where: { activo: true } });
     }
 
-    async createPeriodo(dto: {
-        nombre: string;
-        anio: number;
-        bimestre: number;
-        fecha_inicio: string;
-        fecha_fin: string;
-    }) {
+    async createPeriodo(dto: CreatePeriodoDto) {
         const exists = await this.periodoRepo.findOne({
             where: { anio: dto.anio, bimestre: dto.bimestre },
         });
-        if (exists) throw new ConflictException(`Ya existe el bimestre ${dto.bimestre} del año ${dto.anio}`);
-
-        const periodo = this.periodoRepo.create(dto);
-        return this.periodoRepo.save(periodo);
+        if (exists) {
+            throw new ConflictException(`Ya existe el bimestre ${dto.bimestre} del año ${dto.anio}`);
+        }
+        return this.periodoRepo.save(this.periodoRepo.create(dto));
     }
 
     async activarPeriodo(id: number) {
-        // Desactiva todos
+        // Desactiva todos en una sola query
         await this.periodoRepo
             .createQueryBuilder()
             .update()
@@ -105,7 +110,6 @@ export class AcademicService {
             .where('1=1')
             .execute();
 
-        // Activa el seleccionado
         await this.periodoRepo.update({ id }, { activo: true });
         return this.periodoRepo.findOne({ where: { id } });
     }

@@ -1,15 +1,15 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MulterModule } from '@nestjs/platform-express';
-import { User } from '../users/entities/user.entity.js';
+import { Cuenta } from '../users/entities/cuenta.entity.js';
+import { Alumno } from '../users/entities/alumno.entity.js';
 import { Matricula } from '../academic/entities/matricula.entity.js';
 import { ImportController } from './import.controller.js';
 import { ImportService } from './import.service.js';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([User, Matricula]),
-        // Archivos en memoria (no en disco) — máximo 2MB por CSV
+        TypeOrmModule.forFeature([Cuenta, Alumno, Matricula]),
         MulterModule.register({ limits: { fileSize: 2 * 1024 * 1024 } }),
     ],
     controllers: [ImportController],

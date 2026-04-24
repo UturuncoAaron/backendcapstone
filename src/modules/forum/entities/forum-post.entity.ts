@@ -4,7 +4,7 @@ import {
     ManyToOne, JoinColumn,
 } from 'typeorm';
 import { Forum } from './forum.entity.js';
-import { User } from '../../users/entities/user.entity.js';
+import { Cuenta } from '../../users/entities/cuenta.entity.js';
 
 @Entity('foro_posts')
 export class ForumPost {
@@ -18,12 +18,12 @@ export class ForumPost {
     @JoinColumn({ name: 'foro_id' })
     foro: Forum;
 
-    @Column({ name: 'usuario_id' })
-    usuario_id: string;
+    @Column({ name: 'cuenta_id' })
+    cuenta_id: string;
 
-    @ManyToOne(() => User, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'usuario_id' })
-    usuario: User;
+    @ManyToOne(() => Cuenta, { onDelete: 'CASCADE' })
+    @JoinColumn({ name: 'cuenta_id' })
+    cuenta: Cuenta;
 
     @Column({ type: 'text' })
     contenido: string;

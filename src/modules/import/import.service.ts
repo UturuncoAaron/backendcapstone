@@ -1,17 +1,19 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { InjectDataSource } from '@nestjs/typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { User } from '../users/entities/user.entity.js';
+import { Cuenta } from '../users/entities/cuenta.entity.js';
+import { Alumno } from '../users/entities/alumno.entity.js';
 import { Matricula } from '../academic/entities/matricula.entity.js';
 import { ImportQueryDto, CsvRow, ImportResult, ImportError } from './dto/import-query.dto.js';
 
 @Injectable()
 export class ImportService {
     constructor(
-        @InjectRepository(User)
-        private readonly userRepo: Repository<User>,
+        @InjectRepository(Cuenta)
+        private readonly cuentaRepo: Repository<Cuenta>,
+        @InjectRepository(Alumno)
+        private readonly alumnoRepo: Repository<Alumno>,
         @InjectRepository(Matricula)
         private readonly matriculaRepo: Repository<Matricula>,
         @InjectDataSource()
@@ -54,13 +56,6 @@ export class ImportService {
 
         return rows;
     }
-
-    /**
-     * Importar alumnos masivamente desde CSV
-     * - Crea usuario si no existe (password por defecto = numero_documento)
-     * - Matricula al alumno en seccion_id + periodo_id dados
-     * - Si ya está matriculado, lo omite sin error
-     */
     async importStudents(
         rows: CsvRow[],
         query: ImportQueryDto,
@@ -107,43 +102,54 @@ export class ImportService {
                     continue;
                 }
 
-                // Buscar o crear usuario
-                let user = await this.userRepo.findOne({
+                // 1. Buscar o crear la Cuenta (Bóveda de Autenticación)
+                let cuenta = await this.cuentaRepo.findOne({
                     where: {
                         tipo_documento: row.tipo_documento.toLowerCase() as any,
                         numero_documento: row.numero_documento.trim(),
                     },
                 });
 
-                if (!user) {
-                    // Crear usuario nuevo — password por defecto = numero_documento
+                if (!cuenta) {
+                    // Crear Cuenta nueva — password por defecto = numero_documento
                     const password_hash = await bcrypt.hash(row.numero_documento.trim(), 10);
 
-                    user = this.userRepo.create({
+                    cuenta = this.cuentaRepo.create({
                         tipo_documento: row.tipo_documento.toLowerCase() as any,
                         numero_documento: row.numero_documento.trim(),
+                        password_hash,
+                        rol: 'alumno',
+                        activo: true,
+                    });
+                    await this.cuentaRepo.save(cuenta);
+                    const codigoGenerado = row.codigo_estudiante?.trim() || `EST-${row.numero_documento.trim()}`;
+
+                    const alumno = this.alumnoRepo.create({
+                        id: cuenta.id, // Forzamos el ID de la cuenta recién creada
+                        codigo_estudiante: codigoGenerado,
                         nombre: row.nombre.trim(),
                         apellido_paterno: row.apellido_paterno.trim(),
                         apellido_materno: row.apellido_materno?.trim() || null,
                         email: row.email?.trim() || null,
                         telefono: row.telefono?.trim() || null,
-                        codigo_estudiante: row.codigo_estudiante?.trim() || null,
                         fecha_nacimiento: row.fecha_nacimiento ? new Date(row.fecha_nacimiento) : null,
-                        rol: 'alumno',
-                        activo: true,
-                        password_hash,
                     });
+                    await this.alumnoRepo.save(alumno);
 
-                    await this.userRepo.save(user);
                     result.creados++;
                 } else {
+                    // Si la cuenta ya existe, validar que realmente sea un alumno
+                    if (cuenta.rol !== 'alumno') {
+                        result.errores.push({ fila, numero_documento: row.numero_documento, motivo: `La cuenta ya existe pero tiene rol de ${cuenta.rol}` });
+                        continue;
+                    }
                     result.omitidos++;
                 }
 
-                // Verificar si ya está matriculado en esta sección+periodo
+                // 3. Verificar si ya está matriculado en esta sección+periodo
                 const yaMatriculado = await this.matriculaRepo.findOne({
                     where: {
-                        alumno_id: user.id,
+                        alumno_id: cuenta.id, // En v5.0 el alumno_id es igual al cuenta.id
                         seccion_id: query.seccion_id,
                         periodo_id: query.periodo_id,
                     },
@@ -151,7 +157,7 @@ export class ImportService {
 
                 if (!yaMatriculado) {
                     const matricula = this.matriculaRepo.create({
-                        alumno_id: user.id,
+                        alumno_id: cuenta.id,
                         seccion_id: query.seccion_id,
                         periodo_id: query.periodo_id,
                         activo: true,

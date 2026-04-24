@@ -156,6 +156,7 @@ export class LiveClassesService {
     async getAttendanceByAlumno(alumnoId: string, cursoId?: string) {
         const query = this.attendanceRepo.createQueryBuilder('a')
             .leftJoinAndSelect('a.clase_vivo', 'c')
+            
             .where('a.alumno_id = :alumnoId', { alumnoId });
 
         if (cursoId) {

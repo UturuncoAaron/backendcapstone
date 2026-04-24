@@ -1,40 +1,53 @@
-import { Controller, Get, Post, Param, Body, Query, ParseUUIDPipe } from '@nestjs/common';
+import {
+    Controller, Get, Post, Param, Body,
+    Query, ParseUUIDPipe, ParseIntPipe, UseGuards,
+} from '@nestjs/common';
 import { GradesService } from './grades.service.js';
 import { CreateGradeDto } from './dto/create-grade.dto.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 
-// TODO: agregar JwtAuthGuard + Roles cuando se implemente JWT
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('grades')
 export class GradesController {
     constructor(private readonly gradesService: GradesService) { }
 
-    // GET /api/grades/my — alumno ve sus notas
+    // ── Alumno: ver sus propias notas ────────────────────────────
+    // GET /api/grades/my
     @Get('my')
-    getMyGrades() {
-        // TODO: reemplazar con CurrentUser cuando JWT esté activo
-        const alumnoId = 'd6657bbc-f998-486e-8a54-8a26ddb26cbc';
-        return this.gradesService.getMyGrades(alumnoId);
+    @Roles('alumno')
+    getMyGrades(@CurrentUser() user: any) {
+        return this.gradesService.getMyGrades(user.sub);
     }
 
-    // GET /api/grades/course/:cursoId — docente ve notas de su curso
+    // ── Docente/Admin: ver notas de un curso ─────────────────────
+    // GET /api/grades/course/:cursoId?periodoId=1
     @Get('course/:cursoId')
+    @Roles('docente', 'admin')
     getGradesByCourse(
         @Param('cursoId', ParseUUIDPipe) cursoId: string,
-        @Query('bimestre') bimestre?: string,
+        @Query('periodoId') periodoId?: string,
     ) {
         return this.gradesService.getGradesByCourse(
             cursoId,
-            bimestre ? parseInt(bimestre) : undefined,
+            periodoId ? parseInt(periodoId) : undefined,
         );
     }
 
-    // GET /api/grades/alumno/:alumnoId — padre ve notas de su hijo
+    // ── Docente/Admin: ver notas de un alumno ────────────────────
+    // GET /api/grades/alumno/:alumnoId
     @Get('alumno/:alumnoId')
+    @Roles('docente', 'admin')
     getGradesByAlumno(@Param('alumnoId', ParseUUIDPipe) alumnoId: string) {
         return this.gradesService.getGradesByAlumno(alumnoId);
     }
 
-    // POST /api/grades — docente registra o actualiza nota
+    // ── Docente: registrar o actualizar nota ─────────────────────
+    // POST /api/grades
     @Post()
+    @Roles('docente', 'admin')
     upsertGrade(@Body() dto: CreateGradeDto) {
         return this.gradesService.upsertGrade(dto);
     }

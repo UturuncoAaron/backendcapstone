@@ -3,7 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { QueryReportDto } from './dto/query-report.dto.js';
 
-// Exportar la interfaz para que el controller pueda usarla
+// Interfaz actualizada a v5.0
 export interface GradeRow {
     alumno_id: string;
     numero_documento: string;
@@ -14,7 +14,6 @@ export interface GradeRow {
     seccion: string;
     curso: string;
     bimestre: number;
-    nota_examenes: number | null;
     nota_tareas: number | null;
     nota_participacion: number | null;
     nota_final: number | null;
@@ -39,8 +38,9 @@ export class ReportsService {
             params.push(query.periodo_id);
         }
 
+        // Ahora filtramos por el bimestre del periodo, ya que notas no lo tiene
         if (query.bimestre) {
-            conditions.push(`n.bimestre = $${paramIndex++}`);
+            conditions.push(`p.bimestre = $${paramIndex++}`);
             params.push(query.bimestre);
         }
 
@@ -58,42 +58,39 @@ export class ReportsService {
 
         const sql = `
             SELECT
-                u.id                    AS alumno_id,
-                u.numero_documento,
-                u.nombre,
-                u.apellido_paterno,
-                u.apellido_materno,
+                a.id                    AS alumno_id,
+                cu.numero_documento,
+                a.nombre,
+                a.apellido_paterno,
+                a.apellido_materno,
                 g.nombre                AS grado,
                 s.nombre                AS seccion,
                 c.nombre                AS curso,
-                COALESCE(n.bimestre, $${paramIndex}) AS bimestre,
-                n.nota_examenes,
+                p.bimestre              AS bimestre,
                 n.nota_tareas,
                 n.nota_participacion,
                 n.nota_final,
                 n.escala
             FROM matriculas m
-            JOIN usuarios u   ON u.id = m.alumno_id
+            JOIN alumnos a    ON a.id = m.alumno_id
+            JOIN cuentas cu   ON cu.id = a.id
             JOIN secciones s  ON s.id = m.seccion_id
             JOIN grados g     ON g.id = s.grado_id
             JOIN periodos p   ON p.id = m.periodo_id
             LEFT JOIN cursos c ON c.seccion_id = m.seccion_id
-                              AND c.periodo_id = m.periodo_id
+                               AND c.periodo_id = m.periodo_id
             LEFT JOIN notas n  ON n.alumno_id = m.alumno_id
-                              AND n.curso_id = c.id
-                              AND n.periodo_id = m.periodo_id
-                              AND ($${paramIndex} IS NULL OR n.bimestre = $${paramIndex})
+                               AND n.curso_id = c.id
+                               AND n.periodo_id = m.periodo_id
             ${whereClause}
             ORDER BY
                 g.orden ASC,
                 s.nombre ASC,
-                u.apellido_paterno ASC,
-                u.nombre ASC,
+                a.apellido_paterno ASC,
+                a.nombre ASC,
                 c.nombre ASC,
-                n.bimestre ASC
+                p.bimestre ASC
         `;
-
-        params.push(query.bimestre ?? null);
 
         return this.dataSource.query(sql, params);
     }
@@ -109,7 +106,6 @@ export class ReportsService {
             'Sección',
             'Curso',
             'Bimestre',
-            'Nota Exámenes',
             'Nota Tareas',
             'Nota Participación',
             'Nota Final',
@@ -134,7 +130,6 @@ export class ReportsService {
             row.seccion,
             row.curso ?? '',
             row.bimestre ?? '',
-            row.nota_examenes ?? '',
             row.nota_tareas ?? '',
             row.nota_participacion ?? '',
             row.nota_final ?? '',

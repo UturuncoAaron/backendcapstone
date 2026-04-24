@@ -3,7 +3,7 @@ import {
     CreateDateColumn, UpdateDateColumn,
     ManyToOne, JoinColumn,
 } from 'typeorm';
-import { User } from '../../users/entities/user.entity.js';
+import { Alumno } from '../../users/entities/alumno.entity.js';
 import { Course } from '../../courses/entities/course.entity.js';
 import { Period } from '../../academic/entities/period.entity.js';
 
@@ -15,9 +15,9 @@ export class Grade {
     @Column({ name: 'alumno_id' })
     alumno_id: string;
 
-    @ManyToOne(() => User, { onDelete: 'CASCADE' })
+    @ManyToOne(() => Alumno, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'alumno_id' })
-    alumno: User;
+    alumno: Alumno;
 
     @Column({ name: 'curso_id' })
     curso_id: string;
@@ -29,16 +29,11 @@ export class Grade {
     @Column({ name: 'periodo_id' })
     periodo_id: number;
 
-    @ManyToOne(() => Period, { onDelete: 'CASCADE' })
+    @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'periodo_id' })
     periodo: Period;
 
-    @Column()
-    bimestre: number;
-
-    @Column({ name: 'nota_examenes', type: 'decimal', precision: 4, scale: 2, nullable: true })
-    nota_examenes: number | null;
-
+    // nota_examenes eliminada: en v5 solo hay tareas
     @Column({ name: 'nota_tareas', type: 'decimal', precision: 4, scale: 2, nullable: true })
     nota_tareas: number | null;
 
@@ -48,6 +43,7 @@ export class Grade {
     @Column({ name: 'nota_final', type: 'decimal', precision: 4, scale: 2, nullable: true })
     nota_final: number | null;
 
+    // Generada por la BD automáticamente — solo lectura
     @Column({ nullable: true, length: 5, insert: false, update: false })
     escala: string | null;
 

@@ -4,6 +4,7 @@ import {
     ManyToOne, JoinColumn,
 } from 'typeorm';
 import { GradeLevel } from './grade-level.entity.js';
+import { Docente } from '../../users/entities/docente.entity.js';
 
 @Entity('secciones')
 export class Section {
@@ -13,7 +14,7 @@ export class Section {
     @Column({ name: 'grado_id' })
     grado_id: number;
 
-    @ManyToOne(() => GradeLevel, g => g.secciones, { onDelete: 'CASCADE' })
+    @ManyToOne(() => GradeLevel, (g) => g.secciones, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'grado_id' })
     grado: GradeLevel;
 
@@ -23,9 +24,12 @@ export class Section {
     @Column({ default: 35 })
     capacidad: number;
 
-    /** Docente tutor asignado a la sección */
     @Column({ name: 'tutor_id', nullable: true })
     tutor_id: string | null;
+
+    @ManyToOne(() => Docente, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'tutor_id' })
+    tutor: Docente | null;
 
     @Column({ default: true })
     activo: boolean;

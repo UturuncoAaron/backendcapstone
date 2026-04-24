@@ -3,135 +3,307 @@ import {
     ConflictException, BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike } from 'typeorm';
+import { Repository, ILike, DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import { User } from './entities/user.entity.js';
-import { CreateUserDto } from './dto/create-user.dto.js';
-import { UpdateUserDto } from './dto/update-user.dto.js';
+
+import { Cuenta } from './entities/cuenta.entity.js';
+import { Alumno } from './entities/alumno.entity.js';
+import { Docente } from './entities/docente.entity.js';
+import { Padre } from './entities/padre.entity.js';
+import { Admin } from './entities/admin.entity.js';
+
+import {
+    CreateAlumnoDto,
+    CreateDocenteDto,
+    CreatePadreDto,
+    CreateAdminDto,
+    LinkPadreAlumnoDto,
+} from './dto/users.dto.js';
 
 @Injectable()
 export class UsersService {
     constructor(
-        @InjectRepository(User)
-        private readonly userRepo: Repository<User>,
+        @InjectRepository(Cuenta) private cuentaRepo: Repository<Cuenta>,
+        @InjectRepository(Alumno) private alumnoRepo: Repository<Alumno>,
+        @InjectRepository(Docente) private docenteRepo: Repository<Docente>,
+        @InjectRepository(Padre) private padreRepo: Repository<Padre>,
+        @InjectRepository(Admin) private adminRepo: Repository<Admin>,
+        private readonly dataSource: DataSource,
     ) { }
 
-    async create(dto: CreateUserDto): Promise<Omit<User, 'password_hash'>> {
-        // Verificar documento único
-        const exists = await this.userRepo.findOne({
-            where: {
-                tipo_documento: dto.tipo_documento as any,
-                numero_documento: dto.numero_documento.trim(),
-            },
-        });
+    // ── Helpers privados ────────────────────────────────────────
 
+    private async checkDocumentoUnico(tipo: string, numero: string) {
+        const exists = await this.cuentaRepo.findOne({
+            where: { tipo_documento: tipo as any, numero_documento: numero.trim() },
+        });
         if (exists) {
             throw new ConflictException(
-                `Ya existe un usuario con ${dto.tipo_documento} ${dto.numero_documento}`,
+                `Ya existe un usuario con ${tipo} ${numero}`,
             );
         }
-
-        // Hashear contraseña
-        const password_hash = await bcrypt.hash(dto.password, 10);
-
-        const user = this.userRepo.create({
-            ...dto,
-            tipo_documento: dto.tipo_documento as any,
-            numero_documento: dto.numero_documento.trim(),
-            rol: dto.rol as any,
-            relacion_familiar: dto.relacion_familiar as any,
-            password_hash,
-        });
-
-        const saved = await this.userRepo.save(user);
-        return this.sanitize(saved);
     }
 
-    async findAll(rol?: string): Promise<Omit<User, 'password_hash'>[]> {
-        const where: any = { activo: true };
-        if (rol) where.rol = rol;
+    private async crearCuenta(
+        tipo: string,
+        numero: string,
+        password: string,
+        rol: string,
+    ): Promise<Cuenta> {
+        const password_hash = await bcrypt.hash(password, 12);
+        const cuenta = this.cuentaRepo.create({
+            tipo_documento: tipo as any,
+            numero_documento: numero.trim(),
+            password_hash,
+            rol: rol as any,
+        });
+        return this.cuentaRepo.save(cuenta);
+    }
 
-        const users = await this.userRepo.find({
-            where,
+    // ── Crear usuarios por rol ───────────────────────────────────
+
+    async createAlumno(dto: CreateAlumnoDto) {
+        await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
+
+        return this.dataSource.transaction(async (em) => {
+            const password_hash = await bcrypt.hash(dto.password, 12);
+            const cuenta = em.create(Cuenta, {
+                tipo_documento: dto.tipo_documento as any,
+                numero_documento: dto.numero_documento.trim(),
+                password_hash,
+                rol: 'alumno',
+            });
+            await em.save(cuenta);
+
+            const alumno = em.create(Alumno, {
+                id: cuenta.id,
+                codigo_estudiante: dto.codigo_estudiante,
+                nombre: dto.nombre,
+                apellido_paterno: dto.apellido_paterno,
+                apellido_materno: dto.apellido_materno ?? null,
+                fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+                email: dto.email ?? null,
+                telefono: dto.telefono ?? null,
+            });
+            return em.save(alumno);
+        });
+    }
+
+    async createDocente(dto: CreateDocenteDto) {
+        await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
+
+        return this.dataSource.transaction(async (em) => {
+            const password_hash = await bcrypt.hash(dto.password, 12);
+            const cuenta = em.create(Cuenta, {
+                tipo_documento: dto.tipo_documento as any,
+                numero_documento: dto.numero_documento.trim(),
+                password_hash,
+                rol: 'docente',
+            });
+            await em.save(cuenta);
+
+            const docente = em.create(Docente, {
+                id: cuenta.id,
+                nombre: dto.nombre,
+                apellido_paterno: dto.apellido_paterno,
+                apellido_materno: dto.apellido_materno ?? null,
+                especialidad: dto.especialidad ?? null,
+                titulo_profesional: dto.titulo_profesional ?? null,
+                email: dto.email ?? null,
+                telefono: dto.telefono ?? null,
+            });
+            return em.save(docente);
+        });
+    }
+
+    async createPadre(dto: CreatePadreDto) {
+        await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
+
+        return this.dataSource.transaction(async (em) => {
+            const password_hash = await bcrypt.hash(dto.password, 12);
+            const cuenta = em.create(Cuenta, {
+                tipo_documento: dto.tipo_documento as any,
+                numero_documento: dto.numero_documento.trim(),
+                password_hash,
+                rol: 'padre',
+            });
+            await em.save(cuenta);
+
+            const padre = em.create(Padre, {
+                id: cuenta.id,
+                nombre: dto.nombre,
+                apellido_paterno: dto.apellido_paterno,
+                apellido_materno: dto.apellido_materno ?? null,
+                relacion: dto.relacion as any,
+                email: dto.email ?? null,
+                telefono: dto.telefono ?? null,
+            });
+            return em.save(padre);
+        });
+    }
+
+    async createAdmin(dto: CreateAdminDto) {
+        await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
+
+        return this.dataSource.transaction(async (em) => {
+            const password_hash = await bcrypt.hash(dto.password, 12);
+            const cuenta = em.create(Cuenta, {
+                tipo_documento: dto.tipo_documento as any,
+                numero_documento: dto.numero_documento.trim(),
+                password_hash,
+                rol: 'admin',
+            });
+            await em.save(cuenta);
+
+            const admin = em.create(Admin, {
+                id: cuenta.id,
+                nombre: dto.nombre,
+                apellido_paterno: dto.apellido_paterno,
+                apellido_materno: dto.apellido_materno ?? null,
+                cargo: dto.cargo ?? null,
+                email: dto.email ?? null,
+            });
+            return em.save(admin);
+        });
+    }
+
+    // ── Listar por rol ───────────────────────────────────────────
+
+    async findAlumnos() {
+        return this.alumnoRepo.find({
             order: { apellido_paterno: 'ASC', nombre: 'ASC' },
         });
-
-        return users.map(u => this.sanitize(u));
     }
-    async searchUsers(query: string, role: string) {
-        if (!query || query.length < 3) {
-            return { data: [] };
-        }
-        const users = await this.userRepo.find({
+
+    async findDocentes() {
+        return this.docenteRepo.find({
+            order: { apellido_paterno: 'ASC', nombre: 'ASC' },
+        });
+    }
+
+    async findPadres() {
+        return this.padreRepo.find({
+            order: { apellido_paterno: 'ASC', nombre: 'ASC' },
+        });
+    }
+
+    // ── Buscar (para asignaciones, autocomplete) ─────────────────
+
+    async searchAlumnos(query: string) {
+        if (!query || query.length < 3) return { data: [] };
+
+        const rows = await this.alumnoRepo.find({
             where: [
-                { numero_documento: ILike(`${query}%`), rol: role as any, activo: true },
-                { nombre: ILike(`%${query}%`), rol: role as any, activo: true },
-                { apellido_paterno: ILike(`%${query}%`), rol: role as any, activo: true }
+                { codigo_estudiante: ILike(`${query}%`) },
+                { nombre: ILike(`%${query}%`) },
+                { apellido_paterno: ILike(`%${query}%`) },
             ],
-            take: 10, 
-            select: ['numero_documento', 'nombre', 'apellido_paterno']
+            take: 10,
+            select: ['id', 'codigo_estudiante', 'nombre', 'apellido_paterno'],
         });
 
-        const formattedUsers = users.map(u => ({
-            documento: u.numero_documento,
-            nombres: u.nombre,
-            apellidos: u.apellido_paterno
-        }));
-
-        return { data: formattedUsers };
+        return { data: rows };
     }
 
-    async findOne(id: string): Promise<Omit<User, 'password_hash'>> {
-        const user = await this.userRepo.findOne({
-            where: { id, activo: true },
+    async searchDocentes(query: string) {
+        if (!query || query.length < 3) return { data: [] };
+
+        const rows = await this.docenteRepo.find({
+            where: [
+                { nombre: ILike(`%${query}%`) },
+                { apellido_paterno: ILike(`%${query}%`) },
+            ],
+            take: 10,
+            select: ['id', 'nombre', 'apellido_paterno', 'especialidad'],
         });
 
-        if (!user) throw new NotFoundException(`Usuario ${id} no encontrado`);
-        return this.sanitize(user);
+        return { data: rows };
     }
 
-    async update(id: string, dto: UpdateUserDto): Promise<Omit<User, 'password_hash'>> {
-        const user = await this.userRepo.findOne({ where: { id, activo: true } });
-        if (!user) throw new NotFoundException(`Usuario ${id} no encontrado`);
+    // ── Obtener uno ──────────────────────────────────────────────
 
-        Object.assign(user, dto);
-        const saved = await this.userRepo.save(user);
-        return this.sanitize(saved);
+    async findAlumnoById(id: string) {
+        const alumno = await this.alumnoRepo.findOne({ where: { id } });
+        if (!alumno) throw new NotFoundException(`Alumno ${id} no encontrado`);
+        return alumno;
     }
+
+    async findDocenteById(id: string) {
+        const docente = await this.docenteRepo.findOne({ where: { id } });
+        if (!docente) throw new NotFoundException(`Docente ${id} no encontrado`);
+        return docente;
+    }
+
+    // ── Desactivar cuenta ────────────────────────────────────────
 
     async deactivate(id: string): Promise<{ message: string }> {
-        const user = await this.userRepo.findOne({ where: { id, activo: true } });
-        if (!user) throw new NotFoundException(`Usuario ${id} no encontrado`);
+        const cuenta = await this.cuentaRepo.findOne({ where: { id, activo: true } });
+        if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
 
-        user.activo = false;
-        await this.userRepo.save(user);
+        cuenta.activo = false;
+        await this.cuentaRepo.save(cuenta);
         return { message: 'Usuario desactivado correctamente' };
     }
+
+    // ── Reset de contraseña ──────────────────────────────────────
 
     async resetPassword(id: string, newPassword: string): Promise<{ message: string }> {
         if (newPassword.length < 6) {
             throw new BadRequestException('La contraseña debe tener mínimo 6 caracteres');
         }
 
-        const user = await this.userRepo.findOne({ where: { id, activo: true } });
-        if (!user) throw new NotFoundException(`Usuario ${id} no encontrado`);
+        const cuenta = await this.cuentaRepo.findOne({ where: { id, activo: true } });
+        if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
 
-        user.password_hash = await bcrypt.hash(newPassword, 10);
-        await this.userRepo.save(user);
+        cuenta.password_hash = await bcrypt.hash(newPassword, 12);
+        await this.cuentaRepo.save(cuenta);
         return { message: 'Contraseña actualizada correctamente' };
     }
 
-    private sanitize(user: User): Omit<User, 'password_hash'> {
-        const { password_hash, ...safe } = user as any;
-        return safe;
+    // ── Vincular padre ↔ alumno ──────────────────────────────────
+
+    async linkPadreAlumno(dto: LinkPadreAlumnoDto) {
+        const padre = await this.padreRepo
+            .createQueryBuilder('p')
+            .innerJoin('cuentas', 'c', 'c.id = p.id AND c.activo = true')
+            .where('c.numero_documento = :doc', { doc: dto.padre_doc })
+            .getOne();
+
+        if (!padre) throw new NotFoundException(`No se encontró padre con documento ${dto.padre_doc}`);
+
+        const alumno = await this.alumnoRepo
+            .createQueryBuilder('a')
+            .innerJoin('cuentas', 'c', 'c.id = a.id AND c.activo = true')
+            .where('c.numero_documento = :doc', { doc: dto.alumno_doc })
+            .getOne();
+
+        if (!alumno) throw new NotFoundException(`No se encontró alumno con documento ${dto.alumno_doc}`);
+
+        const existing = await this.dataSource.query(
+            `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2`,
+            [padre.id, alumno.id],
+        );
+        if (existing.length) throw new ConflictException('Este vínculo ya existe');
+
+        await this.dataSource.query(
+            `INSERT INTO padre_alumno (padre_id, alumno_id) VALUES ($1, $2)`,
+            [padre.id, alumno.id],
+        );
+
+        return {
+            padre: `${padre.nombre} ${padre.apellido_paterno}`,
+            alumno: `${alumno.nombre} ${alumno.apellido_paterno}`,
+        };
     }
+
+    // ── Stats para dashboard admin ───────────────────────────────
 
     async getStats() {
         const [alumnos, docentes, padres, cursos] = await Promise.all([
-            this.userRepo.count({ where: { rol: 'alumno', activo: true } }),
-            this.userRepo.count({ where: { rol: 'docente', activo: true } }),
-            this.userRepo.count({ where: { rol: 'padre', activo: true } }),
-            this.userRepo.query(`SELECT COUNT(*) FROM cursos WHERE activo = true`),
+            this.alumnoRepo.count(),
+            this.docenteRepo.count(),
+            this.padreRepo.count(),
+            this.dataSource.query(`SELECT COUNT(*) FROM cursos WHERE activo = true`),
         ]);
 
         return {
@@ -142,31 +314,19 @@ export class UsersService {
         };
     }
 
-    async linkParentChild(padreDoc: string, alumnoDoc: string) {
-        const padre = await this.userRepo.findOne({
-            where: { numero_documento: padreDoc, rol: 'padre', activo: true },
+    // ── Usado por AuthService para login ─────────────────────────
+
+    async findCuentaByDocumento(tipo: string, numero: string): Promise<Cuenta | null> {
+        return this.cuentaRepo.findOne({
+            where: {
+                tipo_documento: tipo as any,
+                numero_documento: numero.trim(),
+                activo: true,
+            },
         });
-        if (!padre) throw new NotFoundException(`No se encontró padre con documento ${padreDoc}`);
+    }
 
-        const alumno = await this.userRepo.findOne({
-            where: { numero_documento: alumnoDoc, rol: 'alumno', activo: true },
-        });
-        if (!alumno) throw new NotFoundException(`No se encontró alumno con documento ${alumnoDoc}`);
-
-        const existing = await this.userRepo.query(
-            `SELECT id FROM padre_hijo WHERE padre_id = $1 AND alumno_id = $2`,
-            [padre.id, alumno.id],
-        );
-        if (existing.length) throw new ConflictException('Este vínculo ya existe');
-
-        await this.userRepo.query(
-            `INSERT INTO padre_hijo (padre_id, alumno_id) VALUES ($1, $2)`,
-            [padre.id, alumno.id],
-        );
-
-        return {
-            padre: `${padre.nombre} ${padre.apellido_paterno}`,
-            alumno: `${alumno.nombre} ${alumno.apellido_paterno}`,
-        };
+    async updateUltimoAcceso(id: string) {
+        await this.cuentaRepo.update(id, { ultimo_acceso: new Date() });
     }
 }

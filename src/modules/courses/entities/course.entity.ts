@@ -3,9 +3,9 @@ import {
     CreateDateColumn, UpdateDateColumn,
     ManyToOne, JoinColumn,
 } from 'typeorm';
-import { User } from '../../users/entities/user.entity.js';
+import { Docente } from '../../users/entities/docente.entity.js';
 import { Section } from '../../academic/entities/section.entity.js';
-import { Period } from '../../academic/entities/period.entity.js';
+import { Period }  from '../../academic/entities/period.entity.js';
 
 @Entity('cursos')
 export class Course {
@@ -21,9 +21,9 @@ export class Course {
     @Column({ name: 'docente_id', nullable: true })
     docente_id: string | null;
 
-    @ManyToOne(() => User, { onDelete: 'RESTRICT', nullable: true })
+    @ManyToOne(() => Docente, { onDelete: 'RESTRICT', nullable: true })
     @JoinColumn({ name: 'docente_id' })
-    docente: User | null;
+    docente: Docente | null;
 
     @Column({ name: 'seccion_id' })
     seccion_id: number;

@@ -11,7 +11,6 @@ import { UsersModule } from './modules/users/users.module.js';
 import { AcademicModule } from './modules/academic/academic.module.js';
 import { CoursesModule } from './modules/courses/courses.module.js';
 import { MaterialsModule } from './modules/materials/materials.module.js';
-import { ExamsModule } from './modules/exams/exams.module.js';
 import { TasksModule } from './modules/tasks/tasks.module.js';
 import { ForumModule } from './modules/forum/forum.module.js';
 import { GradesModule } from './modules/grades/grades.module.js';
@@ -66,7 +65,6 @@ console.log('NODE_ENV:', process.env.NODE_ENV, '| isDev:', isDev);
 
     // ── Contenido educativo ──────────────────────────────────────
     MaterialsModule,
-    ExamsModule,
     TasksModule,
     ForumModule,
     GradesModule,

@@ -3,77 +3,118 @@ import {
     Body, Param, Query, ParseUUIDPipe, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { UsersService } from './users.service.js';
-import { CreateUserDto } from './dto/create-user.dto.js';
-import { UpdateUserDto } from './dto/update-user.dto.js';
+import {
+    CreateAlumnoDto,
+    CreateDocenteDto,
+    CreatePadreDto,
+    CreateAdminDto,
+    LinkPadreAlumnoDto,
+    ResetPasswordDto,
+} from './dto/users.dto.js';
 
 @Controller('admin/users')
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
-    // POST /api/admin/users
-    @Post()
-    create(@Body() dto: CreateUserDto) {
-        return this.usersService.create(dto);
-    }
-
-    // GET /api/admin/users
-    // GET /api/admin/users?rol=alumno
-    @Get()
-    findAll(@Query('rol') rol?: string) {
-        return this.usersService.findAll(rol);
-    }
-
-    // GET /api/admin/users/stats (DEBE ESTAR ARRIBA DE :id)
+    // ── Stats ────────────────────────────────────────────────────
+    // GET /api/admin/users/stats
     @Get('stats')
     getStats() {
         return this.usersService.getStats();
     }
 
-    // 🚀 GET /api/admin/users/search (DEBE ESTAR ARRIBA DE :id)
-    @Get('search')
-    searchUsers(
-        @Query('q') query: string,
-        @Query('role') role: string
-    ) {
-        return this.usersService.searchUsers(query, role);
+    // ── Crear por rol ────────────────────────────────────────────
+    // POST /api/admin/users/alumnos
+    @Post('alumnos')
+    createAlumno(@Body() dto: CreateAlumnoDto) {
+        return this.usersService.createAlumno(dto);
     }
 
-    // GET /api/admin/users/:id
-    @Get(':id')
-    findOne(@Param('id', ParseUUIDPipe) id: string) {
-        return this.usersService.findOne(id);
+    // POST /api/admin/users/docentes
+    @Post('docentes')
+    createDocente(@Body() dto: CreateDocenteDto) {
+        return this.usersService.createDocente(dto);
     }
 
-    // PATCH /api/admin/users/:id
-    @Patch(':id')
-    update(
-        @Param('id', ParseUUIDPipe) id: string,
-        @Body() dto: UpdateUserDto,
-    ) {
-        return this.usersService.update(id, dto);
+    // POST /api/admin/users/padres
+    @Post('padres')
+    createPadre(@Body() dto: CreatePadreDto) {
+        return this.usersService.createPadre(dto);
     }
 
-    // DELETE /api/admin/users/:id (desactivar, no borrar)
+    // POST /api/admin/users/admins
+    @Post('admins')
+    createAdmin(@Body() dto: CreateAdminDto) {
+        return this.usersService.createAdmin(dto);
+    }
+
+    // ── Listar ───────────────────────────────────────────────────
+    // GET /api/admin/users/alumnos
+    @Get('alumnos')
+    findAlumnos() {
+        return this.usersService.findAlumnos();
+    }
+
+    // GET /api/admin/users/docentes
+    @Get('docentes')
+    findDocentes() {
+        return this.usersService.findDocentes();
+    }
+
+    // GET /api/admin/users/padres
+    @Get('padres')
+    findPadres() {
+        return this.usersService.findPadres();
+    }
+
+    // ── Buscar (autocomplete) ────────────────────────────────────
+    // GET /api/admin/users/alumnos/search?q=garcia
+    @Get('alumnos/search')
+    searchAlumnos(@Query('q') q: string) {
+        return this.usersService.searchAlumnos(q);
+    }
+
+    // GET /api/admin/users/docentes/search?q=torres
+    @Get('docentes/search')
+    searchDocentes(@Query('q') q: string) {
+        return this.usersService.searchDocentes(q);
+    }
+
+    // ── Obtener uno ──────────────────────────────────────────────
+    // GET /api/admin/users/alumnos/:id
+    @Get('alumnos/:id')
+    findAlumno(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.findAlumnoById(id);
+    }
+
+    // GET /api/admin/users/docentes/:id
+    @Get('docentes/:id')
+    findDocente(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.findDocenteById(id);
+    }
+
+    // ── Desactivar ───────────────────────────────────────────────
+    // DELETE /api/admin/users/:id
     @Delete(':id')
     @HttpCode(HttpStatus.OK)
     deactivate(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.deactivate(id);
     }
 
+    // ── Reset password ───────────────────────────────────────────
     // PATCH /api/admin/users/:id/reset-password
     @Patch(':id/reset-password')
     resetPassword(
         @Param('id', ParseUUIDPipe) id: string,
-        @Body('password') password: string,
+        @Body() dto: ResetPasswordDto,
     ) {
-        return this.usersService.resetPassword(id, password);
+        return this.usersService.resetPassword(id, dto.password);
     }
 
+    // ── Vincular padre ↔ alumno ──────────────────────────────────
     // POST /api/admin/users/parent-child
     @Post('parent-child')
-    async linkParentChild(
-        @Body() dto: { padre_doc: string; alumno_doc: string },
-    ) {
-        return this.usersService.linkParentChild(dto.padre_doc, dto.alumno_doc);
+    linkPadreAlumno(@Body() dto: LinkPadreAlumnoDto) {
+        return this.usersService.linkPadreAlumno(dto);
     }
 }

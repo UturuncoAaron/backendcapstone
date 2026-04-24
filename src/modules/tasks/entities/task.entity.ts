@@ -1,9 +1,10 @@
 import {
     Entity, PrimaryGeneratedColumn, Column,
     CreateDateColumn, UpdateDateColumn,
-    ManyToOne, JoinColumn,
+    ManyToOne, JoinColumn, OneToMany,
 } from 'typeorm';
 import { Course } from '../../courses/entities/course.entity.js';
+import { Pregunta } from './pregunta.entity.js';
 
 @Entity('tareas')
 export class Task {
@@ -21,32 +22,43 @@ export class Task {
     titulo: string;
 
     @Column({ type: 'text', nullable: true })
-    descripcion: string | null;
+    instrucciones: string | null;
 
-    /** Bimestre al que pertenece (1-4) */
+    // Archivo que sube el docente como enunciado (PDF, imagen, Word en R2)
+    @Column({ name: 'enunciado_storage_key', type: 'text', nullable: true })
+    enunciado_storage_key: string | null;
+
+    // O un link externo (Drive, YouTube, etc.)
+    @Column({ name: 'enunciado_url', type: 'text', nullable: true })
+    enunciado_url: string | null;
+
     @Column({ nullable: true })
     bimestre: number | null;
 
-    /** Semana dentro del bimestre (1-20) */
     @Column({ nullable: true })
     semana: number | null;
 
-    @Column({ name: 'fecha_entrega', type: 'timestamp' })
-    fecha_entrega: Date;
+    @Column({ name: 'fecha_limite', type: 'timestamp' })
+    fecha_limite: Date;
 
     @Column({ name: 'puntos_max', default: 20 })
     puntos_max: number;
 
-    /** El alumno puede subir un archivo como entrega */
-    @Column({ name: 'permite_archivo', default: true })
+    @Column({ name: 'permite_alternativas', default: false })
+    permite_alternativas: boolean;
+
+    @Column({ name: 'permite_archivo', default: false })
     permite_archivo: boolean;
 
-    /** El alumno puede escribir respuesta en texto */
-    @Column({ name: 'permite_texto', default: true })
+    @Column({ name: 'permite_texto', default: false })
     permite_texto: boolean;
 
-    @Column({ default: true })
+    // FALSE = borrador. El docente activa cuando está lista.
+    @Column({ default: false })
     activo: boolean;
+
+    @OneToMany(() => Pregunta, (p) => p.tarea, { cascade: true })
+    preguntas: Pregunta[];
 
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;

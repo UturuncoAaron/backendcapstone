@@ -12,8 +12,7 @@ export class AnnouncementsService {
         private readonly announcementRepo: Repository<Announcement>,
     ) { }
 
-    // POST /api/announcements — admin crea comunicado
-    async create(adminId: string, dto: CreateAnnouncementDto): Promise<Announcement> {
+    async create(adminId: string, dto: CreateAnnouncementDto) {
         const announcement = this.announcementRepo.create({
             admin_id: adminId,
             titulo: dto.titulo,
@@ -23,8 +22,7 @@ export class AnnouncementsService {
         return this.announcementRepo.save(announcement);
     }
 
-    // GET /api/announcements — listar con filtros opcionales
-    async findAll(query: QueryAnnouncementsDto): Promise<Announcement[]> {
+    async findAll(query: QueryAnnouncementsDto) {
         const qb = this.announcementRepo
             .createQueryBuilder('a')
             .leftJoinAndSelect('a.admin', 'admin')
@@ -44,7 +42,6 @@ export class AnnouncementsService {
         if (query.destinatario) {
             qb.andWhere('a.destinatario = :dest', { dest: query.destinatario });
         }
-
         if (query.activo !== undefined) {
             qb.andWhere('a.activo = :activo', { activo: query.activo === 'true' });
         }
@@ -52,24 +49,19 @@ export class AnnouncementsService {
         return qb.getMany();
     }
 
-    // GET /api/announcements/:id — obtener uno
-    async findOne(id: string): Promise<Announcement> {
+    async findOne(id: string) {
         const announcement = await this.announcementRepo.findOne({
             where: { id },
             relations: ['admin'],
         });
-
-        if (!announcement) {
-            throw new NotFoundException(`Comunicado ${id} no encontrado`);
-        }
-
+        if (!announcement) throw new NotFoundException(`Comunicado ${id} no encontrado`);
         return announcement;
     }
 
-    // DELETE /api/announcements/:id — soft delete
-    async remove(id: string): Promise<void> {
+    async remove(id: string) {
         const announcement = await this.findOne(id);
         announcement.activo = false;
         await this.announcementRepo.save(announcement);
+        return { message: 'Comunicado desactivado correctamente' };
     }
 }

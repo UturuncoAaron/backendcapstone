@@ -1,10 +1,11 @@
 import {
     Entity, PrimaryGeneratedColumn, Column,
     CreateDateColumn, UpdateDateColumn,
-    ManyToOne, JoinColumn,
+    ManyToOne, JoinColumn, OneToMany,
 } from 'typeorm';
 import { Task } from './task.entity.js';
-import { User } from '../../users/entities/user.entity.js';
+import { Alumno } from '../../users/entities/alumno.entity.js';
+import { RespuestaAlternativa } from './respuesta-alternativa.entity.js';
 
 @Entity('entregas_tarea')
 export class Submission {
@@ -21,33 +22,44 @@ export class Submission {
     @Column({ name: 'alumno_id' })
     alumno_id: string;
 
-    @ManyToOne(() => User, { onDelete: 'CASCADE' })
+    @ManyToOne(() => Alumno, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'alumno_id' })
-    alumno: User;
+    alumno: Alumno;
 
-    /** URL pública o link externo */
-    @Column({ name: 'url_archivo', type: 'text', nullable: true })
-    url_archivo: string | null;
-
-    /** Clave del archivo en Cloudflare R2 si fue subido directamente */
+    // Entrega de archivo (si tarea.permite_archivo)
     @Column({ name: 'storage_key', type: 'text', nullable: true })
     storage_key: string | null;
 
+    @Column({ name: 'nombre_archivo', length: 255, nullable: true })
+    nombre_archivo: string | null;
+
+    // Entrega de texto (si tarea.permite_texto)
     @Column({ name: 'respuesta_texto', type: 'text', nullable: true })
     respuesta_texto: string | null;
+
+    // Calculada automáticamente al corregir alternativas
+    @Column({ name: 'calificacion_auto', type: 'decimal', precision: 5, scale: 2, nullable: true })
+    calificacion_auto: number | null;
+
+    // Puesta manualmente por el docente (archivo/texto)
+    @Column({ name: 'calificacion_manual', type: 'decimal', precision: 5, scale: 2, nullable: true })
+    calificacion_manual: number | null;
+
+    // Nota final visible al alumno
+    @Column({ name: 'calificacion_final', type: 'decimal', precision: 5, scale: 2, nullable: true })
+    calificacion_final: number | null;
+
+    @Column({ name: 'comentario_docente', type: 'text', nullable: true })
+    comentario_docente: string | null;
+
+    @Column({ name: 'con_retraso', default: false })
+    con_retraso: boolean;
 
     @Column({ name: 'fecha_entrega', type: 'timestamp', default: () => 'NOW()' })
     fecha_entrega: Date;
 
-    @Column({ type: 'decimal', precision: 5, scale: 2, nullable: true })
-    calificacion: number | null;
-
-    /** Feedback del docente al calificar */
-    @Column({ type: 'text', nullable: true })
-    comentario: string | null;
-
-    @Column({ name: 'con_retraso', default: false })
-    con_retraso: boolean;
+    @OneToMany(() => RespuestaAlternativa, (r) => r.entrega, { cascade: true })
+    respuestas: RespuestaAlternativa[];
 
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;

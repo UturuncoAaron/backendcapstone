@@ -2,7 +2,7 @@ import {
     Entity, PrimaryGeneratedColumn, Column,
     CreateDateColumn, ManyToOne, JoinColumn,
 } from 'typeorm';
-import { User } from '../../users/entities/user.entity.js';
+import { Admin } from '../../users/entities/admin.entity.js';
 
 export type Destinatario = 'todos' | 'alumnos' | 'docentes' | 'padres';
 
@@ -14,9 +14,9 @@ export class Announcement {
     @Column({ name: 'admin_id' })
     admin_id: string;
 
-    @ManyToOne(() => User, { onDelete: 'RESTRICT' })
+    @ManyToOne(() => Admin, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'admin_id' })
-    admin: User;
+    admin: Admin;
 
     @Column({ length: 200 })
     titulo: string;

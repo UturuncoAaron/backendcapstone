@@ -3,7 +3,9 @@ import {
     CreateDateColumn, ManyToOne, JoinColumn,
 } from 'typeorm';
 import { LiveClass } from './live-class.entity.js';
-import { User } from '../../users/entities/user.entity.js';
+// Importamos las nuevas entidades separadas
+import { Alumno } from '../../users/entities/alumno.entity.js';
+import { Cuenta } from '../../users/entities/cuenta.entity.js';
 
 @Entity('asistencias')
 export class Attendance {
@@ -13,9 +15,10 @@ export class Attendance {
     @Column({ name: 'alumno_id' })
     alumno_id: string;
 
-    @ManyToOne(() => User, { onDelete: 'CASCADE' })
+    // Actualizado de User a Alumno
+    @ManyToOne(() => Alumno, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'alumno_id' })
-    alumno: User;
+    alumno: Alumno;
 
     @Column({ name: 'clase_vivo_id' })
     clase_vivo_id: string;
@@ -33,9 +36,10 @@ export class Attendance {
     @Column({ name: 'registrado_por', nullable: true })
     registrado_por: string | null;
 
-    @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+    // Actualizado de User a Cuenta (ya que un admin o docente usa su cuenta para registrar)
+    @ManyToOne(() => Cuenta, { onDelete: 'SET NULL', nullable: true })
     @JoinColumn({ name: 'registrado_por' })
-    registrador: User | null;
+    registrador: Cuenta | null;
 
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;
