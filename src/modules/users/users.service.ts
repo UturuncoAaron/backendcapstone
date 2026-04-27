@@ -336,4 +336,10 @@ export class UsersService {
         });
         return { data: admins };
     }
+    async searchPadres(q: string) {
+        return this.padreRepo.createQueryBuilder('p')  // ← padreRepo, no padresRepo
+            .where('p.nombre ILIKE :q OR p.apellido_paterno ILIKE :q', { q: `%${q}%` })
+            .limit(10)
+            .getMany();
+    }
 }

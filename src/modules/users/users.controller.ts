@@ -60,6 +60,11 @@ export class UsersController {
     searchAlumnos(@Query('q') q: string) {
         return this.usersService.searchAlumnos(q);
     }
+    // GET /api/admin/users/padres/search?q=torres
+    @Get('padres/search')
+    searchPadres(@Query('q') q: string) {
+        return this.usersService.searchPadres(q);
+    }
 
     // GET /api/admin/users/docentes/search?q=torres
     @Get('docentes/search')
