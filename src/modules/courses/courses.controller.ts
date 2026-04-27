@@ -1,6 +1,6 @@
 import {
-    Controller, Get, Post, Patch,
-    Body, Param, ParseUUIDPipe, ParseIntPipe,
+    Controller, Get, Post, Patch, Delete,
+    Body, Param, Query, ParseUUIDPipe, ParseIntPipe,
     UseGuards,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service.js';
@@ -15,14 +15,20 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 export class CoursesController {
     constructor(private readonly coursesService: CoursesService) { }
 
-    // GET /api/courses — cursos del usuario según su rol
+    // GET /api/courses
     @Get()
     @Roles('alumno', 'docente', 'admin')
-    findMyCourses(@CurrentUser() user: any) {
-        return this.coursesService.findMyCourses(user.sub, user.rol);
+    findMyCourses(
+        @CurrentUser() user: any,
+        @Query('seccion_id') seccionId?: string,
+    ) {
+        return this.coursesService.findMyCourses(
+            user.sub, user.rol,
+            seccionId ? +seccionId : undefined,
+        );
     }
 
-    // POST /api/courses — admin crea curso manualmente
+    // POST /api/courses
     @Post()
     @Roles('admin')
     create(@Body() dto: {
@@ -36,14 +42,21 @@ export class CoursesController {
         return this.coursesService.create(dto);
     }
 
-    // POST /api/courses/enroll — matricular alumno
+    // POST /api/courses/enroll
     @Post('enroll')
     @Roles('admin')
     enroll(@Body() dto: { alumnoId: string; seccionId: number; periodoId: number }) {
         return this.coursesService.enrollStudent(dto.alumnoId, dto.seccionId, dto.periodoId);
     }
 
-    // POST /api/courses/generate/:seccionId/:periodoId — generar cursos desde plantilla
+    // DELETE /api/courses/enroll/:id — retirar alumno de sección
+    @Delete('enroll/:id')
+    @Roles('admin')
+    unenroll(@Param('id', ParseUUIDPipe) id: string) {
+        return this.coursesService.unenrollStudent(id);
+    }
+
+    // POST /api/courses/generate/:seccionId/:periodoId
     @Post('generate/:seccionId/:periodoId')
     @Roles('admin')
     generateFromTemplate(
@@ -73,7 +86,7 @@ export class CoursesController {
     update(
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: any,
-        @Body() dto: { nombre?: string; descripcion?: string },
+        @Body() dto: { nombre?: string; descripcion?: string; activo?: boolean },
     ) {
         return this.coursesService.update(id, user.sub, user.rol, dto);
     }

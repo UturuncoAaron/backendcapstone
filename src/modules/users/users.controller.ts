@@ -53,6 +53,7 @@ export class UsersController {
     findPadres() {
         return this.usersService.findPadres();
     }
+    
 
     // ── Buscar (autocomplete) ────────────────────────────────────
     // GET /api/admin/users/alumnos/search?q=garcia
