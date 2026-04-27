@@ -127,6 +127,9 @@ export class CreateAdminDto {
 
     @IsOptional() @IsEmail()
     email?: string;
+
+    @IsOptional() @IsString() @MaxLength(20)
+    telefono?: string;   // ← agregar esto
 }
 
 

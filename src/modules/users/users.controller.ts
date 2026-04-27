@@ -1,6 +1,7 @@
 import {
     Controller, Get, Post, Patch, Delete,
     Body, Param, Query, ParseUUIDPipe, HttpCode, HttpStatus,
+    UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service.js';
 import {
@@ -11,8 +12,13 @@ import {
     LinkPadreAlumnoDto,
     ResetPasswordDto,
 } from './dto/users.dto.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
 
 @Controller('admin/users')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('admin')
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
@@ -23,32 +29,13 @@ export class UsersController {
         return this.usersService.getStats();
     }
 
-    // ── Crear por rol ────────────────────────────────────────────
-    // POST /api/admin/users/alumnos
-    @Post('alumnos')
-    createAlumno(@Body() dto: CreateAlumnoDto) {
-        return this.usersService.createAlumno(dto);
-    }
-
-    // POST /api/admin/users/docentes
-    @Post('docentes')
-    createDocente(@Body() dto: CreateDocenteDto) {
-        return this.usersService.createDocente(dto);
-    }
-
-    // POST /api/admin/users/padres
-    @Post('padres')
-    createPadre(@Body() dto: CreatePadreDto) {
-        return this.usersService.createPadre(dto);
-    }
-
-    // POST /api/admin/users/admins
-    @Post('admins')
-    createAdmin(@Body() dto: CreateAdminDto) {
-        return this.usersService.createAdmin(dto);
-    }
-
     // ── Listar ───────────────────────────────────────────────────
+    // GET /api/admin/users/admins
+    @Get('admins')
+    findAdmins() {
+        return this.usersService.findAdmins();
+    }
+
     // GET /api/admin/users/alumnos
     @Get('alumnos')
     findAlumnos() {
@@ -91,6 +78,31 @@ export class UsersController {
     @Get('docentes/:id')
     findDocente(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findDocenteById(id);
+    }
+
+    // ── Crear por rol ────────────────────────────────────────────
+    // POST /api/admin/users/alumnos
+    @Post('alumnos')
+    createAlumno(@Body() dto: CreateAlumnoDto) {
+        return this.usersService.createAlumno(dto);
+    }
+
+    // POST /api/admin/users/docentes
+    @Post('docentes')
+    createDocente(@Body() dto: CreateDocenteDto) {
+        return this.usersService.createDocente(dto);
+    }
+
+    // POST /api/admin/users/padres
+    @Post('padres')
+    createPadre(@Body() dto: CreatePadreDto) {
+        return this.usersService.createPadre(dto);
+    }
+
+    // POST /api/admin/users/admins
+    @Post('admins')
+    createAdmin(@Body() dto: CreateAdminDto) {
+        return this.usersService.createAdmin(dto);
     }
 
     // ── Desactivar ───────────────────────────────────────────────

@@ -329,4 +329,11 @@ export class UsersService {
     async updateUltimoAcceso(id: string) {
         await this.cuentaRepo.update(id, { ultimo_acceso: new Date() });
     }
+    async findAdmins() {
+        const admins = await this.adminRepo.find({
+            relations: ['cuenta'],
+            order: { apellido_paterno: 'ASC' },
+        });
+        return { data: admins };
+    }
 }
