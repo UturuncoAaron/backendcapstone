@@ -14,27 +14,35 @@ export class GradesService {
 
     // Alumno ve sus propias notas (bimestre viene del JOIN con periodos)
     async getMyGrades(alumnoId: string) {
-        return this.gradeRepo.find({
+        const rows = await this.gradeRepo.find({
             where: { alumno_id: alumnoId },
             relations: ['curso', 'periodo'],
             order: { periodo: { anio: 'DESC', bimestre: 'ASC' } },
         });
+        // aplanar bimestre y curso nombre para el frontend
+        return rows.map((g) => ({
+            ...g,
+            bimestre: g.periodo?.bimestre ?? null,
+            curso_nombre: g.curso?.nombre ?? null,
+        }));
     }
 
     // Docente ve notas de su curso — incluye alumnos sin nota aún
     async getGradesByCourse(cursoId: string, periodoId?: number) {
-        // Alumnos matriculados en la sección del curso
+        // Alumnos matriculados en la sección del curso.
+        // Nota: se relaja el filtro de periodo — la matrícula y el curso
+        // pueden estar en bimestres distintos del mismo año. DISTINCT evita
+        // duplicados si el alumno tiene múltiples matrículas en la sección.
         const alumnos = await this.dataSource.query(`
-            SELECT
+            SELECT DISTINCT
                 a.id          AS alumno_id,
                 a.nombre,
                 a.apellido_paterno,
                 a.apellido_materno,
                 a.codigo_estudiante
             FROM matriculas m
-            JOIN cursos  c ON c.seccion_id = m.seccion_id
-                          AND c.periodo_id = m.periodo_id
-            JOIN alumnos a ON a.id = m.alumno_id
+            JOIN cursos  c  ON c.seccion_id = m.seccion_id
+            JOIN alumnos a  ON a.id = m.alumno_id
             JOIN cuentas ct ON ct.id = a.id AND ct.activo = true
             WHERE c.id = $1 AND m.activo = true
             ORDER BY a.apellido_paterno, a.nombre
@@ -64,6 +72,7 @@ export class GradesService {
                 curso_id: cursoId,
                 periodo_id: nota?.periodo_id ?? periodoId ?? null,
                 bimestre: nota?.periodo?.bimestre ?? null,
+                nota_examenes: nota?.nota_examenes ?? null,
                 nota_tareas: nota?.nota_tareas ?? null,
                 nota_participacion: nota?.nota_participacion ?? null,
                 nota_final: nota?.nota_final ?? null,

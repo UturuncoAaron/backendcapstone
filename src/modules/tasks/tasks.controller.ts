@@ -21,9 +21,71 @@ export class TasksController {
 
     // GET /api/courses/:id/tasks
     @Get('courses/:id/tasks')
+    @Roles('docente', 'admin', 'alumno')
+    getCourseTasks(
+        @Param('id', ParseUUIDPipe) cursoId: string,
+        @CurrentUser() user: any,
+    ) {
+        const incluirInactivas = user?.rol !== 'alumno';
+        return this.tasksService.getCourseTasks(cursoId, 'tarea', incluirInactivas);
+    }
+
+    // ── Exámenes (mismo backend, tipo='examen') ─────────────────
+
+    // GET /api/courses/:id/exams
+    @Get('courses/:id/exams')
+    @Roles('docente', 'admin', 'alumno')
+    getCourseExams(
+        @Param('id', ParseUUIDPipe) cursoId: string,
+        @CurrentUser() user: any,
+    ) {
+        const incluirInactivas = user?.rol !== 'alumno';
+        return this.tasksService.getCourseTasks(cursoId, 'examen', incluirInactivas);
+    }
+
+    // POST /api/courses/:id/exams
+    @Post('courses/:id/exams')
     @Roles('docente', 'admin')
-    getCourseTasks(@Param('id', ParseUUIDPipe) cursoId: string) {
-        return this.tasksService.getCourseTasks(cursoId);
+    createExam(
+        @Param('id', ParseUUIDPipe) cursoId: string,
+        @Body() dto: CreateTaskDto,
+    ) {
+        return this.tasksService.createTask(cursoId, { ...dto, tipo: 'examen' });
+    }
+
+    // GET /api/courses/:cursoId/exams/:id  (con preguntas)
+    @Get('courses/:cursoId/exams/:id')
+    @Roles('docente', 'admin', 'alumno')
+    getExam(@Param('id', ParseUUIDPipe) examId: string) {
+        return this.tasksService.getTaskForAlumno(examId);
+    }
+
+    // PATCH /api/courses/:cursoId/exams/:id/toggle
+    @Patch('courses/:cursoId/exams/:id/toggle')
+    @Roles('docente', 'admin')
+    toggleExam(
+        @Param('id', ParseUUIDPipe) examId: string,
+        @Body() dto: ToggleTaskDto,
+    ) {
+        return this.tasksService.toggleTask(examId, dto);
+    }
+
+    // POST /api/courses/:cursoId/exams/:id/submit
+    @Post('courses/:cursoId/exams/:id/submit')
+    @Roles('alumno')
+    submitExam(
+        @Param('id', ParseUUIDPipe) examId: string,
+        @Body() dto: SubmitAlternativasDto,
+        @CurrentUser() user: any,
+    ) {
+        return this.tasksService.submitAlternativas(examId, user.sub, dto);
+    }
+
+    // GET /api/courses/:cursoId/exams/:id/results
+    @Get('courses/:cursoId/exams/:id/results')
+    @Roles('docente', 'admin', 'alumno')
+    getExamResults(@Param('id', ParseUUIDPipe) examId: string) {
+        return this.tasksService.getSubmissions(examId);
     }
 
     // POST /api/courses/:id/tasks
@@ -71,6 +133,13 @@ export class TasksController {
     }
 
     // ── Alumno ───────────────────────────────────────────────────
+
+    // GET /api/my-submissions  (todas las entregas del alumno logueado)
+    @Get('my-submissions')
+    @Roles('alumno')
+    getMySubmissions(@CurrentUser() user: any) {
+        return this.tasksService.getMySubmissions(user.sub);
+    }
 
     // GET /api/tasks/:id  (oculta respuestas correctas si no venció)
     @Get('tasks/:id')

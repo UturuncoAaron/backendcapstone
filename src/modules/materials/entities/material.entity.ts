@@ -25,13 +25,23 @@ export class Material {
     @Column({ length: 20 })
     tipo: TipoMaterial;
 
-    /** URL para links externos (YouTube, Drive, etc.) */
+    /** URL del recurso externo (YouTube, Drive, etc.). Null si es archivo en R2. */
     @Column({ type: 'text', nullable: true })
     url: string | null;
 
     /** Clave del archivo en Cloudflare R2. Null si es link externo. */
     @Column({ name: 'storage_key', type: 'text', nullable: true })
     storage_key: string | null;
+
+    /** Nombre original del archivo subido (para forzar descarga con ese nombre). */
+    @Column({ name: 'nombre_original', type: 'text', nullable: true })
+    nombre_original: string | null;
+
+    @Column({ name: 'mime_type', type: 'text', nullable: true })
+    mime_type: string | null;
+
+    @Column({ name: 'size_bytes', type: 'int', nullable: true })
+    size_bytes: number | null;
 
     @Column({ type: 'text', nullable: true })
     descripcion: string | null;

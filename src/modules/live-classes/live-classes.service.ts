@@ -26,6 +26,13 @@ export class LiveClassesService {
         });
     }
 
+    async findAll() {
+        return this.liveClassRepo.find({
+            relations: ['curso'],
+            order: { fecha_hora: 'DESC' },
+        });
+    }
+
     async findOne(id: string) {
         const clase = await this.liveClassRepo.findOne({
             where: { id },
@@ -156,7 +163,7 @@ export class LiveClassesService {
     async getAttendanceByAlumno(alumnoId: string, cursoId?: string) {
         const query = this.attendanceRepo.createQueryBuilder('a')
             .leftJoinAndSelect('a.clase_vivo', 'c')
-            
+
             .where('a.alumno_id = :alumnoId', { alumnoId });
 
         if (cursoId) {

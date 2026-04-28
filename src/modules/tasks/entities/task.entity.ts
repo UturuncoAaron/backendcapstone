@@ -21,6 +21,9 @@ export class Task {
     @Column({ length: 200 })
     titulo: string;
 
+    @Column({ type: 'varchar', length: 16, default: 'tarea' })
+    tipo: 'tarea' | 'examen';
+
     @Column({ type: 'text', nullable: true })
     instrucciones: string | null;
 

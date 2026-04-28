@@ -13,7 +13,9 @@ export class CreateGradeDto {
     @IsInt()
     periodo_id: number;
 
-    // nota_examenes eliminada: en v5 los exámenes no existen
+    @IsNumber() @IsOptional() @Min(0) @Max(20)
+    nota_examenes?: number;
+
     @IsNumber() @IsOptional() @Min(0) @Max(20)
     nota_tareas?: number;
 

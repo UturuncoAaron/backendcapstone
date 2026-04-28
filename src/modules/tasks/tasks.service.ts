@@ -29,9 +29,15 @@ export class TasksService {
 
     // ── Docente: gestión de tareas ───────────────────────────────
 
-    async getCourseTasks(cursoId: string) {
+    async getCourseTasks(
+        cursoId: string,
+        tipo: 'tarea' | 'examen' = 'tarea',
+        incluirInactivas = false,
+    ) {
+        const where: Record<string, unknown> = { curso_id: cursoId, tipo };
+        if (!incluirInactivas) where['activo'] = true;
         return this.taskRepo.find({
-            where: { curso_id: cursoId, activo: true },
+            where,
             order: { fecha_limite: 'ASC' },
         });
     }
@@ -51,6 +57,7 @@ export class TasksService {
                 ...taskData,
                 curso_id: cursoId,
                 fecha_limite: new Date(dto.fecha_limite),
+                activo: true,
             });
             await em.save(task);
 
@@ -213,6 +220,15 @@ export class TasksService {
         `, [submissionId]);
 
         return parseFloat(resultado[0].total);
+    }
+
+    // ── Alumno: mis entregas (para pintar estado en la lista) ─────
+
+    async getMySubmissions(alumnoId: string) {
+        return this.submissionRepo.find({
+            where: { alumno_id: alumnoId },
+            order: { fecha_entrega: 'DESC' },
+        });
     }
 
     // ── Docente: ver entregas ────────────────────────────────────

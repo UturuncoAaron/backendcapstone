@@ -15,13 +15,13 @@ export class StorageService {
   private readonly logger = new Logger(StorageService.name);
 
   constructor() {
-    this.bucket = process.env.CLOUDFLARE_R2_BUCKET_NAME;
+    this.bucket = process.env.CLOUDFLARE_R2_BUCKET_NAME!;
     this.s3 = new S3Client({
       region: 'auto',
       endpoint: process.env.CLOUDFLARE_R2_ENDPOINT,
       credentials: {
-        accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID,
-        secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
+        accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY!,
       },
     });
   }
@@ -31,7 +31,7 @@ export class StorageService {
     folder: string,
   ): Promise<string> {
     const ext = file.originalname.split('.').pop()?.toLowerCase();
-    const key = `${folder}/${randomUUID()}.${ext}`;
+    const key = `${folder}/${randomUUID()}${ext ? '.' + ext : ''}`;
 
     try {
       await this.s3.send(
@@ -59,6 +59,25 @@ export class StorageService {
       return await getSignedUrl(this.s3, command, { expiresIn });
     } catch (error) {
       this.logger.error(`Error generando URL firmada: ${(error as Error).message}`);
+      throw new InternalServerErrorException('Error al generar URL de descarga');
+    }
+  }
+
+  async getDownloadUrl(
+    key: string,
+    filename: string,
+    expiresIn = 3600,
+  ): Promise<string> {
+    try {
+      const safeName = filename.replace(/"/g, '').replace(/[\r\n]/g, ' ');
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ResponseContentDisposition: `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+      });
+      return await getSignedUrl(this.s3, command, { expiresIn });
+    } catch (error) {
+      this.logger.error(`Error generando URL de descarga: ${(error as Error).message}`);
       throw new InternalServerErrorException('Error al generar URL de descarga');
     }
   }

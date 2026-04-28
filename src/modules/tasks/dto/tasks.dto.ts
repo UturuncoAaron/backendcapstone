@@ -1,7 +1,7 @@
 import {
     IsString, IsNotEmpty, IsOptional, IsDateString,
     IsInt, IsBoolean, Min, Max, ValidateNested,
-    ArrayMinSize, IsUUID, IsArray,
+    ArrayMinSize, IsUUID, IsArray, IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -39,6 +39,9 @@ export class CreatePreguntaDto {
 export class CreateTaskDto {
     @IsString() @IsNotEmpty()
     titulo: string;
+
+    @IsOptional() @IsIn(['tarea', 'examen'])
+    tipo?: 'tarea' | 'examen';
 
     @IsOptional() @IsString()
     instrucciones?: string;

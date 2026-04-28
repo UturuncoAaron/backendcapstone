@@ -286,6 +286,18 @@ export class UsersService {
         return docente;
     }
 
+    async findPadreById(id: string) {
+        const padre = await this.padreRepo.findOne({ where: { id } });
+        if (!padre) throw new NotFoundException(`Padre ${id} no encontrado`);
+        return padre;
+    }
+
+    async findAdminById(id: string) {
+        const admin = await this.adminRepo.findOne({ where: { id } });
+        if (!admin) throw new NotFoundException(`Admin ${id} no encontrado`);
+        return admin;
+    }
+
     // ── Desactivar cuenta ─────────────────────────────────────────
 
     async deactivate(id: string): Promise<{ message: string }> {
@@ -294,6 +306,15 @@ export class UsersService {
         cuenta.activo = false;
         await this.cuentaRepo.save(cuenta);
         return { message: 'Usuario desactivado correctamente' };
+    }
+
+    async reactivate(id: string): Promise<{ message: string }> {
+        const cuenta = await this.cuentaRepo.findOne({ where: { id } });
+        if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
+        if (cuenta.activo) return { message: 'La cuenta ya está activa' };
+        cuenta.activo = true;
+        await this.cuentaRepo.save(cuenta);
+        return { message: 'Usuario reactivado correctamente' };
     }
 
     // ── Reset de contraseña ───────────────────────────────────────
@@ -375,6 +396,10 @@ export class UsersService {
                 activo: true,
             },
         });
+    }
+
+    async findCuentaById(id: string): Promise<Cuenta | null> {
+        return this.cuentaRepo.findOne({ where: { id } });
     }
 
     async updateUltimoAcceso(id: string) {

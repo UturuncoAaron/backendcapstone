@@ -86,6 +86,18 @@ export class UsersController {
         return this.usersService.findDocenteById(id);
     }
 
+    // GET /api/admin/users/padres/:id
+    @Get('padres/:id')
+    findPadre(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.findPadreById(id);
+    }
+
+    // GET /api/admin/users/admins/:id
+    @Get('admins/:id')
+    findAdmin(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.findAdminById(id);
+    }
+
     // ── Crear por rol ────────────────────────────────────────────
     // POST /api/admin/users/alumnos
     @Post('alumnos')
@@ -117,6 +129,13 @@ export class UsersController {
     @HttpCode(HttpStatus.OK)
     deactivate(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.deactivate(id);
+    }
+
+    // PATCH /api/admin/users/:id/reactivar
+    @Patch(':id/reactivar')
+    @HttpCode(HttpStatus.OK)
+    reactivate(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.reactivate(id);
     }
 
     // ── Reset password ───────────────────────────────────────────

@@ -33,7 +33,9 @@ export class Grade {
     @JoinColumn({ name: 'periodo_id' })
     periodo: Period;
 
-    // nota_examenes eliminada: en v5 solo hay tareas
+    @Column({ name: 'nota_examenes', type: 'decimal', precision: 4, scale: 2, nullable: true })
+    nota_examenes: number | null;
+
     @Column({ name: 'nota_tareas', type: 'decimal', precision: 4, scale: 2, nullable: true })
     nota_tareas: number | null;
 

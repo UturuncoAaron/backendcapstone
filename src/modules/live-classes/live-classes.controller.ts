@@ -12,6 +12,14 @@ export class LiveClassesController {
 
     // ── CLASES EN VIVO ──────────────────────────────────────────
 
+    // GET /api/live-classes  (lista global, opcionalmente filtrada por cursoId)
+    @Get('live-classes')
+    findAll(@Query('cursoId') cursoId?: string) {
+        return cursoId
+            ? this.liveClassesService.findByCourse(cursoId)
+            : this.liveClassesService.findAll();
+    }
+
     // GET /api/courses/:courseId/live-classes
     @Get('courses/:courseId/live-classes')
     findByCourse(@Param('courseId', ParseUUIDPipe) courseId: string) {
@@ -39,6 +47,24 @@ export class LiveClassesController {
         return this.liveClassesService.create({
             ...dto,
             curso_id: courseId,
+            fecha_hora: new Date(dto.fecha_hora),
+        });
+    }
+
+    // POST /api/live-classes  (alterno: curso_id en body)
+    @Post('live-classes')
+    createGlobal(
+        @Body() dto: {
+            curso_id: string;
+            titulo: string;
+            descripcion?: string;
+            fecha_hora: string;
+            duracion_min?: number;
+            link_reunion: string;
+        },
+    ) {
+        return this.liveClassesService.create({
+            ...dto,
             fecha_hora: new Date(dto.fecha_hora),
         });
     }

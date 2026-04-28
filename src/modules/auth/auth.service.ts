@@ -52,35 +52,23 @@ export class AuthService {
     }
 
     async getProfile(userId: string) {
-        const [cuenta] = await this.dataSource.query(
-            `SELECT id, rol, activo FROM cuentas WHERE id = $1`,
-            [userId],
-        );
-
+        const cuenta = await this.usersService.findCuentaById(userId);
         if (!cuenta || !cuenta.activo) {
             throw new UnauthorizedException('Usuario no encontrado o inactivo');
         }
-
         return this.getPerfil(cuenta.id, cuenta.rol);
     }
 
-    // Devuelve el perfil de la tabla correspondiente al rol
+    // Devuelve el perfil de la tabla correspondiente al rol usando los repositorios
     private async getPerfil(id: string, rol: string) {
-        const tablas: Record<string, string> = {
-            alumno: 'alumnos',
-            docente: 'docentes',
-            padre: 'padres',
-            admin: 'admins',
-        };
-
-        const tabla = tablas[rol];
-        if (!tabla) throw new UnauthorizedException('Rol no reconocido');
-
-        const [perfil] = await this.dataSource.query(
-            `SELECT * FROM ${tabla} WHERE id = $1`,
-            [id],
-        );
-
-        return { ...perfil, rol };
+        let perfil: unknown;
+        switch (rol) {
+            case 'alumno':  perfil = await this.usersService.findAlumnoById(id);  break;
+            case 'docente': perfil = await this.usersService.findDocenteById(id); break;
+            case 'padre':   perfil = await this.usersService.findPadreById(id);   break;
+            case 'admin':   perfil = await this.usersService.findAdminById(id);   break;
+            default:        throw new UnauthorizedException('Rol no reconocido');
+        }
+        return { ...(perfil as object), rol };
     }
 }
