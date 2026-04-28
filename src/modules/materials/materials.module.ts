@@ -3,11 +3,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MaterialsController } from './materials.controller.js';
 import { MaterialsService } from './materials.service.js';
 import { Material } from './entities/material.entity.js';
+import { MaterialView } from './entities/material-view.entity.js';
 import { StorageModule } from '../storage/storage.module.js';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([Material]),
+        TypeOrmModule.forFeature([Material, MaterialView]),
         StorageModule,
     ],
     controllers: [MaterialsController],

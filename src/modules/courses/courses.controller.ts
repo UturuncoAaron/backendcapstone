@@ -4,6 +4,7 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service.js';
+import { MaterialsService } from '../materials/materials.service.js';
 import { AssignTeacherDto } from './dto/assign-teacher.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
@@ -13,7 +14,10 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('courses')
 export class CoursesController {
-    constructor(private readonly coursesService: CoursesService) { }
+    constructor(
+        private readonly coursesService: CoursesService,
+        private readonly materialsService: MaterialsService,
+    ) { }
 
     // GET /api/courses
     @Get()
@@ -78,6 +82,16 @@ export class CoursesController {
     @Roles('alumno', 'docente', 'admin')
     findOne(@Param('id', ParseUUIDPipe) id: string) {
         return this.coursesService.findOne(id);
+    }
+
+    // GET /api/courses/:id/progress (alumno)
+    @Get(':id/progress')
+    @Roles('alumno')
+    getProgress(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: any,
+    ) {
+        return this.materialsService.getCourseProgress(id, user.sub);
     }
 
     // PATCH /api/courses/:id

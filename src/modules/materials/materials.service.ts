@@ -3,8 +3,9 @@ import {
     BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Material } from './entities/material.entity.js';
+import { MaterialView } from './entities/material-view.entity.js';
 import { CreateMaterialDto } from './dto/create-material.dto.js';
 import { UpdateMaterialDto } from './dto/update-material.dto.js';
 import { StorageService } from '../storage/storage.service.js';
@@ -16,10 +17,12 @@ export class MaterialsService {
     constructor(
         @InjectRepository(Material)
         private readonly materialRepo: Repository<Material>,
+        @InjectRepository(MaterialView)
+        private readonly viewRepo: Repository<MaterialView>,
         private readonly storageService: StorageService,
     ) { }
 
-    async findByCourse(courseId: string) {
+    async findByCourse(courseId: string, alumnoId?: string) {
         const materials = await this.materialRepo.find({
             where: { curso_id: courseId, activo: true },
             order: {
@@ -29,7 +32,23 @@ export class MaterialsService {
                 created_at: 'DESC',
             },
         });
-        return Promise.all(materials.map((m) => this.attachAccessUrl(m)));
+
+        let vistosSet = new Set<string>();
+        if (alumnoId && materials.length) {
+            const ids = materials.map(m => m.id);
+            const views = await this.viewRepo.find({
+                where: { alumno_id: alumnoId, material_id: In(ids) },
+                select: ['material_id'],
+            });
+            vistosSet = new Set(views.map(v => v.material_id));
+        }
+
+        return Promise.all(materials.map(async (m) => {
+            const withUrl = await this.attachAccessUrl(m);
+            return alumnoId
+                ? { ...withUrl, visto: vistosSet.has(m.id) }
+                : withUrl;
+        }));
     }
 
     async findOne(id: string) {
@@ -177,6 +196,64 @@ export class MaterialsService {
             };
         }
         throw new NotFoundException('Este material no tiene un recurso visualizable');
+    }
+
+    /** Marca un material como visto por el alumno (idempotente). */
+    async markViewed(materialId: string, alumnoId: string) {
+        const material = await this.materialRepo.findOne({
+            where: { id: materialId, activo: true },
+        });
+        if (!material) throw new NotFoundException(`Material ${materialId} no encontrado`);
+
+        const existing = await this.viewRepo.findOne({
+            where: { alumno_id: alumnoId, material_id: materialId },
+        });
+        if (existing) return { visto: true, fecha: existing.fecha };
+
+        const view = this.viewRepo.create({
+            alumno_id: alumnoId,
+            material_id: materialId,
+        });
+        const saved = await this.viewRepo.save(view);
+        return { visto: true, fecha: saved.fecha };
+    }
+
+    /** Devuelve progreso por (bimestre, semana) — solo aplica a alumno. */
+    async getCourseProgress(courseId: string, alumnoId: string) {
+        const materials = await this.materialRepo.find({
+            where: { curso_id: courseId, activo: true },
+            select: ['id', 'bimestre', 'semana'],
+        });
+
+        let vistos = new Set<string>();
+        if (materials.length) {
+            const views = await this.viewRepo.find({
+                where: {
+                    alumno_id: alumnoId,
+                    material_id: In(materials.map(m => m.id)),
+                },
+                select: ['material_id'],
+            });
+            vistos = new Set(views.map(v => v.material_id));
+        }
+
+        const map = new Map<string, {
+            semana: number | null;
+            bimestre: number | null;
+            total: number;
+            completados: number;
+        }>();
+        for (const m of materials) {
+            const key = `${m.bimestre ?? 'x'}-${m.semana ?? 'x'}`;
+            let entry = map.get(key);
+            if (!entry) {
+                entry = { semana: m.semana, bimestre: m.bimestre, total: 0, completados: 0 };
+                map.set(key, entry);
+            }
+            entry.total += 1;
+            if (vistos.has(m.id)) entry.completados += 1;
+        }
+        return [...map.values()];
     }
 
     /** Devuelve la storage key, manejando registros antiguos que la guardaban en `url`. */

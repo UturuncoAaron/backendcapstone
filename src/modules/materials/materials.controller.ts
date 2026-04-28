@@ -26,8 +26,12 @@ export class MaterialsController {
 
     @Get()
     @Roles('alumno', 'docente', 'admin', 'padre')
-    findAll(@Param('courseId', ParseUUIDPipe) courseId: string) {
-        return this.materialsService.findByCourse(courseId);
+    findAll(
+        @Param('courseId', ParseUUIDPipe) courseId: string,
+        @CurrentUser() user: any,
+    ) {
+        const alumnoId = user?.rol === 'alumno' ? user.sub : undefined;
+        return this.materialsService.findByCourse(courseId, alumnoId);
     }
 
     @Get(':id')
@@ -46,6 +50,16 @@ export class MaterialsController {
     @Roles('alumno', 'docente', 'admin', 'padre')
     preview(@Param('id', ParseUUIDPipe) id: string) {
         return this.materialsService.getPreviewInfo(id);
+    }
+
+    @Post(':id/view')
+    @Roles('alumno')
+    @HttpCode(HttpStatus.OK)
+    markViewed(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: any,
+    ) {
+        return this.materialsService.markViewed(id, user.sub);
     }
 
     @Post()

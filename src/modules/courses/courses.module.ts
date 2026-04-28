@@ -7,9 +7,13 @@ import { Course } from './entities/course.entity.js';
 import { Enrollment } from './entities/enrollment.entity.js';
 import { Schedule } from './entities/schedule.entity.js';
 import { Period } from '../academic/entities/period.entity.js';
+import { MaterialsModule } from '../materials/materials.module.js';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Course, Enrollment, Schedule, Period])],
+    imports: [
+        TypeOrmModule.forFeature([Course, Enrollment, Schedule, Period]),
+        MaterialsModule,
+    ],
     controllers: [CoursesController],
     providers: [CoursesService],
     exports: [CoursesService],
