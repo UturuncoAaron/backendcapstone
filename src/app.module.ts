@@ -18,6 +18,7 @@ import { StorageModule } from './modules/storage/storage.module.js';
 import { LibretasModule } from './modules/libretas/libretas.module.js';
 import { ConfiguracionModule } from './modules/configuracion/configuracion.module.js';
 import { LiveClassesModule } from './modules/live-classes/live-classes.module.js';
+import { SemanasModule } from './modules/semanas/semanas.module.js';
 
 // Módulos nuevos
 import { AnnouncementsModule } from './modules/announcements/announcements.module.js';
@@ -64,6 +65,7 @@ console.log('NODE_ENV:', process.env.NODE_ENV, '| isDev:', isDev);
     CoursesModule,
 
     // ── Contenido educativo ──────────────────────────────────────
+    SemanasModule,
     MaterialsModule,
     TasksModule,
     ForumModule,

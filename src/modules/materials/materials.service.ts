@@ -8,7 +8,9 @@ import { Material } from './entities/material.entity.js';
 import { MaterialView } from './entities/material-view.entity.js';
 import { CreateMaterialDto } from './dto/create-material.dto.js';
 import { UpdateMaterialDto } from './dto/update-material.dto.js';
+import { ToggleMaterialDto } from './dto/toggle-material.dto.js';
 import { StorageService } from '../storage/storage.service.js';
+import { SemanasService } from '../semanas/semanas.service.js';
 
 const TIPOS_QUE_ACEPTAN_ARCHIVO = ['pdf', 'otro'];
 
@@ -20,6 +22,7 @@ export class MaterialsService {
         @InjectRepository(MaterialView)
         private readonly viewRepo: Repository<MaterialView>,
         private readonly storageService: StorageService,
+        private readonly semanasService: SemanasService,
     ) { }
 
     async findByCourse(courseId: string, alumnoId?: string) {
@@ -33,22 +36,39 @@ export class MaterialsService {
             },
         });
 
+        let visibles = materials;
+        if (alumnoId) {
+            const ocultas = new Set(await this.semanasService.getHiddenSemanas(courseId));
+            visibles = materials.filter(
+                (m) => !m.oculto && !(m.semana != null && ocultas.has(m.semana)),
+            );
+        }
+
         let vistosSet = new Set<string>();
-        if (alumnoId && materials.length) {
-            const ids = materials.map(m => m.id);
+        if (alumnoId && visibles.length) {
+            const ids = visibles.map((m) => m.id);
             const views = await this.viewRepo.find({
                 where: { alumno_id: alumnoId, material_id: In(ids) },
                 select: ['material_id'],
             });
-            vistosSet = new Set(views.map(v => v.material_id));
+            vistosSet = new Set(views.map((v) => v.material_id));
         }
 
-        return Promise.all(materials.map(async (m) => {
+        return Promise.all(visibles.map(async (m) => {
             const withUrl = await this.attachAccessUrl(m);
             return alumnoId
                 ? { ...withUrl, visto: vistosSet.has(m.id) }
                 : withUrl;
         }));
+    }
+
+    async toggleVisibility(id: string, dto: ToggleMaterialDto) {
+        const material = await this.materialRepo.findOne({
+            where: { id, activo: true },
+        });
+        if (!material) throw new NotFoundException(`Material ${id} no encontrado`);
+        material.oculto = dto.oculto;
+        return this.materialRepo.save(material);
     }
 
     async findOne(id: string) {

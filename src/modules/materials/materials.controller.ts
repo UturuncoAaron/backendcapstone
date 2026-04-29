@@ -13,6 +13,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { CreateMaterialDto } from './dto/create-material.dto.js';
 import { UpdateMaterialDto } from './dto/update-material.dto.js';
+import { ToggleMaterialDto } from './dto/toggle-material.dto.js';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -80,6 +81,15 @@ export class MaterialsController {
         })) file?: Express.Multer.File,
     ) {
         return this.materialsService.create(courseId, dto, file);
+    }
+
+    @Patch(':id/toggle')
+    @Roles('docente', 'admin')
+    toggle(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: ToggleMaterialDto,
+    ) {
+        return this.materialsService.toggleVisibility(id, dto);
     }
 
     @Patch(':id')

@@ -60,6 +60,10 @@ export class Material {
     @Column({ default: true })
     activo: boolean;
 
+    /** Oculto por el docente (visible solo para docente/admin). */
+    @Column({ default: false })
+    oculto: boolean;
+
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;
 

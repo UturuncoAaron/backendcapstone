@@ -3,6 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Forum } from './entities/forum.entity.js';
 import { ForumPost } from './entities/forum-post.entity.js';
+import { SemanasService } from '../semanas/semanas.service.js';
+
+export interface CreateForumDto {
+    titulo: string;
+    descripcion?: string;
+    bimestre?: number | null;
+    semana?: number | null;
+}
 
 @Injectable()
 export class ForumService {
@@ -11,23 +19,39 @@ export class ForumService {
         private readonly forumRepo: Repository<Forum>,
         @InjectRepository(ForumPost)
         private readonly postRepo: Repository<ForumPost>,
+        private readonly semanasService: SemanasService,
     ) { }
 
-    async getForumsByCourse(cursoId: string) {
-        return this.forumRepo.find({
+    async getForumsByCourse(cursoId: string, soloVisibles = false) {
+        const foros = await this.forumRepo.find({
             where: { curso_id: cursoId, activo: true },
-            order: { created_at: 'DESC' },
+            order: { bimestre: 'ASC', semana: 'ASC', created_at: 'DESC' },
         });
+        if (!soloVisibles) return foros;
+
+        const ocultas = new Set(await this.semanasService.getHiddenSemanas(cursoId));
+        return foros.filter(
+            (f) => !f.oculto && !(f.semana != null && ocultas.has(f.semana)),
+        );
     }
 
-    async createForum(cursoId: string, dto: { titulo: string; descripcion?: string }) {
+    async createForum(cursoId: string, dto: CreateForumDto) {
         return this.forumRepo.save(
             this.forumRepo.create({
                 curso_id: cursoId,
                 titulo: dto.titulo,
                 descripcion: dto.descripcion ?? null,
+                bimestre: dto.bimestre ?? null,
+                semana: dto.semana ?? null,
             }),
         );
+    }
+
+    async toggleVisibility(foroId: string, oculto: boolean) {
+        const forum = await this.forumRepo.findOne({ where: { id: foroId } });
+        if (!forum) throw new NotFoundException('Foro no encontrado');
+        forum.oculto = oculto;
+        return this.forumRepo.save(forum);
     }
 
     async getPostsByForum(foroId: string) {
