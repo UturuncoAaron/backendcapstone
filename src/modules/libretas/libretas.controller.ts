@@ -3,11 +3,13 @@ import {
     Param, ParseUUIDPipe, ParseIntPipe,
     Body, HttpCode, HttpStatus,
     UseGuards, UseInterceptors, UploadedFile,
+    BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 
 import { LibretasService } from './libretas.service.js';
+import { LibretaTipo } from './entities/libreta.entity.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
@@ -18,61 +20,78 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 export class LibretasController {
     constructor(private readonly libretasService: LibretasService) { }
 
-    // ── Alumno: ver sus propias libretas ─────────────────────────
-    // GET /api/libretas/me
     @Get('me')
-    @Roles('alumno')
+    @Roles('alumno', 'padre')
     findMine(@CurrentUser() user: any) {
-        return this.libretasService.findByAlumno(user.sub);
+        const tipo: LibretaTipo = user.rol === 'padre' ? 'padre' : 'alumno';
+        return this.libretasService.findByCuenta(user.sub, tipo);
     }
 
-    // ── Padre: ver libretas de un hijo ───────────────────────────
-    // GET /api/libretas/hijo/:alumnoId
     @Get('hijo/:alumnoId')
     @Roles('padre')
     findByHijo(
         @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: any,
     ) {
-        return this.libretasService.findByAlumnoForPadre(user.sub, alumnoId);
+        return this.libretasService.findHijoForPadre(user.sub, alumnoId);
     }
-
-    // ── Admin/Docente: ver libreta de alumno en un periodo ───────
-    // GET /api/libretas/alumno/:alumnoId/periodo/:periodoId
-    @Get('alumno/:alumnoId/periodo/:periodoId')
+    @Get(':tipo/:cuentaId/periodo/:periodoId')
     @Roles('admin', 'docente')
     findOne(
-        @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
+        @Param('tipo') tipo: string,
+        @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
         @Param('periodoId', ParseIntPipe) periodoId: number,
     ) {
-        return this.libretasService.findByAlumnoAndPeriodo(alumnoId, periodoId);
+        return this.libretasService.findByCuentaAndPeriodo(
+            cuentaId, periodoId, this.parseTipo(tipo),
+        );
     }
-
-    // ── Admin/Docente: subir o reemplazar libreta ────────────────
-    // POST /api/libretas
-    @Post()
+    @Post('alumno')
     @Roles('admin', 'docente')
     @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
-    upsert(
+    upsertAlumno(
         @CurrentUser() user: any,
         @UploadedFile() file: Express.Multer.File,
         @Body() body: {
-            alumno_id: string;
+            cuenta_id: string;
             periodo_id: string;
             observaciones?: string;
         },
     ) {
         return this.libretasService.upsert({
-            alumno_id: body.alumno_id,
+            cuenta_id: body.cuenta_id,
+            tipo: 'alumno',
             periodo_id: parseInt(body.periodo_id),
             subido_por: user.sub,
+            rol: user.rol,
+            observaciones: body.observaciones,
+            file,
+        });
+    }
+    @Post('padre')
+    @Roles('admin')
+    @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+    upsertPadre(
+        @CurrentUser() user: any,
+        @UploadedFile() file: Express.Multer.File,
+        @Body() body: {
+            cuenta_id: string;
+            periodo_id: string;
+            observaciones?: string;
+        },
+    ) {
+        return this.libretasService.upsert({
+            cuenta_id: body.cuenta_id,
+            tipo: 'padre',
+            periodo_id: parseInt(body.periodo_id),
+            subido_por: user.sub,
+            rol: user.rol,
             observaciones: body.observaciones,
             file,
         });
     }
 
-    // ── Admin/Docente: eliminar libreta ──────────────────────────
-    // DELETE /api/libretas/:id
+
     @Delete(':id')
     @Roles('admin', 'docente')
     @HttpCode(HttpStatus.OK)
@@ -81,5 +100,12 @@ export class LibretasController {
         @CurrentUser() user: any,
     ) {
         return this.libretasService.remove(id, user.sub, user.rol);
+    }
+
+    private parseTipo(raw: string): LibretaTipo {
+        if (raw !== 'alumno' && raw !== 'padre') {
+            throw new BadRequestException(`tipo inválido: ${raw}`);
+        }
+        return raw;
     }
 }

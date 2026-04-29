@@ -1,28 +1,27 @@
 import {
     Controller, Get, Post, Patch,
-    Body, Param, Query,
+    Body, Param, Query, Req,
     ParseIntPipe, UseGuards,
 } from '@nestjs/common';
 import { AcademicService } from './academic.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('academic')
 export class AcademicController {
     constructor(private readonly academicService: AcademicService) { }
 
-    // ── GRADOS (solo lectura — datos fijos) ──────────────────────
+    // ── GRADOS ───────────────────────────────────────────────────
 
-    // GET /api/academic/grados
     @Get('grados')
     @Roles('admin', 'docente', 'alumno', 'padre')
     findAllGrados() {
         return this.academicService.findAllGrados();
     }
 
-    // GET /api/academic/grados/:id
     @Get('grados/:id')
     @Roles('admin', 'docente')
     findGrado(@Param('id', ParseIntPipe) id: number) {
@@ -31,7 +30,6 @@ export class AcademicController {
 
     // ── SECCIONES ────────────────────────────────────────────────
 
-    // GET /api/academic/secciones?gradoId=1
     @Get('secciones')
     @Roles('admin', 'docente')
     findAllSecciones(
@@ -40,7 +38,6 @@ export class AcademicController {
         return this.academicService.findAllSecciones(gradoId);
     }
 
-    // POST /api/academic/secciones
     @Post('secciones')
     @Roles('admin')
     createSeccion(
@@ -58,28 +55,34 @@ export class AcademicController {
     @Roles('admin')
     asignarTutor(
         @Param('id', ParseIntPipe) seccionId: number,
-        @Body('tutor_id') tutorId: string,
+        @Body() body: { docente_id: string | null; force?: boolean },
     ) {
-        return this.academicService.asignarTutor(seccionId, tutorId);
+        return this.academicService.asignarTutor(
+            seccionId,
+            body.docente_id ?? null,
+            body.force === true,
+        );
+    }
+    @Get('tutoria/me')
+    @Roles('docente', 'admin')
+    getMiTutoria(@CurrentUser() user: any) {
+        return this.academicService.getTutoriaForDocente(user.sub);
     }
 
     // ── PERIODOS ─────────────────────────────────────────────────
 
-    // GET /api/academic/periodos
     @Get('periodos')
     @Roles('admin', 'docente', 'alumno', 'padre')
     findAllPeriodos() {
         return this.academicService.findAllPeriodos();
     }
 
-    // GET /api/academic/periodos/activo  ← debe ir ANTES de :id
     @Get('periodos/activo')
     @Roles('admin', 'docente', 'alumno', 'padre')
     findPeriodoActivo() {
         return this.academicService.findPeriodoActivo();
     }
 
-    // POST /api/academic/periodos
     @Post('periodos')
     @Roles('admin')
     createPeriodo(
@@ -94,7 +97,6 @@ export class AcademicController {
         return this.academicService.createPeriodo(body);
     }
 
-    // PATCH /api/academic/periodos/:id/activar
     @Patch('periodos/:id/activar')
     @Roles('admin')
     activarPeriodo(@Param('id', ParseIntPipe) id: number) {
