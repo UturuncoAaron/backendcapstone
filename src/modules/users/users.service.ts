@@ -151,11 +151,7 @@ export class UsersService {
         return admins;
     }
 
-
-    // Reemplaza findAlumnos() en users.service.ts
-
     async findAlumnos() {
-        // JOIN con matriculas → secciones → grados para obtener el grado actual
         const rows = await this.alumnoRepo
             .createQueryBuilder('a')
             .leftJoin('cuentas', 'c', 'c.id = a.id')
@@ -186,11 +182,31 @@ export class UsersService {
 
         return rows;
     }
+    async findDocentes(includeTutoria = false) {
+        if (!includeTutoria) {
+            return this.docenteRepo.find({
+                order: { apellido_paterno: 'ASC', nombre: 'ASC' },
+            });
+        }
 
-    async findDocentes() {
-        return this.docenteRepo.find({
-            order: { apellido_paterno: 'ASC', nombre: 'ASC' },
-        });
+        return this.docenteRepo
+            .createQueryBuilder('d')
+            .leftJoin('secciones', 's', 's.tutor_id = d.id')
+            .leftJoin('grados', 'g', 'g.id = s.grado_id')
+            .select([
+                'd.id               AS id',
+                'd.nombre           AS nombre',
+                'd.apellido_paterno AS apellido_paterno',
+                'd.apellido_materno AS apellido_materno',
+                'd.especialidad     AS especialidad',
+                `CASE WHEN s.id IS NULL THEN NULL ELSE jsonb_build_object(
+                    'seccion_id',    s.id,
+                    'seccion_label', g.nombre || ' Sección ' || s.nombre
+                ) END AS tutoria_actual`,
+            ])
+            .orderBy('d.apellido_paterno', 'ASC')
+            .addOrderBy('d.nombre', 'ASC')
+            .getRawMany();
     }
 
     async findPadres() {
@@ -198,7 +214,6 @@ export class UsersService {
             order: { apellido_paterno: 'ASC', nombre: 'ASC' },
         });
     }
-    // ── Buscar (autocomplete) ─────────────────────────────────────
 
     async searchAlumnos(query: string) {
         if (!query || query.trim().length < 2) return { data: [] };
@@ -385,7 +400,6 @@ export class UsersService {
         };
     }
 
-
     // ── Usado por AuthService ─────────────────────────────────────
 
     async findCuentaByDocumento(tipo: string, numero: string): Promise<Cuenta | null> {
@@ -405,5 +419,4 @@ export class UsersService {
     async updateUltimoAcceso(id: string) {
         await this.cuentaRepo.update(id, { ultimo_acceso: new Date() });
     }
-
 }

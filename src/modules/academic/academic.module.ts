@@ -8,11 +8,12 @@ import { Section } from './entities/section.entity.js';
 import { Period } from './entities/period.entity.js';
 import { Matricula } from './entities/matricula.entity.js';
 import { CoursesModule } from '../courses/courses.module.js';
+import { StorageModule } from '../storage/storage.module.js';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([GradeLevel, Section, Period, Matricula]),
-        CoursesModule,
+        CoursesModule,StorageModule
     ],
     controllers: [AcademicController],
     providers: [AcademicService],

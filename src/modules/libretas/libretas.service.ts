@@ -3,13 +3,15 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { Libreta } from './entities/libreta.entity.js';
+import { Libreta, LibretaTipo } from './entities/libreta.entity.js';
 import { StorageService } from '../storage/storage.service.js';
 
 interface UpsertLibretaDto {
-    alumno_id: string;
+    cuenta_id: string;
+    tipo: LibretaTipo;
     periodo_id: number;
     subido_por: string;
+    rol: string;
     observaciones?: string;
     file: { buffer: Buffer; originalname: string; mimetype: string };
 }
@@ -25,10 +27,11 @@ export class LibretasService {
         private readonly dataSource: DataSource,
     ) { }
 
-    // Alumno ve sus propias libretas (todos los bimestres)
-    async findByAlumno(alumnoId: string) {
+    // ──────────────────── LECTURA ───────────────────────────────
+
+    async findByCuenta(cuentaId: string, tipo: LibretaTipo) {
         const libretas = await this.libretaRepo.find({
-            where: { alumno_id: alumnoId },
+            where: { cuenta_id: cuentaId, tipo },
             relations: ['periodo'],
             order: { periodo: { anio: 'DESC', bimestre: 'DESC' } },
         });
@@ -39,10 +42,7 @@ export class LibretasService {
         })));
     }
 
-    // Padre ve libretas de un hijo específico
-    // (la validación de que el padre es dueño del alumno se hace en el controller)
-    async findByAlumnoForPadre(padreId: string, alumnoId: string) {
-        // Verificar vínculo padre-alumno
+    async findHijoForPadre(padreId: string, alumnoId: string) {
         const vinculo = await this.dataSource.query(
             `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2`,
             [padreId, alumnoId],
@@ -50,15 +50,15 @@ export class LibretasService {
         if (!vinculo.length) {
             throw new ForbiddenException('No tienes acceso a las libretas de este alumno');
         }
-
-        return this.findByAlumno(alumnoId);
+        return this.findByCuenta(alumnoId, 'alumno');
     }
 
-    // Admin/docente lista libretas de un alumno por periodo
-    async findByAlumnoAndPeriodo(alumnoId: string, periodoId: number) {
+    async findByCuentaAndPeriodo(
+        cuentaId: string, periodoId: number, tipo: LibretaTipo,
+    ) {
         const libreta = await this.libretaRepo.findOne({
-            where: { alumno_id: alumnoId, periodo_id: periodoId },
-            relations: ['alumno', 'periodo'],
+            where: { cuenta_id: cuentaId, periodo_id: periodoId, tipo },
+            relations: ['cuenta', 'periodo'],
         });
         if (!libreta) throw new NotFoundException('Libreta no encontrada');
 
@@ -68,20 +68,26 @@ export class LibretasService {
         };
     }
 
-    // Subir o reemplazar libreta (admin/docente)
+    // ──────────────────── ESCRITURA ─────────────────────────────
+
     async upsert(dto: UpsertLibretaDto) {
+        await this.assertCanManage(dto.subido_por, dto.rol, dto.cuenta_id, dto.tipo);
+
         const existing = await this.libretaRepo.findOne({
-            where: { alumno_id: dto.alumno_id, periodo_id: dto.periodo_id },
+            where: {
+                cuenta_id: dto.cuenta_id,
+                periodo_id: dto.periodo_id,
+                tipo: dto.tipo,
+            },
         });
 
-        // Si ya existe, borrar archivo anterior de R2
         if (existing) {
             await this.storageService.deleteFile(existing.storage_key).catch(() => null);
         }
 
         const storage_key = await this.storageService.uploadFile(
             dto.file,
-            `libretas/${dto.alumno_id}/periodo-${dto.periodo_id}`,
+            `libretas/${dto.tipo}/${dto.cuenta_id}/periodo-${dto.periodo_id}`,
         );
 
         if (existing) {
@@ -93,12 +99,13 @@ export class LibretasService {
             });
             return this.libretaRepo.findOne({
                 where: { id: existing.id },
-                relations: ['alumno', 'periodo'],
+                relations: ['cuenta', 'periodo'],
             });
         }
 
         const libreta = this.libretaRepo.create({
-            alumno_id: dto.alumno_id,
+            cuenta_id: dto.cuenta_id,
+            tipo: dto.tipo,
             periodo_id: dto.periodo_id,
             storage_key,
             nombre_archivo: dto.file.originalname,
@@ -109,17 +116,48 @@ export class LibretasService {
         return this.libretaRepo.save(libreta);
     }
 
-    // Eliminar libreta (admin siempre, docente solo si la subió él)
     async remove(id: string, userId: string, rol: string) {
         const libreta = await this.libretaRepo.findOne({ where: { id } });
         if (!libreta) throw new NotFoundException('Libreta no encontrada');
 
-        if (rol === 'docente' && libreta.subido_por !== userId) {
-            throw new ForbiddenException('No tienes permiso para eliminar esta libreta');
-        }
+        await this.assertCanManage(userId, rol, libreta.cuenta_id, libreta.tipo);
 
         await this.storageService.deleteFile(libreta.storage_key).catch(() => null);
         await this.libretaRepo.remove(libreta);
         return { message: 'Libreta eliminada correctamente' };
+    }
+
+    private async assertCanManage(
+        userId: string,
+        rol: string,
+        cuentaId: string,
+        tipo: LibretaTipo,
+    ): Promise<void> {
+        if (rol === 'admin') return;
+        if (rol !== 'docente') {
+            throw new ForbiddenException('No tienes permiso para gestionar libretas');
+        }
+        if (tipo === 'padre') {
+            throw new ForbiddenException(
+                'Solo dirección puede gestionar la libreta del padre',
+            );
+        }
+        const ok = await this.dataSource.query(
+            `SELECT 1
+             FROM matriculas m
+             JOIN secciones s ON s.id = m.seccion_id
+             JOIN periodos  p ON p.id = m.periodo_id
+             WHERE m.alumno_id = $1
+               AND s.tutor_id  = $2
+               AND m.activo    = TRUE
+               AND p.activo    = TRUE
+             LIMIT 1`,
+            [cuentaId, userId],
+        );
+        if (!ok.length) {
+            throw new ForbiddenException(
+                'Solo el tutor de su sección o dirección puede gestionar esta libreta',
+            );
+        }
     }
 }
