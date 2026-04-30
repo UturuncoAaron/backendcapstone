@@ -1,5 +1,5 @@
 import {
-    Controller, Get, Post, Patch,
+    Controller, Get, Post, Patch, Delete,
     Body, Param, Query, Req,
     ParseIntPipe, UseGuards,
 } from '@nestjs/common';
@@ -50,7 +50,6 @@ export class AcademicController {
         );
     }
 
-    // PATCH /api/academic/secciones/:id/tutor
     @Patch('secciones/:id/tutor')
     @Roles('admin')
     asignarTutor(
@@ -63,6 +62,7 @@ export class AcademicController {
             body.force === true,
         );
     }
+
     @Get('tutoria/me')
     @Roles('docente', 'admin')
     getMiTutoria(@CurrentUser() user: any) {
@@ -101,5 +101,15 @@ export class AcademicController {
     @Roles('admin')
     activarPeriodo(@Param('id', ParseIntPipe) id: number) {
         return this.academicService.activarPeriodo(id);
+    }
+
+    // ── MATRÍCULAS ────────────────────────────────────────────────
+    @Get('matriculas')
+    @Roles('admin')
+    findMatriculas(
+        @Query('periodo_id', new ParseIntPipe({ optional: true })) periodoId?: number,
+        @Query('seccion_id', new ParseIntPipe({ optional: true })) seccionId?: number,
+    ) {
+        return this.academicService.findMatriculas(periodoId, seccionId);
     }
 }

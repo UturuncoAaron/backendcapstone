@@ -75,13 +75,10 @@ export class AcademicService {
         };
     }
 
-    async asignarTutor(
-        seccionId: number,
-        docenteId: string | null,
-        force = false,
-    ) {
+    async asignarTutor(seccionId: number, docenteId: string | null, force = false) {
         const seccion = await this.seccionRepo.findOne({ where: { id: seccionId } });
         if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+
         if (docenteId === null) {
             seccion.tutor_id = null;
             await this.seccionRepo.save(seccion);
@@ -91,7 +88,6 @@ export class AcademicService {
             });
         }
 
-        // Caso 2: asignar / cambiar
         const otra = await this.seccionRepo
             .createQueryBuilder('s')
             .leftJoin('grados', 'g', 'g.id = s.grado_id')
@@ -162,6 +158,7 @@ export class AcademicService {
 
         const alumnoIds = alumnos.map((a: any) => a.id);
         let libretas: any[] = [];
+
         if (alumnoIds.length) {
             libretas = await this.dataSource.query(
                 `SELECT
@@ -196,7 +193,7 @@ export class AcademicService {
 
         let padres: any[] = [];
         if (alumnoIds.length) {
-            const padresRaw = await this.dataSource.query(
+            padres = await this.dataSource.query(
                 `SELECT
                     p.id, p.nombre, p.apellido_paterno, p.apellido_materno,
                     p.relacion, p.email, p.telefono,
@@ -208,7 +205,6 @@ export class AcademicService {
                  ORDER BY p.apellido_paterno, p.nombre`,
                 [alumnoIds],
             );
-            padres = padresRaw;
         }
 
         return {
@@ -257,5 +253,69 @@ export class AcademicService {
 
         await this.periodoRepo.update({ id }, { activo: true });
         return this.periodoRepo.findOne({ where: { id } });
+    }
+
+    // ── MATRÍCULAS ────────────────────────────────────────────────
+    async findMatriculas(periodoId?: number, seccionId?: number) {
+        const params: any[] = [];
+        const conditions: string[] = [];
+
+        if (periodoId) {
+            params.push(periodoId);
+            conditions.push(`m.periodo_id = $${params.length}`);
+        }
+
+        if (seccionId) {
+            params.push(seccionId);
+            conditions.push(`m.seccion_id = $${params.length}`);
+        }
+
+        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        const rows = await this.dataSource.query(
+            `SELECT
+                m.id,
+                m.activo,
+                m.fecha_matricula,
+                m.periodo_id,
+                m.seccion_id,
+                -- Alumno
+                a.id               AS alumno_id,
+                a.nombre,
+                a.apellido_paterno,
+                a.apellido_materno,
+                a.codigo_estudiante,
+                -- Sección
+                s.nombre           AS seccion_nombre,
+                s.capacidad,
+                -- Grado
+                g.id               AS grado_id,
+                g.nombre           AS grado_nombre,
+                g.orden            AS grado_orden
+             FROM matriculas m
+             JOIN alumnos  a ON a.id = m.alumno_id
+             JOIN secciones s ON s.id = m.seccion_id
+             JOIN grados    g ON g.id = s.grado_id
+             ${where}
+             ORDER BY g.orden ASC, s.nombre ASC, a.apellido_paterno ASC, a.nombre ASC`,
+            params,
+        );
+
+        return rows.map((r: any) => ({
+            id: r.id,
+            activo: r.activo,
+            fecha_matricula: r.fecha_matricula,
+            periodo_id: r.periodo_id,
+            seccion_id: r.seccion_id,
+            alumno_id: r.alumno_id,
+            nombre: r.nombre,
+            apellido_paterno: r.apellido_paterno,
+            apellido_materno: r.apellido_materno ?? null,
+            codigo_estudiante: r.codigo_estudiante,
+            seccion_nombre: r.seccion_nombre,
+            grado_nombre: r.grado_nombre,
+            grado_id: r.grado_id,
+            grado_orden: r.grado_orden,
+        }));
     }
 }
