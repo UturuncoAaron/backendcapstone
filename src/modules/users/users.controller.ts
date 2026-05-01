@@ -126,12 +126,19 @@ export class UsersController {
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: ResetPasswordDto,
     ) {
-        return this.usersService.resetPassword(id, dto.password);
+        return this.usersService.resetPassword(id);
     }
 
     // ── Vincular padre ↔ alumno ──────────────────────────────────
     @Post('parent-child')
     linkPadreAlumno(@Body() dto: LinkPadreAlumnoDto) {
         return this.usersService.linkPadreAlumno(dto);
+    }
+    // src/modules/users/users.controller.ts
+
+    @Get('psicologos')
+    @Roles('admin')
+    findPsicologas() {
+        return this.usersService.findPsicologas();
     }
 }

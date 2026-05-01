@@ -1,10 +1,7 @@
 import {
     Entity, PrimaryGeneratedColumn, Column,
-    CreateDateColumn, UpdateDateColumn,
+    CreateDateColumn, UpdateDateColumn, Index,
 } from 'typeorm';
-
-export type Rol = 'alumno' | 'docente' | 'admin' | 'padre';
-export type TipoDocumento = 'dni' | 'ce' | 'pasaporte';
 
 @Entity('cuentas')
 export class Cuenta {
@@ -12,26 +9,35 @@ export class Cuenta {
     id: string;
 
     @Column({ name: 'tipo_documento', length: 15 })
-    tipo_documento: TipoDocumento;
+    tipo_documento: string;
 
     @Column({ name: 'numero_documento', length: 20 })
     numero_documento: string;
 
-    @Column({ name: 'password_hash' })
+    @Column({ name: 'password_hash', length: 255 })
     password_hash: string;
 
     @Column({ length: 20 })
-    rol: Rol;
+    rol: string;
+
+    // Código de acceso único por rol — EST-dni, DOC-dni, PAD-dni, ADM-dni, PSI-dni
+    @Column({ name: 'codigo_acceso', length: 30, unique: true, nullable: true })
+    @Index()
+    codigo_acceso: string;
+
+    // false = primer login, debe cambiar password
+    @Column({ name: 'password_changed', default: false })
+    password_changed: boolean;
 
     @Column({ default: true })
     activo: boolean;
 
-    @Column({ name: 'ultimo_acceso', type: 'timestamp', nullable: true })
-    ultimo_acceso: Date | null;
+    @Column({ name: 'ultimo_acceso', nullable: true })
+    ultimo_acceso: Date;
 
     @CreateDateColumn({ name: 'created_at' })
-    created_at: Date;
+    createdAt: Date;
 
     @UpdateDateColumn({ name: 'updated_at' })
-    updated_at: Date;
+    updatedAt: Date;
 }

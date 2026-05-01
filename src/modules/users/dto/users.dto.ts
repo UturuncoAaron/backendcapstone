@@ -148,3 +148,13 @@ export class ResetPasswordDto {
     @IsString() @MinLength(6)
     password: string;
 }
+export class CreatePsicologaDto {
+    tipo_documento: string;
+    numero_documento: string;
+    nombre: string;
+    apellido_paterno: string;
+    apellido_materno?: string;
+    especialidad?: string;
+    email?: string;
+    telefono?: string;
+}

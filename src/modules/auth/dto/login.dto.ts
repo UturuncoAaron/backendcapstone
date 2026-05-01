@@ -1,14 +1,21 @@
-import { IsString, IsNotEmpty, IsIn } from 'class-validator';
+import { IsString, IsNotEmpty, MinLength } from 'class-validator';
 
 export class LoginDto {
-    @IsIn(['dni', 'ce', 'pasaporte'])
-    tipo_documento: string;
-
     @IsString()
     @IsNotEmpty()
-    numero_documento: string;
+    codigo_acceso: string;
 
     @IsString()
-    @IsNotEmpty()
+    @MinLength(4)
     password: string;
+}
+
+export class ChangePasswordDto {
+    @IsString()
+    @MinLength(6)
+    current_password: string;
+
+    @IsString()
+    @MinLength(6)
+    new_password: string;
 }

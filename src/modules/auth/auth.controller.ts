@@ -1,18 +1,18 @@
 import {
-  Controller, Post, Get,
+  Controller, Post, Get, Patch,
   Body, UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import { AuthService } from './auth.service.js';
-import { LoginDto } from './dto/login.dto.js';
+import { LoginDto, ChangePasswordDto } from './dto/login.dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
-  /** Ruta pública — no requiere token */
+  // POST /api/auth/login
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)
@@ -20,10 +20,21 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  /** Ruta protegida — requiere token válido */
+  // GET /api/auth/profile
   @Get('profile')
   @UseGuards(JwtAuthGuard)
   getProfile(@CurrentUser() user: any) {
     return this.authService.getProfile(user.sub);
+  }
+
+  // PATCH /api/auth/change-password
+  @Patch('change-password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  changePassword(
+    @CurrentUser() user: any,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(user.sub, dto);
   }
 }

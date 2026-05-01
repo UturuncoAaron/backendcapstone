@@ -1,0 +1,533 @@
+{
+  "root_group": {
+    "name": "",
+    "path": "",
+    "id": "d41d8cd98f00b204e9800998ecf8427e",
+    "groups": [
+      {
+        "name": "01_login",
+        "path": "::01_login",
+        "id": "ba0e7ad4dd8ff6ecaf35603bb7e89ab2",
+        "groups": [],
+        "checks": [
+            {
+              "fails": 0,
+              "name": "login 200",
+              "path": "::01_login::login 200",
+              "id": "859b0cc653ab8656f3d9766b90b6c933",
+              "passes": 1194
+            },
+            {
+              "name": "tiene token",
+              "path": "::01_login::tiene token",
+              "id": "948a6fba43f636fea25e540dc97f0888",
+              "passes": 1194,
+              "fails": 0
+            }
+          ]
+      },
+      {
+        "checks": [
+          {
+            "name": "GET announcements 2xx",
+            "path": "::02_comunes::GET announcements 2xx",
+            "id": "678b216d3104f042d06c8495464becf2",
+            "passes": 1194,
+            "fails": 0
+          },
+          {
+            "name": "GET notifications 2xx",
+            "path": "::02_comunes::GET notifications 2xx",
+            "id": "dc6ac042941ede8b20e74ba9fa0a5d6d",
+            "passes": 1194,
+            "fails": 0
+          },
+          {
+            "path": "::02_comunes::GET notifications/unread-count 2xx",
+            "id": "97898a4ffb901cd257d254e2227cd071",
+            "passes": 1194,
+            "fails": 0,
+            "name": "GET notifications/unread-count 2xx"
+          },
+          {
+            "id": "fe986c4de2a1c9f2b25bdf5357c7425a",
+            "passes": 1194,
+            "fails": 0,
+            "name": "GET messaging/conversations 2xx",
+            "path": "::02_comunes::GET messaging/conversations 2xx"
+          }
+        ],
+        "name": "02_comunes",
+        "path": "::02_comunes",
+        "id": "ecb34f5d51233983e7edc1a003bee052",
+        "groups": []
+      },
+      {
+        "name": "03_alumno",
+        "path": "::03_alumno",
+        "id": "ec688a7710403d62e09820cf3591c8fa",
+        "groups": [],
+        "checks": [
+            {
+              "fails": 0,
+              "name": "GET courses 2xx",
+              "path": "::03_alumno::GET courses 2xx",
+              "id": "237f92768a751ab253a335adc7cb54d1",
+              "passes": 321
+            },
+            {
+              "name": "GET grades/my 2xx",
+              "path": "::03_alumno::GET grades/my 2xx",
+              "id": "f8bff32aa6971665b7bec20c7acda8c9",
+              "passes": 321,
+              "fails": 0
+            },
+            {
+              "name": "GET my-submissions 2xx",
+              "path": "::03_alumno::GET my-submissions 2xx",
+              "id": "4857ae1ed536929bfcae541971986b8a",
+              "passes": 321,
+              "fails": 0
+            },
+            {
+              "name": "GET libretas/me 2xx",
+              "path": "::03_alumno::GET libretas/me 2xx",
+              "id": "a29cc634da0cc20931227ae9a72813cd",
+              "passes": 321,
+              "fails": 0
+            },
+            {
+              "id": "167407784fe6dac05a20a5c596ecf688",
+              "passes": 321,
+              "fails": 0,
+              "name": "PATCH notifications/read-all 2xx",
+              "path": "::03_alumno::PATCH notifications/read-all 2xx"
+            }
+          ]
+      },
+      {
+        "groups": [],
+        "checks": [
+            {
+              "path": "::03_docente::GET courses 2xx",
+              "id": "148305b360dcfc9abcb6632c65ba2066",
+              "passes": 319,
+              "fails": 0,
+              "name": "GET courses 2xx"
+            },
+            {
+              "name": "GET academic/tutoria/me 2xx",
+              "path": "::03_docente::GET academic/tutoria/me 2xx",
+              "id": "bb9db112a0e8ddad85e2df3737bbbc7c",
+              "passes": 319,
+              "fails": 0
+            },
+            {
+              "name": "POST messaging/conversations/04ee033e-aff2-47 2xx",
+              "path": "::03_docente::POST messaging/conversations/04ee033e-aff2-47 2xx",
+              "id": "a2ab1be7969e9a6effd85535c9adb7f8",
+              "passes": 319,
+              "fails": 0
+            }
+          ],
+        "name": "03_docente",
+        "path": "::03_docente",
+        "id": "309f33a32aa183223254de04e118656e"
+      },
+      {
+        "id": "e4c2c94b50ddd6931310ccc688b2ff54",
+        "groups": [],
+        "checks": [
+            {
+              "name": "GET admin/users/stats 2xx",
+              "path": "::03_admin::GET admin/users/stats 2xx",
+              "id": "d191984aa405641c6e9a7b3235300464",
+              "passes": 284,
+              "fails": 0
+            },
+            {
+              "name": "GET admin/users/alumnos 2xx",
+              "path": "::03_admin::GET admin/users/alumnos 2xx",
+              "id": "4718f63d110d3c139bf570e7174d621b",
+              "passes": 284,
+              "fails": 0
+            },
+            {
+              "path": "::03_admin::GET admin/users/docentes 2xx",
+              "id": "2de7aac49390394e948ce595eaa523a7",
+              "passes": 284,
+              "fails": 0,
+              "name": "GET admin/users/docentes 2xx"
+            },
+            {
+              "name": "GET academic/periodos 2xx",
+              "path": "::03_admin::GET academic/periodos 2xx",
+              "id": "0537b8aa8e6f63f01a81c59449d117b1",
+              "passes": 284,
+              "fails": 0
+            },
+            {
+              "path": "::03_admin::GET academic/secciones 2xx",
+              "id": "3f046960f99dd7233f1a45fde8bdcc1b",
+              "passes": 284,
+              "fails": 0,
+              "name": "GET academic/secciones 2xx"
+            }
+          ],
+        "name": "03_admin",
+        "path": "::03_admin"
+      },
+      {
+        "path": "::03_padre",
+        "id": "6503babc8ff4052f87ff390d3aa30693",
+        "groups": [],
+        "checks": [
+            {
+              "path": "::03_padre::GET parent/children 2xx",
+              "id": "ae15d7eaf70d15d477d7e1ba70965c38",
+              "passes": 270,
+              "fails": 0,
+              "name": "GET parent/children 2xx"
+            },
+            {
+              "passes": 270,
+              "fails": 0,
+              "name": "GET psychology/appointments/parent 2xx",
+              "path": "::03_padre::GET psychology/appointments/parent 2xx",
+              "id": "1a0d990ce81900c9d0b24fdd2782e718"
+            },
+            {
+              "name": "POST messaging/conversations/04ee033e-aff2-47 2xx",
+              "path": "::03_padre::POST messaging/conversations/04ee033e-aff2-47 2xx",
+              "id": "e2e2991d92d454bd9c242694f248edc8",
+              "passes": 270,
+              "fails": 0
+            }
+          ],
+        "name": "03_padre"
+      }
+    ],
+    "checks": []
+  },
+  "options": {
+    "summaryTrendStats": [
+      "avg",
+      "min",
+      "med",
+      "max",
+      "p(90)",
+      "p(95)"
+    ],
+    "summaryTimeUnit": "",
+    "noColor": false
+  },
+  "state": {
+    "isStdErrTTY": true,
+    "testRunDurationMs": 175268.1677,
+    "isStdOutTTY": true
+  },
+  "metrics": {
+    "data_received": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "count": 6393517,
+        "rate": 36478.483708140004
+      }
+    },
+    "http_req_duration": {
+      "thresholds": {
+        "p(95)<800": {
+          "ok": true
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 308.08264500000035,
+        "avg": 92.30394193428629,
+        "min": 3.8462,
+        "med": 50.82595,
+        "max": 1076.8917,
+        "p(90)": 224.19253
+      }
+    },
+    "http_req_connecting": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 0.005446046036755152,
+        "min": 0,
+        "med": 0,
+        "max": 5.5332,
+        "p(90)": 0,
+        "p(95)": 0
+      }
+    },
+    "vus": {
+      "type": "gauge",
+      "contains": "default",
+      "values": {
+        "value": 1,
+        "min": 1,
+        "max": 50
+      }
+    },
+    "http_req_blocked": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 0,
+        "avg": 0.034219658436977905,
+        "min": 0,
+        "med": 0,
+        "max": 186.2499,
+        "p(90)": 0
+      }
+    },
+    "http_req_tls_handshaking": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 0,
+        "med": 0,
+        "max": 0,
+        "p(90)": 0,
+        "p(95)": 0,
+        "avg": 0
+      }
+    },
+    "checks": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 1,
+        "passes": 11956,
+        "fails": 0
+      }
+    },
+    "http_req_duration{type:post}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 1076.8917,
+        "p(90)": 267.35576,
+        "p(95)": 416.59834999999987,
+        "avg": 104.79466131868135,
+        "min": 5.1199,
+        "med": 43.54675
+      },
+      "thresholds": {
+        "p(95)<1000": {
+          "ok": true
+        }
+      }
+    },
+    "http_reqs": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 10774,
+        "rate": 61.4715161422892
+      }
+    },
+    "http_req_duration{type:get}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 3.8462,
+        "med": 38.105000000000004,
+        "max": 994.0296,
+        "p(90)": 195.8582500000001,
+        "p(95)": 262.956635,
+        "avg": 77.62879603834608
+      },
+      "thresholds": {
+        "p(95)<500": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration{type:login}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 189.59241859296512,
+        "min": 73.7746,
+        "med": 148.7721,
+        "max": 956.197,
+        "p(90)": 342.54012000000006,
+        "p(95)": 422.5057249999996
+      },
+      "thresholds": {
+        "p(99)<2000": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_sending": {
+      "values": {
+        "max": 71.0784,
+        "p(90)": 0,
+        "p(95)": 0,
+        "avg": 0.03998758121403377,
+        "min": 0,
+        "med": 0
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "data_sent": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "count": 4443088,
+        "rate": 25350.227929609377
+      }
+    },
+    "iterations": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "rate": 6.81241788322752,
+        "count": 1194
+      }
+    },
+    "login_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 957,
+        "p(90)": 344.70000000000005,
+        "p(95)": 428.4999999999991,
+        "avg": 190.41122278056952,
+        "min": 73,
+        "med": 149
+      }
+    },
+    "group_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 656.534,
+        "max": 3373.5674,
+        "p(90)": 1265.90725,
+        "p(95)": 1502.74444,
+        "avg": 684.2008584868781,
+        "min": 73.7725
+      }
+    },
+    "get_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 264,
+        "avg": 77.85423885423886,
+        "min": 4,
+        "med": 38,
+        "max": 994,
+        "p(90)": 197
+      }
+    },
+    "iteration_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 5554.61891,
+        "p(95)": 6127.525685,
+        "avg": 4338.972034422109,
+        "min": 2484.3795,
+        "med": 4255.505499999999,
+        "max": 8713.1415
+      }
+    },
+    "http_req_duration{expected_response:true}": {
+      "contains": "time",
+      "values": {
+        "avg": 92.3238878272981,
+        "min": 3.8462,
+        "med": 50.840900000000005,
+        "max": 1076.8917,
+        "p(90)": 224.20595000000006,
+        "p(95)": 308.2627849999993
+      },
+      "type": "trend"
+    },
+    "http_req_receiving": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 0,
+        "max": 48.1617,
+        "p(90)": 0.93267,
+        "p(95)": 1.003035,
+        "avg": 0.3552489418971598,
+        "min": 0
+      }
+    },
+    "error_rate": {
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "passes": 0,
+        "fails": 10762
+      },
+      "thresholds": {
+        "rate<0.10": {
+          "ok": true
+        }
+      },
+      "type": "rate"
+    },
+    "vus_max": {
+      "values": {
+        "min": 50,
+        "max": 50,
+        "value": 50
+      },
+      "type": "gauge",
+      "contains": "default"
+    },
+    "http_req_failed": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "passes": 4,
+        "fails": 10770,
+        "rate": 0.00037126415444588826
+      }
+    },
+    "post_duration": {
+      "values": {
+        "p(95)": 417.1999999999998,
+        "avg": 104.96593406593406,
+        "min": 5,
+        "med": 44,
+        "max": 1099,
+        "p(90)": 267
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "http_req_waiting": {
+      "contains": "time",
+      "values": {
+        "max": 1076.8917,
+        "p(90)": 223.75994,
+        "p(95)": 307.6726300000001,
+        "avg": 91.90870541117503,
+        "min": 3.8462,
+        "med": 50.47395
+      },
+      "type": "trend"
+    }
+  },
+  "setup_data": {
+    "adminToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiMGRmMTUyMi1jNTI4LTQ0NTUtYTI0Yi03ZjE3N2ExZDZjYzMiLCJyb2wiOiJhZG1pbiIsInRpcG9fZG9jdW1lbnRvIjoiZG5pIiwibnVtZXJvX2RvY3VtZW50byI6IjAwMDAwMDAxIiwiaWF0IjoxNzc3NjUwNDQyLCJleHAiOjE3Nzc2NzkyNDJ9.gsTCyYk5VwhyxASVsOg5iZTJlgOP5KL4uawHc1LdZIg",
+    "conversacionId": "04ee033e-aff2-477f-a2ec-cad57dde5c90",
+    "cursoId": "d2ca78c0-ebbc-494f-afe7-d48e910f8019",
+    "docenteToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MWU5NjI2OC1mM2RmLTQzNTYtYjU3Yi01YmNlODJhNzVjMTUiLCJyb2wiOiJkb2NlbnRlIiwidGlwb19kb2N1bWVudG8iOiJkbmkiLCJudW1lcm9fZG9jdW1lbnRvIjoiMTExMTExMTEiLCJpYXQiOjE3Nzc2NTA0NDIsImV4cCI6MTc3NzY3OTI0Mn0.uiTJ0zlcGudTNY6oNU5dMl3eOFgDxFz3wPqDRWTwzyQ",
+    "seccionId": 1,
+    "tareaId": "2c88f9fb-e4e4-4013-84b8-495f3de3ae8d"
+  }
+}
