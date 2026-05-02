@@ -34,6 +34,9 @@ export class Padre {
     @Column({ nullable: true, length: 20 })
     telefono: string | null;
 
+    @Column({ name: 'foto_storage_key', type: 'text', nullable: true })  // ← AGREGAR
+    foto_storage_key: string | null;
+
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;
 

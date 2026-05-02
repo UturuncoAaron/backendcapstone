@@ -11,6 +11,7 @@ import { Alumno } from './entities/alumno.entity.js';
 import { Docente } from './entities/docente.entity.js';
 import { Padre } from './entities/padre.entity.js';
 import { Admin } from './entities/admin.entity.js';
+import { StorageService } from '../storage/storage.service.js';
 
 import {
     CreateAlumnoDto,
@@ -30,6 +31,7 @@ export class UsersService {
         @InjectRepository(Padre) private padreRepo: Repository<Padre>,
         @InjectRepository(Admin) private adminRepo: Repository<Admin>,
         private readonly dataSource: DataSource,
+        private readonly storageService: StorageService,
     ) { }
 
     // ════════════════════════════════════════════════════════════
@@ -662,4 +664,82 @@ export class UsersService {
         `);
     }
 
+    // ════════════════════════════════════════════════════════════
+    // PERFIL PROPIO (cualquier usuario logueado)
+    // ════════════════════════════════════════════════════════════
+
+    async getProfileById(id: string, rol: string) {
+        switch (rol) {
+            case 'alumno': return this.alumnoRepo.findOne({ where: { id } });
+            case 'docente': return this.docenteRepo.findOne({ where: { id } });
+            case 'padre': return this.padreRepo.findOne({ where: { id } });
+            case 'admin': return this.adminRepo.findOne({ where: { id } });
+            default: return this.cuentaRepo.findOne({ where: { id } });
+        }
+    }
+
+    async updateProfile(id: string, rol: string, dto: any) {
+        const allowed = ['nombre', 'apellido_paterno', 'apellido_materno', 'telefono'];
+        const data: any = {};
+        allowed.forEach(k => { if (dto[k] !== undefined) data[k] = dto[k]; });
+
+        switch (rol) {
+            case 'alumno': await this.alumnoRepo.update(id, data); break;
+            case 'docente': await this.docenteRepo.update(id, data); break;
+            case 'padre': await this.padreRepo.update(id, data); break;
+            case 'admin': await this.adminRepo.update(id, data); break;
+        }
+        return { message: 'Perfil actualizado correctamente' };
+    }
+
+    async updateEmail(id: string, rol: string, dto: { email: string; password: string }) {
+        const cuenta = await this.cuentaRepo.findOne({ where: { id } });
+        if (!cuenta) throw new NotFoundException('Cuenta no encontrada');
+
+        const bcrypt = await import('bcrypt');
+        const ok = await bcrypt.compare(dto.password, cuenta.password_hash);
+        if (!ok) throw new BadRequestException('Contraseña incorrecta');
+
+        switch (rol) {
+            case 'alumno': await this.alumnoRepo.update(id, { email: dto.email }); break;
+            case 'docente': await this.docenteRepo.update(id, { email: dto.email }); break;
+            case 'padre': await this.padreRepo.update(id, { email: dto.email }); break;
+            case 'admin': await this.adminRepo.update(id, { email: dto.email }); break;
+        }
+        return { message: 'Correo actualizado correctamente' };
+    }
+
+    async updatePasswordProfile(id: string, dto: { current_password: string; new_password: string }) {
+        const cuenta = await this.cuentaRepo.findOne({ where: { id } });
+        if (!cuenta) throw new NotFoundException('Cuenta no encontrada');
+
+        const bcrypt = await import('bcrypt');
+        const ok = await bcrypt.compare(dto.current_password, cuenta.password_hash);
+        if (!ok) throw new BadRequestException('La contraseña actual es incorrecta');
+
+        const isSame = await bcrypt.compare(dto.new_password, cuenta.password_hash);
+        if (isSame) throw new BadRequestException('La nueva contraseña no puede ser igual a la actual');
+
+        const newHash = await bcrypt.hash(dto.new_password, 10);
+        await this.cuentaRepo.update(id, { password_hash: newHash, password_changed: true });
+        return { message: 'Contraseña actualizada correctamente' };
+    }
+
+    async updateFoto(id: string, rol: string, file: Express.Multer.File) {
+        const key = await this.storageService.uploadFile(
+            { buffer: file.buffer, originalname: file.originalname, mimetype: file.mimetype },
+            'fotos-perfil',
+        );
+
+        const fotoUrl = `${process.env.CLOUDFLARE_R2_PUBLIC_DOMAIN}${key}`;
+
+        switch (rol) {
+            case 'alumno': await this.alumnoRepo.update(id, { foto_storage_key: key }); break;
+            case 'docente': await this.docenteRepo.update(id, { foto_storage_key: key }); break;
+            case 'padre': await this.padreRepo.update(id, { foto_storage_key: key } as any); break;
+            case 'admin': await this.adminRepo.update(id, { foto_storage_key: key } as any); break;
+        }
+
+        return { message: 'Foto actualizada', foto_url: fotoUrl };
+    }
 }

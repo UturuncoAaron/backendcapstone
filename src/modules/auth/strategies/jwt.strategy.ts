@@ -38,7 +38,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
         // Lo que queda disponible en @CurrentUser() y request.user
         return {
-            sub: cuenta.id,
+            id: cuenta.id,
             rol: cuenta.rol,
             tipo_documento: cuenta.tipo_documento,
             numero_documento: cuenta.numero_documento,
