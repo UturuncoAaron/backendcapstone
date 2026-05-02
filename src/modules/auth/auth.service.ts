@@ -20,11 +20,9 @@ export class AuthService {
         );
         if (!cuenta) throw new UnauthorizedException('Código de acceso o contraseña incorrectos');
 
-        // 2. Verificar password — bcrypt rounds=10
         const passwordOk = await bcrypt.compare(dto.password, cuenta.password_hash);
         if (!passwordOk) throw new UnauthorizedException('Código de acceso o contraseña incorrectos');
 
-        // 3. Perfil + JWT en paralelo
         const payload = {
             sub: cuenta.id,
             rol: cuenta.rol,
@@ -37,7 +35,6 @@ export class AuthService {
             Promise.resolve(this.jwtService.sign(payload)),
         ]);
 
-        // 4. Actualizar último acceso en background
         setImmediate(() => {
             this.usersService.updateUltimoAcceso(cuenta.id).catch(() => null);
         });
@@ -51,19 +48,14 @@ export class AuthService {
 
     async changePassword(userId: string, dto: ChangePasswordDto) {
         const cuenta = await this.usersService.findCuentaById(userId);
-        if (!cuenta || !cuenta.activo) {
-            throw new UnauthorizedException('Cuenta no encontrada');
-        }
+        if (!cuenta || !cuenta.activo) throw new UnauthorizedException('Cuenta no encontrada');
 
-        // Verificar contraseña actual
         const passwordOk = await bcrypt.compare(dto.current_password, cuenta.password_hash);
         if (!passwordOk) throw new BadRequestException('La contraseña actual es incorrecta');
 
-        // No permitir que la nueva sea igual a la actual
         const isSame = await bcrypt.compare(dto.new_password, cuenta.password_hash);
         if (isSame) throw new BadRequestException('La nueva contraseña no puede ser igual a la actual');
 
-        // Actualizar password y marcar como cambiada
         const newHash = await bcrypt.hash(dto.new_password, 10);
         await this.usersService.updatePassword(userId, newHash);
 
@@ -72,9 +64,8 @@ export class AuthService {
 
     async getProfile(userId: string) {
         const cuenta = await this.usersService.findCuentaById(userId);
-        if (!cuenta || !cuenta.activo) {
-            throw new UnauthorizedException('Usuario no encontrado o inactivo');
-        }
+        if (!cuenta || !cuenta.activo) throw new UnauthorizedException('Usuario no encontrado o inactivo');
+
         const perfil = await this.getPerfil(cuenta.id, cuenta.rol);
         return {
             ...perfil,
@@ -83,14 +74,10 @@ export class AuthService {
         };
     }
 
+    // ── Usa getProfileById para que foto_storage_key se resuelva
     private async getPerfil(id: string, rol: string) {
-        switch (rol) {
-            case 'alumno': return this.usersService.findAlumnoById(id);
-            case 'docente': return this.usersService.findDocenteById(id);
-            case 'padre': return this.usersService.findPadreById(id);
-            case 'admin': return this.usersService.findAdminById(id);
-            case 'psicologa': return this.usersService.findPsicologaById(id);
-            default: throw new UnauthorizedException('Rol no reconocido');
-        }
+        const perfil = await this.usersService.getProfileById(id, rol);
+        if (!perfil) throw new UnauthorizedException('Rol no reconocido');
+        return perfil;
     }
 }

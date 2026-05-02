@@ -18,14 +18,14 @@ export class AnnouncementsController {
 
     // GET /api/announcements — todos los roles ven comunicados
     @Get()
-    @Roles('alumno', 'docente', 'admin', 'padre')
+    @Roles('alumno', 'docente', 'admin', 'padre','psicologa')
     findAll(@Query() query: QueryAnnouncementsDto) {
         return this.announcementsService.findAll(query);
     }
 
     // GET /api/announcements/:id
     @Get(':id')
-    @Roles('alumno', 'docente', 'admin', 'padre')
+    @Roles('alumno', 'docente', 'admin', 'padre','psicologa')
     findOne(@Param('id', ParseUUIDPipe) id: string) {
         return this.announcementsService.findOne(id);
     }

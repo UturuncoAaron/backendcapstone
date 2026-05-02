@@ -2,7 +2,7 @@ import {
     Entity, PrimaryGeneratedColumn, Column,
     ManyToOne, JoinColumn, CreateDateColumn,
 } from 'typeorm';
-import { Psychologist } from './psychologist.entity.js';
+import { Psicologa } from '../../users/entities/psicologa.entity.js';
 
 @Entity('psicologa_bloqueos')
 export class PsychologistBlock {
@@ -12,9 +12,9 @@ export class PsychologistBlock {
     @Column({ name: 'psicologa_id' })
     psychologistId: string;
 
-    @ManyToOne(() => Psychologist, { onDelete: 'CASCADE' })
+    @ManyToOne(() => Psicologa, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'psicologa_id' })
-    psychologist: Psychologist;
+    psychologist: Psicologa;
 
     @Column({ name: 'fecha_inicio', type: 'timestamp' })
     startDate: Date;

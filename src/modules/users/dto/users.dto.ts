@@ -11,12 +11,6 @@ export class CreateAlumnoDto {
     @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
 
-    /**
-     * Opcional. La contraseña inicial se genera siempre a partir del
-     * `numero_documento` y `password_changed` queda en `false` hasta el
-     * primer cambio del usuario. Se mantiene en el DTO solo para
-     * compatibilidad con clientes legacy.
-     */
     @IsOptional() @IsString() @MinLength(6)
     password?: string;
 
@@ -32,8 +26,8 @@ export class CreateAlumnoDto {
     @IsOptional() @IsString() @MaxLength(100)
     apellido_materno?: string;
 
-    @IsOptional() @IsDateString()
-    fecha_nacimiento?: string;
+    @IsDateString()
+    fecha_nacimiento: string;
 
     @IsOptional() @IsEmail()
     email?: string;

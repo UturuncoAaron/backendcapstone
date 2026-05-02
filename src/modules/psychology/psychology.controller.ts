@@ -13,27 +13,29 @@ import {
     CreateAvailabilityDto, CreateBlockDto,
 } from './dto/psychology.dto.js';
 
+interface JwtUser { id: string; rol: string; }
+
 @Controller('psychology')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class PsychologyController {
 
     constructor(private readonly service: PsychologyService) { }
 
-    // ── Records (psychologist only) ───────────────────────────────────────────
+    // ── Fichas psicológicas (solo psicóloga asignada) ─────────────────────────
 
     @Post('records')
     @Roles('psicologa')
-    createRecord(@Body() dto: CreateRecordDto, @CurrentUser() user: any) {
-        return this.service.createRecord(user.sub, dto);
+    createRecord(@Body() dto: CreateRecordDto, @CurrentUser() user: JwtUser) {
+        return this.service.createRecord(user.id, dto);
     }
 
     @Get('records/student/:studentId')
     @Roles('psicologa')
     getRecords(
         @Param('studentId', ParseUUIDPipe) studentId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: JwtUser,
     ) {
-        return this.service.getRecordsByStudent(user.sub, studentId);
+        return this.service.getRecordsByStudent(user.id, studentId);
     }
 
     @Patch('records/:id')
@@ -41,44 +43,44 @@ export class PsychologyController {
     updateRecord(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: UpdateRecordDto,
-        @CurrentUser() user: any,
+        @CurrentUser() user: JwtUser,
     ) {
-        return this.service.updateRecord(user.sub, id, dto);
+        return this.service.updateRecord(user.id, id, dto);
     }
 
     @Delete('records/:id')
     @Roles('psicologa')
     deleteRecord(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: JwtUser,
     ) {
-        return this.service.deleteRecord(user.sub, id);
+        return this.service.deleteRecord(user.id, id);
     }
 
-    // ── Appointments ──────────────────────────────────────────────────────────
+    // ── Citas ─────────────────────────────────────────────────────────────────
 
     @Post('appointments')
     @Roles('psicologa', 'docente')
-    createAppointment(@Body() dto: CreateAppointmentDto, @CurrentUser() user: any) {
-        return this.service.createAppointment(user.sub, dto);
+    createAppointment(@Body() dto: CreateAppointmentDto, @CurrentUser() user: JwtUser) {
+        return this.service.createAppointment(user.id, dto);
     }
 
     @Get('appointments/mine')
     @Roles('psicologa', 'docente')
-    getMyAppointments(@CurrentUser() user: any) {
-        return this.service.getMyAppointments(user.sub);
+    getMyAppointments(@CurrentUser() user: JwtUser) {
+        return this.service.getMyAppointments(user.id);
     }
 
     @Get('appointments/parent')
     @Roles('padre')
-    getParentAppointments(@CurrentUser() user: any) {
-        return this.service.getAppointmentsByParent(user.sub);
+    getParentAppointments(@CurrentUser() user: JwtUser) {
+        return this.service.getAppointmentsByParent(user.id);
     }
 
     @Get('appointments/student')
     @Roles('alumno')
-    getStudentAppointments(@CurrentUser() user: any) {
-        return this.service.getAppointmentsByStudent(user.sub);
+    getStudentAppointments(@CurrentUser() user: JwtUser) {
+        return this.service.getAppointmentsByStudent(user.id);
     }
 
     @Patch('appointments/:id')
@@ -86,17 +88,17 @@ export class PsychologyController {
     updateAppointment(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: UpdateAppointmentDto,
-        @CurrentUser() user: any,
+        @CurrentUser() user: JwtUser,
     ) {
-        return this.service.updateAppointment(id, user.sub, dto);
+        return this.service.updateAppointment(id, user.id, dto);
     }
 
-    // ── Availability ──────────────────────────────────────────────────────────
+    // ── Disponibilidad ────────────────────────────────────────────────────────
 
     @Post('availability')
     @Roles('psicologa')
-    setAvailability(@Body() dto: CreateAvailabilityDto, @CurrentUser() user: any) {
-        return this.service.setAvailability(user.sub, dto);
+    setAvailability(@Body() dto: CreateAvailabilityDto, @CurrentUser() user: JwtUser) {
+        return this.service.setAvailability(user.id, dto);
     }
 
     @Get('availability/:psychologistId')
@@ -109,35 +111,35 @@ export class PsychologyController {
     @Roles('psicologa')
     removeAvailability(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: JwtUser,
     ) {
-        return this.service.removeAvailability(user.sub, id);
+        return this.service.removeAvailability(user.id, id);
     }
 
-    // ── Blocks ────────────────────────────────────────────────────────────────
+    // ── Bloqueos ──────────────────────────────────────────────────────────────
 
     @Post('blocks')
     @Roles('psicologa')
-    createBlock(@Body() dto: CreateBlockDto, @CurrentUser() user: any) {
-        return this.service.createBlock(user.sub, dto);
+    createBlock(@Body() dto: CreateBlockDto, @CurrentUser() user: JwtUser) {
+        return this.service.createBlock(user.id, dto);
     }
 
     @Get('blocks')
     @Roles('psicologa')
-    getBlocks(@CurrentUser() user: any) {
-        return this.service.getBlocks(user.sub);
+    getBlocks(@CurrentUser() user: JwtUser) {
+        return this.service.getBlocks(user.id);
     }
 
     @Delete('blocks/:id')
     @Roles('psicologa')
     removeBlock(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: JwtUser,
     ) {
-        return this.service.removeBlock(user.sub, id);
+        return this.service.removeBlock(user.id, id);
     }
 
-    // ── Available slots (parent books here) ──────────────────────────────────
+    // ── Slots disponibles (el padre agenda aquí) ──────────────────────────────
 
     @Get('slots/:psychologistId')
     @Roles('padre', 'psicologa', 'admin')
@@ -153,7 +155,7 @@ export class PsychologyController {
         );
     }
 
-    // ── Assignments (admin manages) ───────────────────────────────────────────
+    // ── Asignaciones (admin gestiona) ─────────────────────────────────────────
 
     @Post('assignments/:psychologistId/:studentId')
     @Roles('admin')
@@ -173,12 +175,14 @@ export class PsychologyController {
         return this.service.unassignStudent(psychologistId, studentId);
     }
 
+    // Mis alumnos asignados (vista de la psicóloga)
     @Get('my-students')
     @Roles('psicologa')
-    getMyStudents(@CurrentUser() user: any) {
-        return this.service.getMyStudents(user.sub);
+    getMyStudents(@CurrentUser() user: JwtUser) {
+        return this.service.getStudentsOfPsychologist(user.id);
     }
 
+    // Alumnos de una psicóloga específica (vista del admin)
     @Get('assignments/:psychologistId/students')
     @Roles('admin')
     getStudentsOfPsychologist(
@@ -187,14 +191,14 @@ export class PsychologyController {
         return this.service.getStudentsOfPsychologist(psychologistId);
     }
 
-    // ── Padres del alumno asignado (para programar citas) ─────────────────────
+    // ── Padres del alumno asignado (para agendar citas) ───────────────────────
 
     @Get('students/:studentId/parents')
     @Roles('psicologa')
     getStudentParents(
         @Param('studentId', ParseUUIDPipe) studentId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: JwtUser,
     ) {
-        return this.service.getStudentParents(user.sub, studentId);
+        return this.service.getStudentParents(user.id, studentId);
     }
 }

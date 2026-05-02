@@ -3,7 +3,7 @@ import {
     ManyToOne, JoinColumn,
     CreateDateColumn, UpdateDateColumn,
 } from 'typeorm';
-import { Psychologist } from './psychologist.entity.js';
+import { Psicologa } from '../../users/entities/psicologa.entity.js';
 import { Alumno } from '../../users/entities/alumno.entity.js';
 
 @Entity('fichas_psicologia')
@@ -14,9 +14,9 @@ export class PsychologyRecord {
     @Column({ name: 'psicologa_id' })
     psychologistId: string;
 
-    @ManyToOne(() => Psychologist, { onDelete: 'RESTRICT' })
+    @ManyToOne(() => Psicologa, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'psicologa_id' })
-    psychologist: Psychologist;
+    psychologist: Psicologa;
 
     @Column({ name: 'alumno_id' })
     studentId: string;

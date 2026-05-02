@@ -1,7 +1,7 @@
 import {
-    Controller, Get, Post, Patch, Delete,
-    Body, Param, Query, ParseUUIDPipe, HttpCode, HttpStatus,
-    UseGuards,
+    Controller, Get, Post, Put, Patch, Delete,
+    Body, Param, Query, ParseUUIDPipe,
+    HttpCode, HttpStatus, UseGuards, NotFoundException,
 } from '@nestjs/common';
 import { UsersService } from './users.service.js';
 import {
@@ -13,6 +13,7 @@ import {
     LinkPadreAlumnoDto,
     ResetPasswordDto,
 } from './dto/users.dto.js';
+import { UpdateFullDto } from './dto/profile.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
@@ -23,13 +24,13 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
-    // ── Stats ────────────────────────────────────────────────────
+    // ── Stats ────────────────────────────────────────────────────────────
     @Get('stats')
     getStats() {
         return this.usersService.getStats();
     }
 
-    // ── Listar ───────────────────────────────────────────────────
+    // ── Listar ───────────────────────────────────────────────────────────
     @Get('admins')
     findAdmins() {
         return this.usersService.findAdmins();
@@ -50,7 +51,13 @@ export class UsersController {
         return this.usersService.findPadres();
     }
 
-    // ── Buscar (autocomplete) ────────────────────────────────────
+    @Get('psicologos')
+    findPsicologas() {
+        return this.usersService.findPsicologas();
+    }
+
+    // ── Buscar (autocomplete) ─────────────────────────────────────────────
+    // IMPORTANTE: estas rutas deben estar ANTES de /:id para evitar conflictos
     @Get('alumnos/search')
     searchAlumnos(@Query('q') q: string) {
         return this.usersService.searchAlumnos(q);
@@ -66,7 +73,7 @@ export class UsersController {
         return this.usersService.searchDocentes(q);
     }
 
-    // ── Obtener uno ──────────────────────────────────────────────
+    // ── Obtener uno por id ────────────────────────────────────────────────
     @Get('alumnos/:id')
     findAlumno(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findAlumnoById(id);
@@ -87,7 +94,12 @@ export class UsersController {
         return this.usersService.findAdminById(id);
     }
 
-    // ── Crear por rol ────────────────────────────────────────────
+    @Get('psicologos/:id')
+    findPsicologa(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.findPsicologaById(id);
+    }
+
+    // ── Crear por rol ─────────────────────────────────────────────────────
     @Post('alumnos')
     createAlumno(@Body() dto: CreateAlumnoDto) {
         return this.usersService.createAlumno(dto);
@@ -108,7 +120,24 @@ export class UsersController {
         return this.usersService.createAdmin(dto);
     }
 
-    // ── Desactivar ───────────────────────────────────────────────
+    @Post('psicologos')
+    createPsicologa(@Body() dto: CreatePsicologaDto) {
+        return this.usersService.createPsicologa(dto);
+    }
+
+    // ── PUT unificado ─────────────────────────────────────────────────────
+
+    @Put(':id')
+    async updateUser(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: UpdateFullDto,
+    ) {
+        const cuenta = await this.usersService.findCuentaById(id);
+        if (!cuenta) throw new NotFoundException(`Usuario ${id} no encontrado`);
+        return this.usersService.updateFull(id, cuenta.rol, dto, false);
+    }
+
+    // ── Desactivar / Reactivar ────────────────────────────────────────────
     @Delete(':id')
     @HttpCode(HttpStatus.OK)
     deactivate(@Param('id', ParseUUIDPipe) id: string) {
@@ -121,37 +150,18 @@ export class UsersController {
         return this.usersService.reactivate(id);
     }
 
-    // ── Reset password ───────────────────────────────────────────
+    // ── Reset password ────────────────────────────────────────────────────
     @Patch(':id/reset-password')
     resetPassword(
         @Param('id', ParseUUIDPipe) id: string,
-        @Body() dto: ResetPasswordDto,
+        @Body() _dto: ResetPasswordDto,
     ) {
         return this.usersService.resetPassword(id);
     }
 
-    // ── Vincular padre ↔ alumno ──────────────────────────────────
+    // ── Vincular padre ↔ alumno ───────────────────────────────────────────
     @Post('parent-child')
     linkPadreAlumno(@Body() dto: LinkPadreAlumnoDto) {
         return this.usersService.linkPadreAlumno(dto);
-    }
-    // src/modules/users/users.controller.ts
-
-    @Get('psicologos')
-    @Roles('admin')
-    findPsicologas() {
-        return this.usersService.findPsicologas();
-    }
-
-    @Get('psicologos/:id')
-    @Roles('admin')
-    findPsicologa(@Param('id', ParseUUIDPipe) id: string) {
-        return this.usersService.findPsicologaById(id);
-    }
-
-    @Post('psicologos')
-    @Roles('admin')
-    createPsicologa(@Body() dto: CreatePsicologaDto) {
-        return this.usersService.createPsicologa(dto);
     }
 }

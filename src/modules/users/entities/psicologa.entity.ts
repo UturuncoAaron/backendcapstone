@@ -1,27 +1,24 @@
-import {
-    Entity, PrimaryColumn, Column,
-    OneToOne, JoinColumn,
-    CreateDateColumn, UpdateDateColumn,
-} from 'typeorm';
-import { Cuenta } from '../../users/entities/cuenta.entity.js';
+// users/entities/psicologa.entity.ts
+import { Entity, PrimaryColumn, Column, OneToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Cuenta } from './cuenta.entity.js';
 
 @Entity('psicologas')
-export class Psychologist {
+export class Psicologa {
     @PrimaryColumn({ type: 'uuid' })
     id: string;
 
     @OneToOne(() => Cuenta, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'id' })
-    account: Cuenta;
+    cuenta: Cuenta;
 
     @Column({ length: 100 })
     nombre: string;
 
     @Column({ name: 'apellido_paterno', length: 100 })
-    apellidoPaterno: string;
+    apellido_paterno: string;
 
     @Column({ name: 'apellido_materno', length: 100, nullable: true })
-    apellidoMaterno: string;
+    apellido_materno: string;
 
     @Column({ length: 150, nullable: true })
     especialidad: string;
@@ -30,7 +27,7 @@ export class Psychologist {
     colegiatura: string;
 
     @Column({ name: 'foto_storage_key', nullable: true })
-    fotoStorageKey: string;
+    foto_storage_key: string;
 
     @Column({ length: 255, unique: true, nullable: true })
     email: string;
@@ -39,8 +36,8 @@ export class Psychologist {
     telefono: string;
 
     @CreateDateColumn({ name: 'created_at' })
-    createdAt: Date;
+    created_at: Date;
 
     @UpdateDateColumn({ name: 'updated_at' })
-    updatedAt: Date;
+    updated_at: Date;
 }

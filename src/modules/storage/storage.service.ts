@@ -42,62 +42,52 @@ export class StorageService {
           ContentType: file.mimetype,
         }),
       );
-      this.logger.log(`Archivo subido: ${key}`);
+      this.logger.verbose(`Subido: ${key}`);
       return key;
     } catch (error) {
-      this.logger.error(`Error subiendo archivo: ${(error as Error).message}`);
+      this.logger.error(`Error al subir archivo: ${(error as Error).message}`);
       throw new InternalServerErrorException('Error al subir el archivo');
     }
   }
 
   async getSignedUrl(key: string, expiresIn = 3600): Promise<string> {
     try {
-      const command = new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-      });
+      const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
       return await getSignedUrl(this.s3, command, { expiresIn });
     } catch (error) {
-      this.logger.error(`Error generando URL firmada: ${(error as Error).message}`);
+      this.logger.error(`Error al generar URL firmada: ${(error as Error).message}`);
       throw new InternalServerErrorException('Error al generar URL de descarga');
     }
   }
 
-  async getDownloadUrl(
-    key: string,
-    filename: string,
-    expiresIn = 3600,
-  ): Promise<string> {
+  async getDownloadUrl(key: string, filename: string, expiresIn = 3600): Promise<string> {
     try {
       const safeName = filename.replace(/"/g, '').replace(/[\r\n]/g, ' ');
       const command = new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
-        ResponseContentDisposition: `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
+        ResponseContentDisposition:
+          `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
       });
       return await getSignedUrl(this.s3, command, { expiresIn });
     } catch (error) {
-      this.logger.error(`Error generando URL de descarga: ${(error as Error).message}`);
+      this.logger.error(`Error al generar URL de descarga: ${(error as Error).message}`);
       throw new InternalServerErrorException('Error al generar URL de descarga');
     }
   }
 
   async deleteFile(key: string): Promise<void> {
     try {
-      await this.s3.send(
-        new DeleteObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-        }),
-      );
-      this.logger.log(`Archivo eliminado: ${key}`);
+      await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+      this.logger.verbose(`Eliminado: ${key}`);
     } catch (error) {
-      this.logger.error(`Error eliminando archivo: ${(error as Error).message}`);
+      this.logger.error(`Error al eliminar archivo: ${(error as Error).message}`);
       throw new InternalServerErrorException('Error al eliminar el archivo');
     }
   }
 
   getPublicUrl(key: string): string {
-    return `${process.env.CLOUDFLARE_R2_ENDPOINT}/${this.bucket}/${key}`;
+    const domain = process.env.CLOUDFLARE_R2_PUBLIC_DOMAIN!.replace(/\/$/, '');
+    return `${domain}/${key}`;
   }
 }

@@ -3,7 +3,7 @@ import {
     ManyToOne, JoinColumn,
     CreateDateColumn, UpdateDateColumn,
 } from 'typeorm';
-import { Psychologist } from './psychologist.entity.js';
+import { Psicologa } from '../../users/entities/psicologa.entity.js';
 
 @Entity('psicologa_disponibilidad')
 export class PsychologistAvailability {
@@ -13,9 +13,9 @@ export class PsychologistAvailability {
     @Column({ name: 'psicologa_id' })
     psychologistId: string;
 
-    @ManyToOne(() => Psychologist, { onDelete: 'CASCADE' })
+    @ManyToOne(() => Psicologa, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'psicologa_id' })
-    psychologist: Psychologist;
+    psychologist: Psicologa;
 
     @Column({ name: 'dia_semana', length: 15 })
     weekDay: string;
