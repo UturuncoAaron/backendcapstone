@@ -9,6 +9,7 @@ import {
     CreateDocenteDto,
     CreatePadreDto,
     CreateAdminDto,
+    CreatePsicologaDto,
     LinkPadreAlumnoDto,
     ResetPasswordDto,
 } from './dto/users.dto.js';
@@ -140,5 +141,17 @@ export class UsersController {
     @Roles('admin')
     findPsicologas() {
         return this.usersService.findPsicologas();
+    }
+
+    @Get('psicologos/:id')
+    @Roles('admin')
+    findPsicologa(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.findPsicologaById(id);
+    }
+
+    @Post('psicologos')
+    @Roles('admin')
+    createPsicologa(@Body() dto: CreatePsicologaDto) {
+        return this.usersService.createPsicologa(dto);
     }
 }

@@ -275,6 +275,52 @@ export class PsychologyService {
         });
     }
 
+    async getStudentsOfPsychologist(psychologistId: string) {
+        return this.dataSource.query(
+            `
+            SELECT
+                a.id,
+                a.codigo_estudiante,
+                a.nombre,
+                a.apellido_paterno,
+                a.apellido_materno,
+                TRIM(CONCAT(a.apellido_paterno, ' ',
+                            COALESCE(a.apellido_materno, ''))) AS apellidos,
+                pa.activo,
+                pa.desde,
+                pa.hasta
+            FROM psicologa_alumno pa
+            INNER JOIN alumnos a ON a.id = pa.alumno_id
+            WHERE pa.psicologa_id = $1 AND pa.activo = true
+            ORDER BY a.apellido_paterno, a.nombre
+            `,
+            [psychologistId],
+        );
+    }
+
+    async getStudentParents(psychologistId: string, studentId: string) {
+        await this.assertAssigned(psychologistId, studentId);
+        return this.dataSource.query(
+            `
+            SELECT
+                p.id,
+                p.nombre,
+                p.apellido_paterno,
+                p.apellido_materno,
+                p.relacion,
+                p.email,
+                p.telefono,
+                c.codigo_acceso
+            FROM padre_alumno pa
+            JOIN padres p ON p.id = pa.padre_id
+            JOIN cuentas c ON c.id = p.id AND c.activo = true
+            WHERE pa.alumno_id = $1
+            ORDER BY p.apellido_paterno, p.nombre
+            `,
+            [studentId],
+        );
+    }
+
     // ════════════════════════════════════════════════════════════
     // PRIVATE HELPERS
     // ════════════════════════════════════════════════════════════

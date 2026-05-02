@@ -17,6 +17,7 @@ import {
     CreateDocenteDto,
     CreatePadreDto,
     CreateAdminDto,
+    CreatePsicologaDto,
     LinkPadreAlumnoDto,
 } from './dto/users.dto.js';
 
@@ -144,6 +145,53 @@ export class UsersService {
         });
     }
 
+    async createPsicologa(dto: CreatePsicologaDto) {
+        await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
+        return this.dataSource.transaction(async (em) => {
+            const dni = dto.numero_documento.trim();
+            const password_hash = await bcrypt.hash(dni, 10);
+            const codigo_acceso = this.generateCodigoAcceso('psicologa', dni);
+
+            const cuenta = await em.save(em.create(Cuenta, {
+                tipo_documento: dto.tipo_documento as any,
+                numero_documento: dni,
+                password_hash,
+                codigo_acceso,
+                password_changed: false,
+                rol: 'psicologa' as any,
+            }));
+
+            await em.query(
+                `INSERT INTO psicologas
+                    (id, nombre, apellido_paterno, apellido_materno,
+                     especialidad, colegiatura, email, telefono)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [
+                    cuenta.id,
+                    dto.nombre,
+                    dto.apellido_paterno,
+                    dto.apellido_materno ?? null,
+                    dto.especialidad ?? null,
+                    dto.colegiatura ?? null,
+                    dto.email ?? null,
+                    dto.telefono ?? null,
+                ],
+            );
+
+            return {
+                id: cuenta.id,
+                codigo_acceso,
+                nombre: dto.nombre,
+                apellido_paterno: dto.apellido_paterno,
+                apellido_materno: dto.apellido_materno ?? null,
+                especialidad: dto.especialidad ?? null,
+                colegiatura: dto.colegiatura ?? null,
+                email: dto.email ?? null,
+                telefono: dto.telefono ?? null,
+            };
+        });
+    }
+
     async createAdmin(dto: CreateAdminDto) {
         await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
         return this.dataSource.transaction(async (em) => {
@@ -252,9 +300,27 @@ export class UsersService {
     }
 
     async findPadres() {
-        return this.padreRepo.find({
-            order: { apellido_paterno: 'ASC', nombre: 'ASC' },
-        });
+        return this.padreRepo
+            .createQueryBuilder('p')
+            .leftJoin('cuentas', 'c', 'c.id = p.id')
+            .select([
+                'p.id               AS id',
+                'p.nombre           AS nombre',
+                'p.apellido_paterno AS apellido_paterno',
+                'p.apellido_materno AS apellido_materno',
+                'p.relacion         AS relacion',
+                'p.email            AS email',
+                'p.telefono         AS telefono',
+                'p.created_at       AS created_at',
+                'c.numero_documento AS numero_documento',
+                'c.tipo_documento   AS tipo_documento',
+                'c.codigo_acceso    AS codigo_acceso',
+                'c.activo           AS activo',
+                'c.password_changed AS password_changed',
+            ])
+            .orderBy('p.apellido_paterno', 'ASC')
+            .addOrderBy('p.nombre', 'ASC')
+            .getRawMany();
     }
 
     // ════════════════════════════════════════════════════════════
@@ -335,33 +401,76 @@ export class UsersService {
     // ════════════════════════════════════════════════════════════
 
     async findAlumnoById(id: string) {
-        const alumno = await this.alumnoRepo.findOne({ where: { id } });
+        const alumno = await this.alumnoRepo.findOne({
+            where: { id },
+            relations: ['cuenta'],
+        });
         if (!alumno) throw new NotFoundException(`Alumno ${id} no encontrado`);
         return alumno;
     }
 
     async findDocenteById(id: string) {
-        const docente = await this.docenteRepo.findOne({ where: { id } });
+        const docente = await this.docenteRepo.findOne({
+            where: { id },
+            relations: ['cuenta'],
+        });
         if (!docente) throw new NotFoundException(`Docente ${id} no encontrado`);
         return docente;
     }
 
     async findPadreById(id: string) {
-        const padre = await this.padreRepo.findOne({ where: { id } });
+        const padre = await this.padreRepo.findOne({
+            where: { id },
+            relations: ['cuenta'],
+        });
         if (!padre) throw new NotFoundException(`Padre ${id} no encontrado`);
         return padre;
     }
 
     async findAdminById(id: string) {
-        const admin = await this.adminRepo.findOne({ where: { id } });
+        const admin = await this.adminRepo.findOne({
+            where: { id },
+            relations: ['cuenta'],
+        });
         if (!admin) throw new NotFoundException(`Admin ${id} no encontrado`);
         return admin;
     }
 
     async findPsicologaById(id: string) {
-        const cuenta = await this.cuentaRepo.findOne({ where: { id } });
-        if (!cuenta) throw new NotFoundException(`Psicóloga ${id} no encontrada`);
-        return cuenta;
+        const rows = await this.dataSource.query(
+            `
+            SELECT
+                p.id,
+                c.numero_documento,
+                c.tipo_documento,
+                c.codigo_acceso,
+                p.nombre,
+                p.apellido_paterno,
+                p.apellido_materno,
+                p.especialidad,
+                p.colegiatura,
+                p.email,
+                p.telefono,
+                p.foto_storage_key,
+                c.activo,
+                c.password_changed,
+                jsonb_build_object(
+                    'id',                p.id,
+                    'numero_documento',  c.numero_documento,
+                    'tipo_documento',    c.tipo_documento,
+                    'codigo_acceso',     c.codigo_acceso,
+                    'activo',            c.activo,
+                    'password_changed',  c.password_changed
+                ) AS cuenta
+            FROM psicologas p
+            INNER JOIN cuentas c ON c.id = p.id
+            WHERE p.id = $1
+            LIMIT 1
+            `,
+            [id],
+        );
+        if (!rows.length) throw new NotFoundException(`Psicóloga ${id} no encontrada`);
+        return rows[0];
     }
 
     // ════════════════════════════════════════════════════════════
@@ -530,26 +639,27 @@ export class UsersService {
     // src/modules/users/users.service.ts
 
     async findPsicologas() {
-        try {
-            // Usamos c.numero_documento porque la tabla psicologas NO tiene la columna dni
-            return await this.dataSource.query(`
-            SELECT 
+        return this.dataSource.query(`
+            SELECT
                 p.id,
-                c.numero_documento AS dni, 
-                p.nombres,
-                p.apellidos,
+                c.numero_documento                                  AS dni,
+                c.codigo_acceso,
+                p.nombre                                            AS nombres,
+                p.apellido_paterno,
+                p.apellido_materno,
+                TRIM(CONCAT(p.apellido_paterno, ' ',
+                            COALESCE(p.apellido_materno, '')))      AS apellidos,
                 p.especialidad,
-                p.correo,
+                p.colegiatura,
+                p.email                                             AS correo,
                 p.telefono,
-                c.activo
+                p.foto_storage_key,
+                c.activo,
+                c.password_changed
             FROM psicologas p
             INNER JOIN cuentas c ON c.id = p.id
-            ORDER BY p.apellidos ASC
+            ORDER BY p.apellido_paterno ASC, p.nombre ASC
         `);
-        } catch (error) {
-            console.error('Fallo en findPsicologas:', error);
-            throw error;
-        }
     }
 
 }

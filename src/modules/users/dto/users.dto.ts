@@ -11,11 +11,17 @@ export class CreateAlumnoDto {
     @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
 
-    @IsString() @IsNotEmpty() @MinLength(6)
-    password: string;
+    /**
+     * Opcional. La contraseña inicial se genera siempre a partir del
+     * `numero_documento` y `password_changed` queda en `false` hasta el
+     * primer cambio del usuario. Se mantiene en el DTO solo para
+     * compatibilidad con clientes legacy.
+     */
+    @IsOptional() @IsString() @MinLength(6)
+    password?: string;
 
-    @IsString() @IsNotEmpty() @MaxLength(20)
-    codigo_estudiante: string;
+    @IsOptional() @IsString() @MaxLength(20)
+    codigo_estudiante?: string;
 
     @IsString() @IsNotEmpty() @MaxLength(100)
     nombre: string;
@@ -45,8 +51,9 @@ export class CreateDocenteDto {
     @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
 
-    @IsString() @IsNotEmpty() @MinLength(6)
-    password: string;
+    /** Opcional: la contraseña inicial siempre se genera desde el DNI. */
+    @IsOptional() @IsString() @MinLength(6)
+    password?: string;
 
     @IsString() @IsNotEmpty() @MaxLength(100)
     nombre: string;
@@ -79,8 +86,9 @@ export class CreatePadreDto {
     @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
 
-    @IsString() @IsNotEmpty() @MinLength(6)
-    password: string;
+    /** Opcional: la contraseña inicial siempre se genera desde el DNI. */
+    @IsOptional() @IsString() @MinLength(6)
+    password?: string;
 
     @IsString() @IsNotEmpty() @MaxLength(100)
     nombre: string;
@@ -110,8 +118,9 @@ export class CreateAdminDto {
     @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
 
-    @IsString() @IsNotEmpty() @MinLength(6)
-    password: string;
+    /** Opcional: la contraseña inicial siempre se genera desde el DNI. */
+    @IsOptional() @IsString() @MinLength(6)
+    password?: string;
 
     @IsString() @IsNotEmpty() @MaxLength(100)
     nombre: string;
@@ -149,12 +158,30 @@ export class ResetPasswordDto {
     password: string;
 }
 export class CreatePsicologaDto {
+    @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
+
+    @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
+
+    @IsString() @IsNotEmpty() @MaxLength(100)
     nombre: string;
+
+    @IsString() @IsNotEmpty() @MaxLength(100)
     apellido_paterno: string;
+
+    @IsOptional() @IsString() @MaxLength(100)
     apellido_materno?: string;
+
+    @IsOptional() @IsString() @MaxLength(150)
     especialidad?: string;
+
+    @IsOptional() @IsString() @MaxLength(50)
+    colegiatura?: string;
+
+    @IsOptional() @IsEmail()
     email?: string;
+
+    @IsOptional() @IsString() @MaxLength(20)
     telefono?: string;
 }

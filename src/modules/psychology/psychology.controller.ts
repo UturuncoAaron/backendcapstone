@@ -178,4 +178,23 @@ export class PsychologyController {
     getMyStudents(@CurrentUser() user: any) {
         return this.service.getMyStudents(user.sub);
     }
+
+    @Get('assignments/:psychologistId/students')
+    @Roles('admin')
+    getStudentsOfPsychologist(
+        @Param('psychologistId', ParseUUIDPipe) psychologistId: string,
+    ) {
+        return this.service.getStudentsOfPsychologist(psychologistId);
+    }
+
+    // ── Padres del alumno asignado (para programar citas) ─────────────────────
+
+    @Get('students/:studentId/parents')
+    @Roles('psicologa')
+    getStudentParents(
+        @Param('studentId', ParseUUIDPipe) studentId: string,
+        @CurrentUser() user: any,
+    ) {
+        return this.service.getStudentParents(user.sub, studentId);
+    }
 }
