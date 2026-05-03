@@ -112,8 +112,8 @@ export class DashboardService {
          contenido,
          created_at AS fecha
        FROM  comunicados
-       WHERE activo       = TRUE
-         AND destinatario IN ('todos', 'alumnos')
+       WHERE activo = TRUE
+         AND ('todos' = ANY(destinatarios) OR 'alumnos' = ANY(destinatarios))
        ORDER BY created_at DESC
        LIMIT 3`,
         );

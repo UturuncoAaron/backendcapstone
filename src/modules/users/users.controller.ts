@@ -24,11 +24,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
-    // ── Stats ────────────────────────────────────────────────────────────
-    @Get('stats')
-    getStats() {
-        return this.usersService.getStats();
-    }
+
 
     // ── Listar ───────────────────────────────────────────────────────────
     @Get('admins')

@@ -27,7 +27,7 @@ export class CoursesController {
         @Query('seccion_id') seccionId?: string,
     ) {
         return this.coursesService.findMyCourses(
-            user.sub, user.rol,
+            user.id, user.rol,
             seccionId ? +seccionId : undefined,
         );
     }
@@ -91,7 +91,7 @@ export class CoursesController {
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: any,
     ) {
-        return this.materialsService.getCourseProgress(id, user.sub);
+        return this.materialsService.getCourseProgress(id, user);
     }
 
     // PATCH /api/courses/:id
@@ -102,7 +102,7 @@ export class CoursesController {
         @CurrentUser() user: any,
         @Body() dto: { nombre?: string; descripcion?: string; activo?: boolean },
     ) {
-        return this.coursesService.update(id, user.sub, user.rol, dto);
+        return this.coursesService.update(id, user.id, user.rol, dto);
     }
 
     // PATCH /api/courses/:id/assign-teacher

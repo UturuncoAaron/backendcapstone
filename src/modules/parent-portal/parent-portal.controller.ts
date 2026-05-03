@@ -15,7 +15,7 @@ export class ParentPortalController {
     // GET /api/parent/children
     @Get('children')
     getChildren(@CurrentUser() user: any) {
-        return this.service.getChildren(user.sub);
+        return this.service.getChildren(user.id);
     }
 
     // GET /api/parent/children/:id/grades
@@ -24,7 +24,7 @@ export class ParentPortalController {
         @Param('id', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: any,
     ) {
-        return this.service.getChildGrades(user.sub, alumnoId);
+        return this.service.getChildGrades(user.id, alumnoId);
     }
 
     // GET /api/parent/children/:id/attendance
@@ -33,7 +33,7 @@ export class ParentPortalController {
         @Param('id', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: any,
     ) {
-        return this.service.getChildAttendance(user.sub, alumnoId);
+        return this.service.getChildAttendance(user.id, alumnoId);
     }
 
     // GET /api/parent/children/:id/libretas
@@ -42,6 +42,6 @@ export class ParentPortalController {
         @Param('id', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: any,
     ) {
-        return this.service.getChildLibretas(user.sub, alumnoId);
+        return this.service.getChildLibretas(user.id, alumnoId);
     }
 }

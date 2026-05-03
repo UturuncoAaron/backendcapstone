@@ -24,7 +24,7 @@ export class LibretasController {
     @Roles('alumno', 'padre')
     findMine(@CurrentUser() user: any) {
         const tipo: LibretaTipo = user.rol === 'padre' ? 'padre' : 'alumno';
-        return this.libretasService.findByCuenta(user.sub, tipo);
+        return this.libretasService.findByCuenta(user.id, tipo);
     }
 
     @Get('hijo/:alumnoId')
@@ -33,7 +33,7 @@ export class LibretasController {
         @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: any,
     ) {
-        return this.libretasService.findHijoForPadre(user.sub, alumnoId);
+        return this.libretasService.findHijoForPadre(user.id, alumnoId);
     }
     @Get(':tipo/:cuentaId/periodo/:periodoId')
     @Roles('admin', 'docente')
@@ -62,7 +62,7 @@ export class LibretasController {
             cuenta_id: body.cuenta_id,
             tipo: 'alumno',
             periodo_id: parseInt(body.periodo_id),
-            subido_por: user.sub,
+            subido_por: user.id,
             rol: user.rol,
             observaciones: body.observaciones,
             file,
@@ -84,7 +84,7 @@ export class LibretasController {
             cuenta_id: body.cuenta_id,
             tipo: 'padre',
             periodo_id: parseInt(body.periodo_id),
-            subido_por: user.sub,
+            subido_por: user.id,
             rol: user.rol,
             observaciones: body.observaciones,
             file,
@@ -99,7 +99,7 @@ export class LibretasController {
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: any,
     ) {
-        return this.libretasService.remove(id, user.sub, user.rol);
+        return this.libretasService.remove(id, user.id, user.rol);
     }
 
     private parseTipo(raw: string): LibretaTipo {

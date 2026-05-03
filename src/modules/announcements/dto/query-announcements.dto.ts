@@ -1,9 +1,10 @@
 import { IsEnum, IsOptional, IsIn } from 'class-validator';
+import type { Destinatario } from '../entities/announcement.entity.js';
 
 export class QueryAnnouncementsDto {
-    @IsEnum(['todos', 'alumnos', 'docentes', 'padres'])
+    @IsEnum(['todos', 'alumnos', 'docentes', 'padres', 'psicologas'])
     @IsOptional()
-    destinatario?: 'todos' | 'alumnos' | 'docentes' | 'padres';
+    rol?: Destinatario;
 
     @IsIn(['true', 'false'])
     @IsOptional()

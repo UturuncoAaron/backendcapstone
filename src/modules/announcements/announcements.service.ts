@@ -17,7 +17,7 @@ export class AnnouncementsService {
             admin_id: adminId,
             titulo: dto.titulo,
             contenido: dto.contenido,
-            destinatario: dto.destinatario ?? 'todos',
+            destinatarios: dto.destinatarios ?? ['todos'],
         });
         return this.announcementRepo.save(announcement);
     }
@@ -30,20 +30,21 @@ export class AnnouncementsService {
                 'a.id',
                 'a.titulo',
                 'a.contenido',
-                'a.destinatario',
+                'a.destinatarios',
                 'a.activo',
                 'a.created_at',
                 'admin.id',
                 'admin.nombre',
                 'admin.apellido_paterno',
             ])
+            .where('a.activo = true') 
             .orderBy('a.created_at', 'DESC');
 
-        if (query.destinatario) {
-            qb.andWhere('a.destinatario = :dest', { dest: query.destinatario });
-        }
-        if (query.activo !== undefined) {
-            qb.andWhere('a.activo = :activo', { activo: query.activo === 'true' });
+        if (query.rol) {
+            qb.andWhere(
+                ':rol = ANY(a.destinatarios) OR \'todos\' = ANY(a.destinatarios)',
+                { rol: query.rol }
+            );
         }
 
         return qb.getMany();

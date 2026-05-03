@@ -1,9 +1,9 @@
-// ── create-alumno.dto.ts ─────────────────────────────────────────
 import {
     IsString, IsNotEmpty, IsOptional, IsEmail,
     IsIn, MinLength, MaxLength, IsDateString,
 } from 'class-validator';
 
+// ── CreateAlumnoDto ──────────────────────────────────────────────
 export class CreateAlumnoDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -36,8 +36,7 @@ export class CreateAlumnoDto {
     telefono?: string;
 }
 
-
-// ── create-docente.dto.ts ────────────────────────────────────────
+// ── CreateDocenteDto ─────────────────────────────────────────────
 export class CreateDocenteDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -45,7 +44,6 @@ export class CreateDocenteDto {
     @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
 
-    /** Opcional: la contraseña inicial siempre se genera desde el DNI. */
     @IsOptional() @IsString() @MinLength(6)
     password?: string;
 
@@ -69,10 +67,26 @@ export class CreateDocenteDto {
 
     @IsOptional() @IsString() @MaxLength(20)
     telefono?: string;
+
+    // ── v6: fecha de nacimiento ──────────────────────────────────
+    @IsOptional() @IsDateString()
+    fecha_nacimiento?: string;
+
+    // ── v6: contrato ─────────────────────────────────────────────
+    @IsOptional() @IsIn(['nombrado', 'contratado'])
+    tipo_contrato?: string;
+
+    @IsOptional() @IsIn(['activo', 'inactivo', 'pendiente'])
+    estado_contrato?: string;
+
+    @IsOptional() @IsDateString()
+    fecha_inicio_contrato?: string;
+
+    @IsOptional() @IsDateString()
+    fecha_fin_contrato?: string;
 }
 
-
-// ── create-padre.dto.ts ──────────────────────────────────────────
+// ── CreatePadreDto ───────────────────────────────────────────────
 export class CreatePadreDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -80,7 +94,6 @@ export class CreatePadreDto {
     @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
 
-    /** Opcional: la contraseña inicial siempre se genera desde el DNI. */
     @IsOptional() @IsString() @MinLength(6)
     password?: string;
 
@@ -101,10 +114,12 @@ export class CreatePadreDto {
 
     @IsOptional() @IsString() @MaxLength(20)
     telefono?: string;
+
+    @IsOptional() @IsDateString()
+    fecha_nacimiento?: string;
 }
 
-
-// ── create-admin.dto.ts ──────────────────────────────────────────
+// ── CreateAdminDto ───────────────────────────────────────────────
 export class CreateAdminDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -112,7 +127,6 @@ export class CreateAdminDto {
     @IsString() @IsNotEmpty() @MaxLength(20)
     numero_documento: string;
 
-    /** Opcional: la contraseña inicial siempre se genera desde el DNI. */
     @IsOptional() @IsString() @MinLength(6)
     password?: string;
 
@@ -132,25 +146,13 @@ export class CreateAdminDto {
     email?: string;
 
     @IsOptional() @IsString() @MaxLength(20)
-    telefono?: string;   // ← agregar esto
+    telefono?: string;
+
+    @IsOptional() @IsDateString()
+    fecha_nacimiento?: string;
 }
 
-
-// ── link-padre-alumno.dto.ts ─────────────────────────────────────
-export class LinkPadreAlumnoDto {
-    @IsString() @IsNotEmpty()
-    padre_doc: string;
-
-    @IsString() @IsNotEmpty()
-    alumno_doc: string;
-}
-
-
-// ── reset-password.dto.ts ────────────────────────────────────────
-export class ResetPasswordDto {
-    @IsString() @MinLength(6)
-    password: string;
-}
+// ── CreatePsicologaDto ───────────────────────────────────────────
 export class CreatePsicologaDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -178,4 +180,22 @@ export class CreatePsicologaDto {
 
     @IsOptional() @IsString() @MaxLength(20)
     telefono?: string;
+
+    @IsOptional() @IsDateString()
+    fecha_nacimiento?: string;
+}
+
+// ── LinkPadreAlumnoDto ───────────────────────────────────────────
+export class LinkPadreAlumnoDto {
+    @IsString() @IsNotEmpty()
+    padre_doc: string;
+
+    @IsString() @IsNotEmpty()
+    alumno_doc: string;
+}
+
+// ── ResetPasswordDto ─────────────────────────────────────────────
+export class ResetPasswordDto {
+    @IsString() @MinLength(6)
+    password: string;
 }

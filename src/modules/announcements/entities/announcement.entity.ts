@@ -4,7 +4,7 @@ import {
 } from 'typeorm';
 import { Admin } from '../../users/entities/admin.entity.js';
 
-export type Destinatario = 'todos' | 'alumnos' | 'docentes' | 'padres';
+export type Destinatario = 'todos' | 'alumnos' | 'docentes' | 'padres' | 'psicologas';
 
 @Entity('comunicados')
 export class Announcement {
@@ -24,8 +24,8 @@ export class Announcement {
     @Column({ type: 'text' })
     contenido: string;
 
-    @Column({ length: 20, default: 'todos' })
-    destinatario: Destinatario;
+    @Column({ type: 'text', array: true, default: '{}' })
+    destinatarios: Destinatario[];
 
     @Column({ default: true })
     activo: boolean;

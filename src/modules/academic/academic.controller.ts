@@ -66,7 +66,7 @@ export class AcademicController {
     @Get('tutoria/me')
     @Roles('docente', 'admin')
     getMiTutoria(@CurrentUser() user: any) {
-        return this.academicService.getTutoriaForDocente(user.sub);
+        return this.academicService.getTutoriaForDocente(user.id);
     }
 
     // ── PERIODOS ─────────────────────────────────────────────────

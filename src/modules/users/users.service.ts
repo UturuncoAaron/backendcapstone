@@ -27,24 +27,21 @@ import {
 } from './dto/users.dto.js';
 import { UpdateFullDto } from './dto/profile.dto.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Prefijos de código de acceso por rol
-// ─────────────────────────────────────────────────────────────────────────────
 const ROLE_PREFIX: Record<string, string> = {
-    alumno: 'EST',
-    docente: 'DOC',
-    padre: 'PAD',
-    admin: 'ADM',
-    psicologa: 'PSI',
+    alumno: 'EST', docente: 'DOC', padre: 'PAD', admin: 'ADM', psicologa: 'PSI',
 };
 
-// Campos editables en la tabla especializada por rol
 const PROFILE_FIELDS = [
     'nombre', 'apellido_paterno', 'apellido_materno',
     'telefono', 'email',
     'especialidad', 'titulo_profesional', 'colegiatura',
     'cargo', 'relacion',
 ] as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Campos que NUNCA deben salir en listados ni en respuestas al frontend
+// ─────────────────────────────────────────────────────────────────────────────
+const SENSITIVE_FIELDS = ['foto_storage_key', 'password_changed', 'password_hash'];
 
 @Injectable()
 export class UsersService {
@@ -84,20 +81,16 @@ export class UsersService {
         const dni = numero_documento.trim();
         const password_hash = await bcrypt.hash(dni, 10);
         const codigo_acceso = this.buildCodigoAcceso(rol, dni);
-
-        return em.save(
-            em.create(Cuenta, {
-                tipo_documento: tipo_documento as any,
-                numero_documento: dni,
-                password_hash,
-                codigo_acceso,
-                password_changed: false,
-                rol: rol as any,
-            }),
-        );
+        return em.save(em.create(Cuenta, {
+            tipo_documento: tipo_documento as any,
+            numero_documento: dni,
+            password_hash,
+            codigo_acceso,
+            password_changed: false,
+            rol: rol as any,
+        }));
     }
 
-    /** Mapa rol → repositorio. Evita switch repetidos en métodos genéricos. */
     private repoByRol(rol: string): Repository<any> | null {
         const map: Record<string, Repository<any>> = {
             alumno: this.alumnoRepo,
@@ -110,13 +103,25 @@ export class UsersService {
     }
 
     /**
-     * Resuelve foto_storage_key → foto_url (URL pública de R2) en cualquier
-     * row devuelto por findXById. Mutación in-place para evitar copias.
+     * Resuelve foto_storage_key → foto_url y elimina campos sensibles.
+     * Se aplica a TODOS los rows antes de devolverlos al frontend.
      */
-    private resolveFotoUrl(row: Record<string, any>): void {
+    private sanitize(row: Record<string, any>, forList = false): void {
+        // Resolver foto
         row.foto_url = row.foto_storage_key
             ? this.storageService.getPublicUrl(row.foto_storage_key)
             : null;
+
+        // Eliminar campos internos siempre
+        for (const field of SENSITIVE_FIELDS) {
+            delete row[field];
+        }
+
+        // En listados eliminar campos que solo usa el detalle
+        if (forList) {
+            delete row.codigo_acceso;
+            delete row.created_at;
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -125,14 +130,11 @@ export class UsersService {
 
     async createAlumno(dto: CreateAlumnoDto) {
         await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
-
         return this.dataSource.transaction(async (em) => {
             const cuenta = await this.createCuenta(em, 'alumno', dto.tipo_documento, dto.numero_documento);
-            const dni = cuenta.numero_documento;
-
             return em.save(em.create(Alumno, {
                 id: cuenta.id,
-                codigo_estudiante: dto.codigo_estudiante ?? `EST-${dni}`,
+                codigo_estudiante: dto.codigo_estudiante ?? `EST-${cuenta.numero_documento}`,
                 nombre: dto.nombre,
                 apellido_paterno: dto.apellido_paterno,
                 apellido_materno: dto.apellido_materno ?? null,
@@ -145,10 +147,8 @@ export class UsersService {
 
     async createDocente(dto: CreateDocenteDto) {
         await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
-
         return this.dataSource.transaction(async (em) => {
             const cuenta = await this.createCuenta(em, 'docente', dto.tipo_documento, dto.numero_documento);
-
             return em.save(em.create(Docente, {
                 id: cuenta.id,
                 nombre: dto.nombre,
@@ -158,16 +158,19 @@ export class UsersService {
                 titulo_profesional: dto.titulo_profesional ?? null,
                 email: dto.email ?? null,
                 telefono: dto.telefono ?? null,
+                fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+                tipo_contrato: dto.tipo_contrato ?? 'contratado',
+                estado_contrato: dto.estado_contrato ?? 'activo',
+                fecha_inicio_contrato: dto.fecha_inicio_contrato ? new Date(dto.fecha_inicio_contrato) : null,
+                fecha_fin_contrato: dto.fecha_fin_contrato ? new Date(dto.fecha_fin_contrato) : null,
             }));
         });
     }
 
     async createPadre(dto: CreatePadreDto) {
         await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
-
         return this.dataSource.transaction(async (em) => {
             const cuenta = await this.createCuenta(em, 'padre', dto.tipo_documento, dto.numero_documento);
-
             return em.save(em.create(Padre, {
                 id: cuenta.id,
                 nombre: dto.nombre,
@@ -176,16 +179,15 @@ export class UsersService {
                 relacion: dto.relacion as any,
                 email: dto.email ?? null,
                 telefono: dto.telefono ?? null,
+                fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
             }));
         });
     }
 
     async createAdmin(dto: CreateAdminDto) {
         await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
-
         return this.dataSource.transaction(async (em) => {
             const cuenta = await this.createCuenta(em, 'admin', dto.tipo_documento, dto.numero_documento);
-
             return em.save(em.create(Admin, {
                 id: cuenta.id,
                 nombre: dto.nombre,
@@ -193,16 +195,15 @@ export class UsersService {
                 apellido_materno: dto.apellido_materno ?? null,
                 cargo: dto.cargo ?? null,
                 email: dto.email ?? null,
+                fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
             }));
         });
     }
 
     async createPsicologa(dto: CreatePsicologaDto) {
         await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
-
         return this.dataSource.transaction(async (em) => {
             const cuenta = await this.createCuenta(em, 'psicologa', dto.tipo_documento, dto.numero_documento);
-
             return em.save(em.create(Psicologa, {
                 id: cuenta.id,
                 nombre: dto.nombre,
@@ -212,16 +213,17 @@ export class UsersService {
                 colegiatura: dto.colegiatura ?? null,
                 email: dto.email ?? null,
                 telefono: dto.telefono ?? null,
+                fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
             }));
         });
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // LISTAR POR ROL
+    // LISTAR POR ROL — solo campos necesarios para la tabla
     // ══════════════════════════════════════════════════════════════════════════
 
     async findAdmins() {
-        return this.adminRepo
+        const rows = await this.adminRepo
             .createQueryBuilder('a')
             .innerJoin('cuentas', 'c', 'c.id = a.id')
             .select([
@@ -231,19 +233,21 @@ export class UsersService {
                 'a.apellido_materno AS apellido_materno',
                 'a.cargo            AS cargo',
                 'a.email            AS email',
-                'a.created_at       AS created_at',
+                'a.foto_storage_key AS foto_storage_key',
                 'c.numero_documento AS numero_documento',
                 'c.tipo_documento   AS tipo_documento',
-                'c.codigo_acceso    AS codigo_acceso',
                 'c.activo           AS activo',
             ])
             .orderBy('a.apellido_paterno', 'ASC')
             .addOrderBy('a.nombre', 'ASC')
             .getRawMany();
+
+        rows.forEach(r => this.sanitize(r, true));
+        return rows;
     }
 
     async findAlumnos() {
-        return this.alumnoRepo
+        const rows = await this.alumnoRepo
             .createQueryBuilder('a')
             .innerJoin('cuentas', 'c', 'c.id = a.id')
             .leftJoin('matriculas', 'm', 'm.alumno_id = a.id AND m.activo = true')
@@ -258,9 +262,9 @@ export class UsersService {
                 'a.fecha_nacimiento  AS fecha_nacimiento',
                 'a.telefono          AS telefono',
                 'a.email             AS email',
+                'a.foto_storage_key  AS foto_storage_key',
                 'c.numero_documento  AS numero_documento',
                 'c.tipo_documento    AS tipo_documento',
-                'c.codigo_acceso     AS codigo_acceso',
                 'c.activo            AS activo',
                 "CONCAT(g.orden, '°') AS grado",
                 's.nombre             AS seccion',
@@ -268,6 +272,9 @@ export class UsersService {
             .orderBy('a.apellido_paterno', 'ASC')
             .addOrderBy('a.nombre', 'ASC')
             .getRawMany();
+
+        rows.forEach(r => this.sanitize(r, true));
+        return rows;
     }
 
     async findDocentes(includeTutoria = false) {
@@ -282,9 +289,9 @@ export class UsersService {
                 'd.especialidad     AS especialidad',
                 'd.email            AS email',
                 'd.telefono         AS telefono',
+                'd.foto_storage_key AS foto_storage_key',
                 'c.numero_documento AS numero_documento',
                 'c.tipo_documento   AS tipo_documento',
-                'c.codigo_acceso    AS codigo_acceso',
                 'c.activo           AS activo',
             ])
             .orderBy('d.apellido_paterno', 'ASC')
@@ -303,11 +310,13 @@ export class UsersService {
                 `);
         }
 
-        return qb.getRawMany();
+        const rows = await qb.getRawMany();
+        rows.forEach(r => this.sanitize(r, true));
+        return rows;
     }
 
     async findPadres() {
-        return this.padreRepo
+        const rows = await this.padreRepo
             .createQueryBuilder('p')
             .innerJoin('cuentas', 'c', 'c.id = p.id')
             .select([
@@ -318,46 +327,47 @@ export class UsersService {
                 'p.relacion         AS relacion',
                 'p.email            AS email',
                 'p.telefono         AS telefono',
-                'p.created_at       AS created_at',
+                'p.foto_storage_key AS foto_storage_key',
                 'c.numero_documento AS numero_documento',
                 'c.tipo_documento   AS tipo_documento',
-                'c.codigo_acceso    AS codigo_acceso',
                 'c.activo           AS activo',
-                'c.password_changed AS password_changed',
             ])
             .orderBy('p.apellido_paterno', 'ASC')
             .addOrderBy('p.nombre', 'ASC')
             .getRawMany();
+
+        rows.forEach(r => this.sanitize(r, true));
+        return rows;
     }
 
     async findPsicologas() {
-        return this.psicologaRepo
+        const rows = await this.psicologaRepo
             .createQueryBuilder('p')
             .innerJoin('cuentas', 'c', 'c.id = p.id')
             .select([
                 'p.id               AS id',
                 'c.numero_documento AS dni',
                 'c.tipo_documento   AS tipo_documento',
-                'c.codigo_acceso    AS codigo_acceso',
                 'p.nombre           AS nombres',
                 'p.apellido_paterno AS apellido_paterno',
                 'p.apellido_materno AS apellido_materno',
                 `TRIM(CONCAT(p.apellido_paterno, ' ', COALESCE(p.apellido_materno, ''))) AS apellidos`,
                 'p.especialidad     AS especialidad',
-                'p.colegiatura      AS colegiatura',
                 'p.email            AS correo',
                 'p.telefono         AS telefono',
                 'p.foto_storage_key AS foto_storage_key',
                 'c.activo           AS activo',
-                'c.password_changed AS password_changed',
             ])
             .orderBy('p.apellido_paterno', 'ASC')
             .addOrderBy('p.nombre', 'ASC')
             .getRawMany();
+
+        rows.forEach(r => this.sanitize(r, true));
+        return rows;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // BÚSQUEDAS (autocomplete)
+    // BÚSQUEDAS (autocomplete) — sin cambios, no exponen datos sensibles
     // ══════════════════════════════════════════════════════════════════════════
 
     async searchAlumnos(query: string) {
@@ -375,11 +385,9 @@ export class UsersService {
                 'c.codigo_acceso     AS codigo_acceso',
             ])
             .where(
-                `a.nombre              ILIKE :q
-                 OR a.apellido_paterno  ILIKE :q
-                 OR c.numero_documento  ILIKE :q
-                 OR a.codigo_estudiante ILIKE :q
-                 OR c.codigo_acceso     ILIKE :q`,
+                `a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
+                 OR c.numero_documento ILIKE :q OR a.codigo_estudiante ILIKE :q
+                 OR c.codigo_acceso ILIKE :q`,
                 { q: `%${query.trim()}%` },
             )
             .limit(10)
@@ -401,10 +409,8 @@ export class UsersService {
                 'c.codigo_acceso    AS codigo_acceso',
             ])
             .where(
-                `d.nombre             ILIKE :q
-                 OR d.apellido_paterno ILIKE :q
-                 OR c.numero_documento ILIKE :q
-                 OR c.codigo_acceso    ILIKE :q`,
+                `d.nombre ILIKE :q OR d.apellido_paterno ILIKE :q
+                 OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
                 { q: `%${query.trim()}%` },
             )
             .limit(10)
@@ -426,10 +432,8 @@ export class UsersService {
                 'c.codigo_acceso    AS codigo_acceso',
             ])
             .where(
-                `p.nombre             ILIKE :q
-                 OR p.apellido_paterno ILIKE :q
-                 OR c.numero_documento ILIKE :q
-                 OR c.codigo_acceso    ILIKE :q`,
+                `p.nombre ILIKE :q OR p.apellido_paterno ILIKE :q
+                 OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
                 { q: `%${query.trim()}%` },
             )
             .limit(10)
@@ -437,9 +441,7 @@ export class UsersService {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // OBTENER UNO POR ID
-    // Devuelven foto_storage_key sin resolver.
-    // Para obtener foto_url lista usar getProfileById().
+    // OBTENER UNO POR ID — detalle completo con foto_url resuelta
     // ══════════════════════════════════════════════════════════════════════════
 
     async findAlumnoById(id: string) {
@@ -460,11 +462,11 @@ export class UsersService {
                 'c.tipo_documento    AS tipo_documento',
                 'c.codigo_acceso     AS codigo_acceso',
                 'c.activo            AS activo',
-                'c.password_changed  AS password_changed',
             ])
             .where('a.id = :id', { id })
             .getRawOne();
         if (!row) throw new NotFoundException(`Alumno ${id} no encontrado`);
+        this.sanitize(row);
         return row;
     }
 
@@ -490,11 +492,11 @@ export class UsersService {
                 'c.tipo_documento        AS tipo_documento',
                 'c.codigo_acceso         AS codigo_acceso',
                 'c.activo                AS activo',
-                'c.password_changed      AS password_changed',
             ])
             .where('d.id = :id', { id })
             .getRawOne();
         if (!row) throw new NotFoundException(`Docente ${id} no encontrado`);
+        this.sanitize(row);
         return row;
     }
 
@@ -515,11 +517,11 @@ export class UsersService {
                 'c.tipo_documento   AS tipo_documento',
                 'c.codigo_acceso    AS codigo_acceso',
                 'c.activo           AS activo',
-                'c.password_changed AS password_changed',
             ])
             .where('p.id = :id', { id })
             .getRawOne();
         if (!row) throw new NotFoundException(`Padre ${id} no encontrado`);
+        this.sanitize(row);
         return row;
     }
 
@@ -540,11 +542,11 @@ export class UsersService {
                 'c.tipo_documento   AS tipo_documento',
                 'c.codigo_acceso    AS codigo_acceso',
                 'c.activo           AS activo',
-                'c.password_changed AS password_changed',
             ])
             .where('a.id = :id', { id })
             .getRawOne();
         if (!row) throw new NotFoundException(`Admin ${id} no encontrado`);
+        this.sanitize(row);
         return row;
     }
 
@@ -566,11 +568,11 @@ export class UsersService {
                 'c.tipo_documento   AS tipo_documento',
                 'c.codigo_acceso    AS codigo_acceso',
                 'c.activo           AS activo',
-                'c.password_changed AS password_changed',
             ])
             .where('p.id = :id', { id })
             .getRawOne();
         if (!row) throw new NotFoundException(`Psicóloga ${id} no encontrada`);
+        this.sanitize(row);
         return row;
     }
 
@@ -585,7 +587,6 @@ export class UsersService {
             .set({ activo: false })
             .where('id = :id AND activo = true', { id })
             .execute();
-
         if (!result.affected) throw new NotFoundException(`Cuenta ${id} no encontrada o ya inactiva`);
         return { message: 'Usuario desactivado correctamente' };
     }
@@ -597,7 +598,6 @@ export class UsersService {
             .set({ activo: true })
             .where('id = :id AND activo = false', { id })
             .execute();
-
         if (!result.affected) {
             const exists = await this.cuentaRepo.findOne({ where: { id }, select: ['id'] });
             if (!exists) throw new NotFoundException(`Cuenta ${id} no encontrada`);
@@ -607,7 +607,7 @@ export class UsersService {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // RESET PASSWORD (admin → vuelve al DNI)
+    // RESET PASSWORD
     // ══════════════════════════════════════════════════════════════════════════
 
     async resetPassword(id: string): Promise<{ message: string }> {
@@ -616,13 +616,11 @@ export class UsersService {
             select: ['id', 'numero_documento'],
         });
         if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
-
         const newHash = await bcrypt.hash(cuenta.numero_documento, 10);
         await this.cuentaRepo.update(id, { password_hash: newHash, password_changed: false });
         return { message: 'Contraseña reseteada al DNI correctamente' };
     }
 
-    /** Usado por AuthService tras changePassword. Recibe el hash ya calculado. */
     async updatePassword(id: string, newHash: string): Promise<void> {
         await this.cuentaRepo.update(id, { password_hash: newHash, password_changed: true });
     }
@@ -666,32 +664,6 @@ export class UsersService {
             alumno: `${alumno.nombre} ${alumno.apellido_paterno}`,
         };
     }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // STATS DASHBOARD ADMIN — un solo query paralelo, sin N+1
-    // ══════════════════════════════════════════════════════════════════════════
-
-    async getStats() {
-        const [counts] = await this.dataSource.query(`
-            SELECT
-                (SELECT COUNT(*) FROM alumnos    a INNER JOIN cuentas c ON c.id = a.id WHERE c.activo = true) AS alumnos,
-                (SELECT COUNT(*) FROM docentes   d INNER JOIN cuentas c ON c.id = d.id WHERE c.activo = true) AS docentes,
-                (SELECT COUNT(*) FROM padres     p INNER JOIN cuentas c ON c.id = p.id WHERE c.activo = true) AS padres,
-                (SELECT COUNT(*) FROM admins     a INNER JOIN cuentas c ON c.id = a.id WHERE c.activo = true) AS admins,
-                (SELECT COUNT(*) FROM psicologas p INNER JOIN cuentas c ON c.id = p.id WHERE c.activo = true) AS psicologas,
-                (SELECT COUNT(*) FROM cursos WHERE activo = true) AS cursos
-        `);
-
-        return {
-            alumnos: Number(counts.alumnos),
-            docentes: Number(counts.docentes),
-            padres: Number(counts.padres),
-            admins: Number(counts.admins),
-            psicologas: Number(counts.psicologas),
-            cursos: Number(counts.cursos),
-        };
-    }
-
     // ══════════════════════════════════════════════════════════════════════════
     // MÉTODOS PARA AUTH SERVICE
     // ══════════════════════════════════════════════════════════════════════════
@@ -712,31 +684,28 @@ export class UsersService {
                 'c.numero_documento', 'c.codigo_acceso', 'c.password_changed', 'c.activo',
             ])
             .where('c.tipo_documento = :tipo AND c.numero_documento = :numero AND c.activo = true', {
-                tipo,
-                numero: numero.trim(),
+                tipo, numero: numero.trim(),
             })
             .getOne();
     }
 
     async findCuentaById(id: string): Promise<Cuenta | null> {
-        return this.cuentaRepo.findOne({ where: { id }, select: ['id', 'rol', 'activo', 'password_changed'] });
+        return this.cuentaRepo.findOne({
+            where: { id },
+            select: ['id', 'rol', 'activo', 'password_changed', 'password_hash'],
+        });
     }
 
     async updateUltimoAcceso(id: string): Promise<void> {
-        // Fire-and-forget: no penaliza el login si falla
         this.cuentaRepo.update(id, { ultimo_acceso: new Date() }).catch(() => { });
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // PERFIL — GET con foto_url resuelta
-    //
-    // Punto central para obtener perfil completo listo para el frontend.
-    // Usado por: ProfileController GET /users/me, AuthService login y getProfile.
+    // PERFIL COMPLETO — usado por /users/me y AuthService
     // ══════════════════════════════════════════════════════════════════════════
 
     async getProfileById(id: string, rol: string) {
         let row: any;
-
         switch (rol) {
             case 'alumno': row = await this.findAlumnoById(id); break;
             case 'docente': row = await this.findDocenteById(id); break;
@@ -746,10 +715,14 @@ export class UsersService {
             default:
                 return this.cuentaRepo.findOne({ where: { id }, select: ['id', 'rol', 'activo'] });
         }
-
-        this.resolveFotoUrl(row);
+        // sanitize ya fue llamado dentro de findXxxById
         return row;
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // ACTUALIZAR PERFIL
+    // ══════════════════════════════════════════════════════════════════════════
+
     async updateFull(
         id: string,
         rol: string,
@@ -758,30 +731,24 @@ export class UsersService {
     ): Promise<{ message: string }> {
         return this.dataSource.transaction(async (em) => {
 
-            // ── 1. Campos de la tabla especializada ──────────────────────────
+            // 1. Campos perfil especializado
             const profileData: Record<string, any> = {};
             for (const k of PROFILE_FIELDS) {
                 if (dto[k] !== undefined) profileData[k] = dto[k] || null;
             }
-
             if (Object.keys(profileData).length) {
                 const repo = this.repoByRol(rol);
                 if (repo) await em.getRepository(repo.target).update(id, profileData);
             }
 
-            // ── 2. Documento (solo admin sobre otro usuario) ──────────────────
+            // 2. Documento (solo admin sobre otro usuario)
             if (!isSelf && (dto.tipo_documento || dto.numero_documento)) {
                 const cuentaUpd: Record<string, any> = {};
-
-                if (dto.tipo_documento) {
-                    cuentaUpd['tipo_documento'] = dto.tipo_documento;
-                }
-
+                if (dto.tipo_documento) cuentaUpd['tipo_documento'] = dto.tipo_documento;
                 if (dto.numero_documento) {
                     const dni = dto.numero_documento.trim();
                     const conflict = await em.getRepository(Cuenta).findOne({
-                        where: { numero_documento: dni },
-                        select: ['id'],
+                        where: { numero_documento: dni }, select: ['id'],
                     });
                     if (conflict && conflict.id !== id) {
                         throw new ConflictException(`Ya existe un usuario con documento ${dni}`);
@@ -789,37 +756,31 @@ export class UsersService {
                     cuentaUpd['numero_documento'] = dni;
                     cuentaUpd['codigo_acceso'] = this.buildCodigoAcceso(rol, dni);
                 }
-
                 await em.getRepository(Cuenta).update(id, cuentaUpd);
             }
 
-            // ── 3. Contraseña ─────────────────────────────────────────────────
+            // 3. Contraseña (opcional)
             if (dto.new_password) {
                 if (dto.new_password.length < 8) {
                     throw new BadRequestException('La contraseña debe tener al menos 8 caracteres');
                 }
-
                 if (isSelf) {
                     if (!dto.current_password) {
                         throw new BadRequestException('Debes ingresar tu contraseña actual para cambiarla');
                     }
                     const cuenta = await em.getRepository(Cuenta).findOne({
-                        where: { id },
-                        select: ['id', 'password_hash'],
+                        where: { id }, select: ['id', 'password_hash'],
                     });
                     if (!cuenta) throw new NotFoundException('Cuenta no encontrada');
-
                     const ok = await bcrypt.compare(dto.current_password, cuenta.password_hash);
                     if (!ok) throw new BadRequestException('La contraseña actual es incorrecta');
-
                     const isSame = await bcrypt.compare(dto.new_password, cuenta.password_hash);
                     if (isSame) throw new BadRequestException('La nueva contraseña no puede ser igual a la actual');
                 }
-
                 const newHash = await bcrypt.hash(dto.new_password, 10);
                 await em.getRepository(Cuenta).update(id, {
                     password_hash: newHash,
-                    password_changed: isSelf, // admin reset → false; self → true
+                    password_changed: isSelf,
                 });
             }
 
@@ -828,14 +789,12 @@ export class UsersService {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // FOTO DE PERFIL — compresión sharp → WebP antes de subir a R2
+    // FOTO DE PERFIL
     // ══════════════════════════════════════════════════════════════════════════
 
     async updateFoto(id: string, rol: string, file: Express.Multer.File) {
-        // Leer key anterior antes de subir (para borrarla después)
         const oldKeyPromise = this.getFotoKey(id, rol);
 
-        // Comprimir → WebP 800×800 max, quality 80
         const compressed = await sharp(file.buffer)
             .resize(800, 800, { fit: 'inside', withoutEnlargement: true })
             .webp({ quality: 80 })
@@ -850,11 +809,9 @@ export class UsersService {
             'fotos-perfil',
         );
 
-        // Actualizar BD con la nueva key
         const repo = this.repoByRol(rol);
         if (repo) await repo.update(id, { foto_storage_key: newKey });
 
-        // Borrar foto anterior de R2 — solo si existe y es distinta a la nueva
         const oldKey = await oldKeyPromise;
         if (oldKey && oldKey !== newKey) {
             this.storageService.deleteFile(oldKey).catch(() => { });

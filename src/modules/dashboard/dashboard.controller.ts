@@ -16,8 +16,8 @@ export class DashboardController {
     @Get('alumno/resumen')
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles('alumno')
-    getResumen(@CurrentUser() user: { sub: string }) {
-        return this.dashboardService.getAlumnoResumen(user.sub);
+    getResumen(@CurrentUser() user: { id: string }) {
+        return this.dashboardService.getAlumnoResumen(user.id);  // ← user.id no user.sub
     }
 
     /**
