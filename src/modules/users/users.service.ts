@@ -222,8 +222,12 @@ export class UsersService {
     // LISTAR POR ROL — solo campos necesarios para la tabla
     // ══════════════════════════════════════════════════════════════════════════
 
-    async findAdmins() {
-        const rows = await this.adminRepo
+    async findAdmins(filters?: { q?: string; page?: number; limit?: number }) {
+        const page = filters?.page ?? 1;
+        const limit = filters?.limit ?? 20;
+        const offset = (page - 1) * limit;
+
+        const qb = this.adminRepo
             .createQueryBuilder('a')
             .innerJoin('cuentas', 'c', 'c.id = a.id')
             .select([
@@ -239,15 +243,37 @@ export class UsersService {
                 'c.activo           AS activo',
             ])
             .orderBy('a.apellido_paterno', 'ASC')
-            .addOrderBy('a.nombre', 'ASC')
-            .getRawMany();
+            .addOrderBy('a.nombre', 'ASC');
 
+        if (filters?.q && filters.q.trim().length >= 2) {
+            const q = `%${filters.q.trim()}%`;
+            qb.andWhere(
+                `(a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
+              OR a.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
+              OR a.cargo ILIKE :q)`,
+                { q },
+            );
+        }
+
+        const total = await qb.getCount();
+        const rows = await qb.limit(limit).offset(offset).getRawMany();
         rows.forEach(r => this.sanitize(r, true));
-        return rows;
+        return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
+    // users.service.ts
+    async findAlumnos(filters: {
+        q?: string;
+        gradoId?: string;
+        seccionId?: string;
+        page?: number;
+        limit?: number;
+        activo?: boolean;
+    }) {
+        const page = filters.page ?? 1;
+        const limit = filters.limit ?? 20;
+        const offset = (page - 1) * limit;
 
-    async findAlumnos() {
-        const rows = await this.alumnoRepo
+        const qb = this.alumnoRepo
             .createQueryBuilder('a')
             .innerJoin('cuentas', 'c', 'c.id = a.id')
             .leftJoin('matriculas', 'm', 'm.alumno_id = a.id AND m.activo = true')
@@ -266,18 +292,67 @@ export class UsersService {
                 'c.numero_documento  AS numero_documento',
                 'c.tipo_documento    AS tipo_documento',
                 'c.activo            AS activo',
-                "CONCAT(g.orden, '°') AS grado",
-                's.nombre             AS seccion',
-            ])
+                'g.nombre            AS grado',       // ✅ nombre completo
+                'g.id                AS grado_id',
+                's.nombre            AS seccion',
+                's.id                AS seccion_id',
+            ]);
+
+        // ── Filtros dinámicos ──────────────────────────────────────
+        if (filters.seccionId) {
+            qb.andWhere('s.id = :seccionId', { seccionId: filters.seccionId });
+        } else if (filters.gradoId) {
+            qb.andWhere('g.id = :gradoId', { gradoId: Number(filters.gradoId) });
+        }
+
+        if (filters.activo !== undefined) {
+            qb.andWhere('c.activo = :activo', { activo: filters.activo });
+        }
+
+        if (filters.q && filters.q.trim().length >= 2) {
+            const q = `%${filters.q.trim()}%`;
+            qb.andWhere(
+                `(a.nombre           ILIKE :q
+              OR a.apellido_paterno ILIKE :q
+              OR a.apellido_materno ILIKE :q
+              OR c.numero_documento ILIKE :q
+              OR a.codigo_estudiante ILIKE :q)`,
+                { q },
+            );
+        }
+
+        // ── Total para paginación ──────────────────────────────────
+        const total = await qb.getCount();
+
+        // ── Página actual ──────────────────────────────────────────
+        const rows = await qb
             .orderBy('a.apellido_paterno', 'ASC')
             .addOrderBy('a.nombre', 'ASC')
+            .limit(limit)
+            .offset(offset)
             .getRawMany();
 
         rows.forEach(r => this.sanitize(r, true));
-        return rows;
+
+        return {
+            data: rows,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit),
+        };
     }
 
-    async findDocentes(includeTutoria = false) {
+    async findDocentes(filters?: {
+        q?: string;
+        includeTutoria?: boolean;
+        page?: number;
+        limit?: number;
+    }) {
+        const page = filters?.page ?? 1;
+        const limit = filters?.limit ?? 20;
+        const offset = (page - 1) * limit;
+
         const qb = this.docenteRepo
             .createQueryBuilder('d')
             .innerJoin('cuentas', 'c', 'c.id = d.id')
@@ -289,6 +364,8 @@ export class UsersService {
                 'd.especialidad     AS especialidad',
                 'd.email            AS email',
                 'd.telefono         AS telefono',
+                'd.tipo_contrato    AS tipo_contrato',
+                'd.estado_contrato  AS estado_contrato',
                 'd.foto_storage_key AS foto_storage_key',
                 'c.numero_documento AS numero_documento',
                 'c.tipo_documento   AS tipo_documento',
@@ -297,26 +374,40 @@ export class UsersService {
             .orderBy('d.apellido_paterno', 'ASC')
             .addOrderBy('d.nombre', 'ASC');
 
-        if (includeTutoria) {
+        if (filters?.includeTutoria) {
             qb.leftJoin('secciones', 's', 's.tutor_id = d.id AND s.activo = true')
                 .leftJoin('grados', 'g', 'g.id = s.grado_id')
                 .addSelect(`
-                    CASE WHEN s.id IS NULL THEN NULL
-                         ELSE jsonb_build_object(
-                             'seccion_id',    s.id,
-                             'seccion_label', g.nombre || ' – Sección ' || s.nombre
-                         )
-                    END AS tutoria_actual
-                `);
+              CASE WHEN s.id IS NULL THEN NULL
+                   ELSE jsonb_build_object(
+                       'seccion_id',    s.id,
+                       'seccion_label', g.nombre || ' – Sección ' || s.nombre
+                   )
+              END AS tutoria_actual
+          `);
         }
 
-        const rows = await qb.getRawMany();
-        rows.forEach(r => this.sanitize(r, true));
-        return rows;
-    }
+        if (filters?.q && filters.q.trim().length >= 2) {
+            const q = `%${filters.q.trim()}%`;
+            qb.andWhere(
+                `(d.nombre ILIKE :q OR d.apellido_paterno ILIKE :q
+              OR d.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
+              OR d.especialidad ILIKE :q)`,
+                { q },
+            );
+        }
 
-    async findPadres() {
-        const rows = await this.padreRepo
+        const total = await qb.getCount();
+        const rows = await qb.limit(limit).offset(offset).getRawMany();
+        rows.forEach(r => this.sanitize(r, true));
+        return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
+    }
+    async findPadres(filters?: { q?: string; page?: number; limit?: number }) {
+        const page = filters?.page ?? 1;
+        const limit = filters?.limit ?? 20;
+        const offset = (page - 1) * limit;
+
+        const qb = this.padreRepo
             .createQueryBuilder('p')
             .innerJoin('cuentas', 'c', 'c.id = p.id')
             .select([
@@ -333,39 +424,64 @@ export class UsersService {
                 'c.activo           AS activo',
             ])
             .orderBy('p.apellido_paterno', 'ASC')
-            .addOrderBy('p.nombre', 'ASC')
-            .getRawMany();
+            .addOrderBy('p.nombre', 'ASC');
 
+        if (filters?.q && filters.q.trim().length >= 2) {
+            const q = `%${filters.q.trim()}%`;
+            qb.andWhere(
+                `(p.nombre ILIKE :q OR p.apellido_paterno ILIKE :q
+              OR p.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q)`,
+                { q },
+            );
+        }
+
+        const total = await qb.getCount();
+        const rows = await qb.limit(limit).offset(offset).getRawMany();
         rows.forEach(r => this.sanitize(r, true));
-        return rows;
+
+        return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
-    async findPsicologas() {
-        const rows = await this.psicologaRepo
+    async findPsicologas(filters?: { q?: string; page?: number; limit?: number }) {
+        const page = filters?.page ?? 1;
+        const limit = filters?.limit ?? 20;
+        const offset = (page - 1) * limit;
+
+        const qb = this.psicologaRepo
             .createQueryBuilder('p')
             .innerJoin('cuentas', 'c', 'c.id = p.id')
             .select([
                 'p.id               AS id',
-                'c.numero_documento AS dni',
-                'c.tipo_documento   AS tipo_documento',
-                'p.nombre           AS nombres',
+                'p.nombre           AS nombre',
                 'p.apellido_paterno AS apellido_paterno',
                 'p.apellido_materno AS apellido_materno',
-                `TRIM(CONCAT(p.apellido_paterno, ' ', COALESCE(p.apellido_materno, ''))) AS apellidos`,
                 'p.especialidad     AS especialidad',
-                'p.email            AS correo',
+                'p.colegiatura      AS colegiatura',
+                'p.email            AS email',
                 'p.telefono         AS telefono',
                 'p.foto_storage_key AS foto_storage_key',
+                'c.numero_documento AS numero_documento',
+                'c.tipo_documento   AS tipo_documento',
                 'c.activo           AS activo',
             ])
             .orderBy('p.apellido_paterno', 'ASC')
-            .addOrderBy('p.nombre', 'ASC')
-            .getRawMany();
+            .addOrderBy('p.nombre', 'ASC');
 
+        if (filters?.q && filters.q.trim().length >= 2) {
+            const q = `%${filters.q.trim()}%`;
+            qb.andWhere(
+                `(p.nombre ILIKE :q OR p.apellido_paterno ILIKE :q
+              OR p.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
+              OR p.especialidad ILIKE :q)`,
+                { q },
+            );
+        }
+
+        const total = await qb.getCount();
+        const rows = await qb.limit(limit).offset(offset).getRawMany();
         rows.forEach(r => this.sanitize(r, true));
-        return rows;
+        return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
-
     // ══════════════════════════════════════════════════════════════════════════
     // BÚSQUEDAS (autocomplete) — sin cambios, no exponen datos sensibles
     // ══════════════════════════════════════════════════════════════════════════
@@ -828,5 +944,32 @@ export class UsersService {
         if (!repo) return null;
         const r = await repo.findOne({ where: { id }, select: ['foto_storage_key'] });
         return r?.foto_storage_key ?? null;
+    }
+    async createBulk(rol: string, dtos: any[]): Promise<any[]> {
+        const results: any[] = [];
+        for (const dto of dtos) {
+            try {
+                let result: any;
+                switch (rol) {
+                    case 'alumno': result = await this.createAlumno(dto); break;
+                    case 'docente': result = await this.createDocente(dto); break;
+                    case 'padre': result = await this.createPadre(dto); break;
+                    case 'admin': result = await this.createAdmin(dto); break;
+                    case 'psicologa': result = await this.createPsicologa(dto); break;
+                }
+                results.push({
+                    ok: true,
+                    numero_documento: dto.numero_documento,
+                    id: result?.id ?? null,
+                });
+            } catch (e: any) {
+                results.push({
+                    ok: false,
+                    numero_documento: dto.numero_documento,
+                    error: e.message ?? 'Error desconocido',
+                });
+            }
+        }
+        return results;
     }
 }

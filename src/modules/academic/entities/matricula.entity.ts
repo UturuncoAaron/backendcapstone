@@ -18,8 +18,9 @@ export class Matricula {
     @JoinColumn({ name: 'alumno_id' })
     alumno: Alumno;
 
+    // ✅ v7: secciones.id ahora es UUID
     @Column({ name: 'seccion_id' })
-    seccion_id: number;
+    seccion_id: string;
 
     @ManyToOne(() => Section, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'seccion_id' })
@@ -36,7 +37,7 @@ export class Matricula {
     activo: boolean;
 
     @Column({ name: 'fecha_matricula', type: 'date', default: () => 'CURRENT_DATE' })
-    fecha_matricula: Date;
+    fecha_matricula: string;
 
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;

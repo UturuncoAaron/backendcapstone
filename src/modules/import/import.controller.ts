@@ -1,52 +1,37 @@
 import {
     Controller, Post, Get,
     UploadedFile, UseInterceptors,
-    Query, BadRequestException, Res,
+    Query, BadRequestException, Res, UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { ImportService } from './import.service.js';
 import { ImportQueryDto } from './dto/import-query.dto.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
 
-// TODO: agregar JwtAuthGuard + Roles('admin') cuando se implemente JWT
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('admin/import')
 export class ImportController {
     constructor(private readonly importService: ImportService) { }
 
-    /**
-     * POST /api/admin/import/students?seccion_id=1&periodo_id=1
-     * Body: multipart/form-data — campo "file" con el CSV
-     *
-     * Columnas CSV:
-     * tipo_documento, numero_documento, nombre, apellido_paterno,
-     * apellido_materno (opc), fecha_nacimiento (opc), email (opc),
-     * telefono (opc), codigo_estudiante (opc)
-     */
     @Post('students')
+    @Roles('admin')
     @UseInterceptors(FileInterceptor('file'))
     async importStudents(
         @UploadedFile() file: Express.Multer.File,
         @Query() query: ImportQueryDto,
     ) {
-        if (!file) {
-            throw new BadRequestException('Se requiere un archivo CSV (campo: file)');
-        }
-
-        if (!file.originalname.endsWith('.csv')) {
-            throw new BadRequestException('El archivo debe ser .csv');
-        }
+        if (!file) throw new BadRequestException('Se requiere un archivo CSV (campo: file)');
+        if (!file.originalname.endsWith('.csv')) throw new BadRequestException('El archivo debe ser .csv');
 
         const rows = this.importService.parseCsv(file.buffer);
-        const result = await this.importService.importStudents(rows, query);
-
-        return result;
+        return this.importService.importStudents(rows, query);
     }
 
-    /**
-     * GET /api/admin/import/students/template
-     * Descarga CSV de ejemplo para importación
-     */
     @Get('students/template')
+    @Roles('admin')
     downloadTemplate(@Res() res: Response): void {
         const headers = 'tipo_documento,numero_documento,nombre,apellido_paterno,apellido_materno,fecha_nacimiento,email,telefono,codigo_estudiante';
         const example = 'dni,12345678,Juan,García,López,2010-03-15,juan@mail.com,999888777,EST001';

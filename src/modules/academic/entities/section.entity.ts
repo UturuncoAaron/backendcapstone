@@ -8,8 +8,8 @@ import { Docente } from '../../users/entities/docente.entity.js';
 
 @Entity('secciones')
 export class Section {
-    @PrimaryGeneratedColumn()
-    id: number;
+    @PrimaryGeneratedColumn('uuid')
+    id: string;
 
     @Column({ name: 'grado_id' })
     grado_id: number;

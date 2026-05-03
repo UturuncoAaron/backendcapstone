@@ -24,36 +24,84 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
+    // ══════════════════════════════════════════════════════════════
+    // LISTAR CON PAGINACIÓN
+    // ══════════════════════════════════════════════════════════════
 
-
-    // ── Listar ───────────────────────────────────────────────────────────
     @Get('admins')
-    findAdmins() {
-        return this.usersService.findAdmins();
+    findAdmins(
+        @Query('q') q?: string,
+        @Query('page') page = '1',
+        @Query('limit') limit = '20',
+    ) {
+        return this.usersService.findAdmins({
+            q,
+            page: Math.max(1, parseInt(page)),
+            limit: Math.min(100, parseInt(limit)),
+        });
     }
 
     @Get('alumnos')
-    findAlumnos() {
-        return this.usersService.findAlumnos();
+    findAlumnos(
+        @Query('q') q?: string,
+        @Query('grado_id') gradoId?: string,
+        @Query('seccion_id') seccionId?: string,
+        @Query('page') page = '1',
+        @Query('limit') limit = '20',
+    ) {
+        return this.usersService.findAlumnos({
+            q, gradoId, seccionId,
+            page: Math.max(1, parseInt(page)),
+            limit: Math.min(100, parseInt(limit)),
+        });
     }
 
     @Get('docentes')
-    findDocentes(@Query('include') include?: string) {
-        return this.usersService.findDocentes(include === 'tutoria');
+    findDocentes(
+        @Query('q') q?: string,
+        @Query('include') include?: string,
+        @Query('page') page = '1',
+        @Query('limit') limit = '20',
+    ) {
+        return this.usersService.findDocentes({
+            q,
+            includeTutoria: include === 'tutoria',
+            page: Math.max(1, parseInt(page)),
+            limit: Math.min(100, parseInt(limit)),
+        });
     }
 
     @Get('padres')
-    findPadres() {
-        return this.usersService.findPadres();
+    findPadres(
+        @Query('q') q?: string,
+        @Query('page') page = '1',
+        @Query('limit') limit = '20',
+    ) {
+        return this.usersService.findPadres({
+            q,
+            page: Math.max(1, parseInt(page)),
+            limit: Math.min(100, parseInt(limit)),
+        });
     }
 
     @Get('psicologos')
-    findPsicologas() {
-        return this.usersService.findPsicologas();
+    findPsicologas(
+        @Query('q') q?: string,
+        @Query('page') page = '1',
+        @Query('limit') limit = '20',
+    ) {
+        return this.usersService.findPsicologas({
+            q,
+            page: Math.max(1, parseInt(page)),
+            limit: Math.min(100, parseInt(limit)),
+        });
     }
 
-    // ── Buscar (autocomplete) ─────────────────────────────────────────────
-    // IMPORTANTE: estas rutas deben estar ANTES de /:id para evitar conflictos
+    // ══════════════════════════════════════════════════════════════
+    // BÚSQUEDA AUTOCOMPLETE
+    // IMPORTANTE: rutas con sufijo ANTES de /:id
+    // ══════════════════════════════════════════════════════════════
+
     @Get('alumnos/search')
     searchAlumnos(@Query('q') q: string) {
         return this.usersService.searchAlumnos(q);
@@ -69,7 +117,10 @@ export class UsersController {
         return this.usersService.searchDocentes(q);
     }
 
-    // ── Obtener uno por id ────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    // OBTENER UNO POR ID
+    // ══════════════════════════════════════════════════════════════
+
     @Get('alumnos/:id')
     findAlumno(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findAlumnoById(id);
@@ -95,7 +146,10 @@ export class UsersController {
         return this.usersService.findPsicologaById(id);
     }
 
-    // ── Crear por rol ─────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    // CREAR INDIVIDUAL
+    // ══════════════════════════════════════════════════════════════
+
     @Post('alumnos')
     createAlumno(@Body() dto: CreateAlumnoDto) {
         return this.usersService.createAlumno(dto);
@@ -121,7 +175,38 @@ export class UsersController {
         return this.usersService.createPsicologa(dto);
     }
 
-    // ── PUT unificado ─────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    // CREAR MASIVO (seed/testing — borrar en producción)
+    // ══════════════════════════════════════════════════════════════
+
+    @Post('alumnos/bulk')
+    async createAlumnosBulk(@Body() dtos: CreateAlumnoDto[]) {
+        return this.usersService.createBulk('alumno', dtos);
+    }
+
+    @Post('docentes/bulk')
+    async createDocentesBulk(@Body() dtos: CreateDocenteDto[]) {
+        return this.usersService.createBulk('docente', dtos);
+    }
+
+    @Post('padres/bulk')
+    async createPadresBulk(@Body() dtos: CreatePadreDto[]) {
+        return this.usersService.createBulk('padre', dtos);
+    }
+
+    @Post('admins/bulk')
+    async createAdminsBulk(@Body() dtos: CreateAdminDto[]) {
+        return this.usersService.createBulk('admin', dtos);
+    }
+
+    @Post('psicologos/bulk')
+    async createPsicologasBulk(@Body() dtos: CreatePsicologaDto[]) {
+        return this.usersService.createBulk('psicologa', dtos);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // ACTUALIZAR
+    // ══════════════════════════════════════════════════════════════
 
     @Put(':id')
     async updateUser(
@@ -133,7 +218,10 @@ export class UsersController {
         return this.usersService.updateFull(id, cuenta.rol, dto, false);
     }
 
-    // ── Desactivar / Reactivar ────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    // ACTIVAR / DESACTIVAR
+    // ══════════════════════════════════════════════════════════════
+
     @Delete(':id')
     @HttpCode(HttpStatus.OK)
     deactivate(@Param('id', ParseUUIDPipe) id: string) {
@@ -146,7 +234,10 @@ export class UsersController {
         return this.usersService.reactivate(id);
     }
 
-    // ── Reset password ────────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    // RESET PASSWORD
+    // ══════════════════════════════════════════════════════════════
+
     @Patch(':id/reset-password')
     resetPassword(
         @Param('id', ParseUUIDPipe) id: string,
@@ -155,7 +246,10 @@ export class UsersController {
         return this.usersService.resetPassword(id);
     }
 
-    // ── Vincular padre ↔ alumno ───────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════
+    // VÍNCULO PADRE ↔ ALUMNO
+    // ══════════════════════════════════════════════════════════════
+
     @Post('parent-child')
     linkPadreAlumno(@Body() dto: LinkPadreAlumnoDto) {
         return this.usersService.linkPadreAlumno(dto);

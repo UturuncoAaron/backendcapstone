@@ -118,7 +118,7 @@ export class CoursesService {
         return { curso: course.nombre, docente: `${docente.nombre} ${docente.apellido_paterno}` };
     }
 
-    async generateCoursesFromTemplate(seccionId: number, periodoId: number) {
+    async generateCoursesFromTemplate(seccionId: string, periodoId: number) {
         const [seccion] = await this.dataSource.query(
             `SELECT s.id, s.nombre, g.nombre AS grado, g.orden
              FROM secciones s JOIN grados g ON g.id = s.grado_id WHERE s.id = $1`,

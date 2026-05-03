@@ -64,7 +64,7 @@ export class CoursesController {
     @Post('generate/:seccionId/:periodoId')
     @Roles('admin')
     generateFromTemplate(
-        @Param('seccionId', ParseIntPipe) seccionId: number,
+        @Param('seccionId', ParseIntPipe) seccionId: string,
         @Param('periodoId', ParseIntPipe) periodoId: number,
     ) {
         return this.coursesService.generateCoursesFromTemplate(seccionId, periodoId);

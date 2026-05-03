@@ -1,7 +1,7 @@
 import {
-    Controller, Get, Post, Patch, Delete,
-    Body, Param, Query, Req,
-    ParseIntPipe, UseGuards,
+    Controller, Get, Post, Patch,
+    Body, Param, Query,
+    ParseIntPipe, ParseUUIDPipe, UseGuards,
 } from '@nestjs/common';
 import { AcademicService } from './academic.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -53,7 +53,7 @@ export class AcademicController {
     @Patch('secciones/:id/tutor')
     @Roles('admin')
     asignarTutor(
-        @Param('id', ParseIntPipe) seccionId: number,
+        @Param('id', ParseUUIDPipe) seccionId: string,
         @Body() body: { docente_id: string | null; force?: boolean },
     ) {
         return this.academicService.asignarTutor(
@@ -103,12 +103,13 @@ export class AcademicController {
         return this.academicService.activarPeriodo(id);
     }
 
-    // ── MATRÍCULAS ────────────────────────────────────────────────
-    @Get('matriculas')
+    // ── MATRÍCULAS ───────────────────────────────────────────────
+
+   @Get('matriculas')
     @Roles('admin')
     findMatriculas(
         @Query('periodo_id', new ParseIntPipe({ optional: true })) periodoId?: number,
-        @Query('seccion_id', new ParseIntPipe({ optional: true })) seccionId?: number,
+        @Query('seccion_id') seccionId?: string,
     ) {
         return this.academicService.findMatriculas(periodoId, seccionId);
     }

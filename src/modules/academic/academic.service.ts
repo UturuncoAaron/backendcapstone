@@ -63,6 +63,8 @@ export class AcademicService {
         const saved = await this.seccionRepo.save(seccion);
 
         const periodoActivo = await this.periodoRepo.findOne({ where: { activo: true } });
+
+        // saved.id es string UUID ✓ — periodoActivo.id es number (SERIAL) ✓
         const cursosGenerados = periodoActivo
             ? await this.coursesService.generateCoursesFromTemplate(saved.id, periodoActivo.id)
             : null;
@@ -70,12 +72,13 @@ export class AcademicService {
         return {
             seccion: saved,
             cursos: cursosGenerados ?? {
-                mensaje: 'No hay periodo activo — cursos no generados. Activa un periodo e invoca POST /api/courses/generate/:seccionId/:periodoId',
+                mensaje: 'No hay periodo activo — cursos no generados.',
             },
         };
     }
 
-    async asignarTutor(seccionId: number, docenteId: string | null, force = false) {
+    // seccionId: number → string (UUID en v7)
+    async asignarTutor(seccionId: string, docenteId: string | null, force = false) {
         const seccion = await this.seccionRepo.findOne({ where: { id: seccionId } });
         if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
 
@@ -237,9 +240,7 @@ export class AcademicService {
         const exists = await this.periodoRepo.findOne({
             where: { anio: dto.anio, bimestre: dto.bimestre },
         });
-        if (exists) {
-            throw new ConflictException(`Ya existe el bimestre ${dto.bimestre} del año ${dto.anio}`);
-        }
+        if (exists) throw new ConflictException(`Ya existe el bimestre ${dto.bimestre} del año ${dto.anio}`);
         return this.periodoRepo.save(this.periodoRepo.create(dto));
     }
 
@@ -255,8 +256,10 @@ export class AcademicService {
         return this.periodoRepo.findOne({ where: { id } });
     }
 
-    // ── MATRÍCULAS ────────────────────────────────────────────────
-    async findMatriculas(periodoId?: number, seccionId?: number) {
+    // ── MATRÍCULAS ───────────────────────────────────────────────
+
+    // seccionId: number → string (UUID en v7)
+    async findMatriculas(periodoId?: number, seccionId?: string) {
         const params: any[] = [];
         const conditions: string[] = [];
 
@@ -274,26 +277,16 @@ export class AcademicService {
 
         const rows = await this.dataSource.query(
             `SELECT
-                m.id,
-                m.activo,
-                m.fecha_matricula,
-                m.periodo_id,
-                m.seccion_id,
-                -- Alumno
+                m.id, m.activo, m.fecha_matricula, m.periodo_id, m.seccion_id,
                 a.id               AS alumno_id,
-                a.nombre,
-                a.apellido_paterno,
-                a.apellido_materno,
-                a.codigo_estudiante,
-                -- Sección
+                a.nombre, a.apellido_paterno, a.apellido_materno, a.codigo_estudiante,
                 s.nombre           AS seccion_nombre,
                 s.capacidad,
-                -- Grado
                 g.id               AS grado_id,
                 g.nombre           AS grado_nombre,
                 g.orden            AS grado_orden
              FROM matriculas m
-             JOIN alumnos  a ON a.id = m.alumno_id
+             JOIN alumnos   a ON a.id = m.alumno_id
              JOIN secciones s ON s.id = m.seccion_id
              JOIN grados    g ON g.id = s.grado_id
              ${where}
