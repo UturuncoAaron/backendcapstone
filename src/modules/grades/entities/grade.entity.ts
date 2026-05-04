@@ -33,20 +33,49 @@ export class Grade {
     @JoinColumn({ name: 'periodo_id' })
     periodo: Period;
 
-    @Column({ name: 'nota_examenes', type: 'decimal', precision: 4, scale: 2, nullable: true })
+    @Column({ nullable: true, length: 200 })
+    titulo: string | null;
+
+    @Column({
+        name: 'nota_examenes',
+        type: 'decimal', precision: 4, scale: 2,
+        nullable: true,
+    })
     nota_examenes: number | null;
 
-    @Column({ name: 'nota_tareas', type: 'decimal', precision: 4, scale: 2, nullable: true })
+    @Column({
+        name: 'nota_tareas',
+        type: 'decimal', precision: 4, scale: 2,
+        nullable: true,
+    })
     nota_tareas: number | null;
 
-    @Column({ name: 'nota_participacion', type: 'decimal', precision: 4, scale: 2, nullable: true })
+    @Column({
+        name: 'nota_participacion',
+        type: 'decimal', precision: 4, scale: 2,
+        nullable: true,
+    })
     nota_participacion: number | null;
 
-    @Column({ name: 'nota_final', type: 'decimal', precision: 4, scale: 2, nullable: true })
+    @Column({
+        name: 'nota_final',
+        type: 'decimal', precision: 4, scale: 2,
+        nullable: true,
+    })
     nota_final: number | null;
 
-    // Generada por la BD automáticamente — solo lectura
-    @Column({ nullable: true, length: 5, insert: false, update: false })
+    @Column({
+        nullable: true,
+        length: 5,
+        generatedType: 'STORED',
+        asExpression: `CASE
+            WHEN nota_final >= 18 THEN 'AD'
+            WHEN nota_final >= 14 THEN 'A'
+            WHEN nota_final >= 11 THEN 'B'
+            WHEN nota_final IS NOT NULL THEN 'C'
+            ELSE NULL
+        END`,
+    })
     escala: string | null;
 
     @Column({ type: 'text', nullable: true })

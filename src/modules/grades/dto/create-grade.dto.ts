@@ -1,6 +1,6 @@
 import {
     IsUUID, IsInt, IsNumber,
-    IsOptional, IsString, Min, Max,
+    IsOptional, IsString, Min, Max, MaxLength,
 } from 'class-validator';
 
 export class CreateGradeDto {
@@ -12,6 +12,11 @@ export class CreateGradeDto {
 
     @IsInt()
     periodo_id: number;
+    
+    @IsString()
+    @IsOptional()
+    @MaxLength(200)
+    titulo?: string;
 
     @IsNumber() @IsOptional() @Min(0) @Max(20)
     nota_examenes?: number;

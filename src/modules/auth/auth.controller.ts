@@ -12,7 +12,6 @@ import { Public } from './decorators/public.decorator.js';
 export class AuthController {
   constructor(private readonly authService: AuthService) { }
 
-  // POST /api/auth/login
   @Post('login')
   @Public()
   @HttpCode(HttpStatus.OK)
@@ -20,11 +19,24 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
-  // GET /api/auth/profile
   @Get('profile')
   @UseGuards(JwtAuthGuard)
   getProfile(@CurrentUser() user: any) {
-    return this.authService.getProfile(user.sub);
+    // 💡 Aseguramos usar el ID correcto
+    const userId = user.id || user.sub;
+    return this.authService.getProfile(userId);
+  }
+
+  // POST /api/auth/change-password
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  changePasswordPost(
+    @CurrentUser() user: any,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    const userId = user.id || user.sub;
+    return this.authService.changePassword(userId, dto);
   }
 
   // PATCH /api/auth/change-password
@@ -35,6 +47,8 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() dto: ChangePasswordDto,
   ) {
-    return this.authService.changePassword(user.id, dto);
+    // 💡 Aseguramos usar el ID correcto
+    const userId = user.id || user.sub;
+    return this.authService.changePassword(userId, dto);
   }
 }

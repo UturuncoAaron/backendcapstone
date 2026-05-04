@@ -23,10 +23,12 @@ export class ImportController {
         @UploadedFile() file: Express.Multer.File,
         @Query() query: ImportQueryDto,
     ) {
-        if (!file) throw new BadRequestException('Se requiere un archivo CSV (campo: file)');
-        if (!file.originalname.endsWith('.csv')) throw new BadRequestException('El archivo debe ser .csv');
-
-        const rows = this.importService.parseCsv(file.buffer);
+        if (!file) throw new BadRequestException('Se requiere un archivo (campo: file)');
+        const extension = file.originalname.split('.').pop()?.toLowerCase();
+        if (!['csv', 'xls', 'xlsx'].includes(extension || '')) {
+            throw new BadRequestException('El archivo debe ser .csv, .xls o .xlsx');
+        }
+        const rows = this.importService.parseFile(file.originalname, file.buffer);
         return this.importService.importStudents(rows, query);
     }
 

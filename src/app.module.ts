@@ -15,7 +15,6 @@ import { ForumModule } from './modules/forum/forum.module.js';
 import { GradesModule } from './modules/grades/grades.module.js';
 import { StorageModule } from './modules/storage/storage.module.js';
 import { LibretasModule } from './modules/libretas/libretas.module.js';
-import { ConfiguracionModule } from './modules/configuracion/configuracion.module.js';
 import { LiveClassesModule } from './modules/live-classes/live-classes.module.js';
 import { AnnouncementsModule } from './modules/announcements/announcements.module.js';
 import { ReportsModule } from './modules/reports/reports.module.js';
@@ -88,7 +87,6 @@ console.log('NODE_ENV:', process.env.NODE_ENV, '| isDev:', isDev);
     // ── Admin ─────────────────────────────────────────────────────
     ImportModule,
     ReportsModule,
-    ConfiguracionModule,
 
     // ── Permissions & Notifications ───────────────────────────────
     PermissionsModule,

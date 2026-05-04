@@ -49,19 +49,13 @@ export class AuthService {
     async changePassword(userId: string, dto: ChangePasswordDto) {
         const cuenta = await this.usersService.findCuentaById(userId);
         if (!cuenta || !cuenta.activo) throw new UnauthorizedException('Cuenta no encontrada');
-
-        const passwordOk = await bcrypt.compare(dto.current_password, cuenta.password_hash);
-        if (!passwordOk) throw new BadRequestException('La contraseña actual es incorrecta');
-
         const isSame = await bcrypt.compare(dto.new_password, cuenta.password_hash);
-        if (isSame) throw new BadRequestException('La nueva contraseña no puede ser igual a la actual');
-
+        if (isSame) throw new BadRequestException('La nueva contraseña no puede ser igual a tu número de documento actual');
         const newHash = await bcrypt.hash(dto.new_password, 10);
         await this.usersService.updatePassword(userId, newHash);
 
         return { message: 'Contraseña actualizada correctamente' };
     }
-
     async getProfile(userId: string) {
         const cuenta = await this.usersService.findCuentaById(userId);
         if (!cuenta || !cuenta.activo) throw new UnauthorizedException('Usuario no encontrado o inactivo');

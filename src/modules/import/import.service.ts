@@ -2,6 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import * as xlsx from 'xlsx';
 import { Cuenta } from '../users/entities/cuenta.entity.js';
 import { Alumno } from '../users/entities/alumno.entity.js';
 import { Matricula } from '../academic/entities/matricula.entity.js';
@@ -19,6 +20,47 @@ export class ImportService {
         @InjectDataSource()
         private readonly dataSource: DataSource,
     ) { }
+
+    parseFile(originalname: string, buffer: Buffer): CsvRow[] {
+        const ext = originalname.split('.').pop()?.toLowerCase();
+        if (ext === 'csv') {
+            return this.parseCsv(buffer);
+        } else {
+            return this.parseExcel(buffer);
+        }
+    }
+    parseExcel(buffer: Buffer): CsvRow[] {
+        const workbook = xlsx.read(buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+
+        const rawData = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
+
+        if (!rawData || rawData.length === 0) {
+            throw new BadRequestException('El archivo Excel está vacío o no tiene datos válidos');
+        }
+
+        const rows: CsvRow[] = rawData.map((row: any) => {
+            const normalizedRow: any = {};
+            for (const key in row) {
+                const normalizedKey = key.trim().toLowerCase();
+                normalizedRow[normalizedKey] = String(row[key]).trim();
+            }
+            return normalizedRow as CsvRow;
+        });
+
+        const required = ['tipo_documento', 'numero_documento', 'nombre', 'apellido_paterno'];
+        if (rows.length > 0) {
+            const firstRowHeaders = Object.keys(rows[0]);
+            for (const col of required) {
+                if (!firstRowHeaders.includes(col)) {
+                    throw new BadRequestException(`Columna obligatoria faltante en Excel: "${col}"`);
+                }
+            }
+        }
+
+        return rows;
+    }
 
     parseCsv(buffer: Buffer): CsvRow[] {
         const text = buffer.toString('utf-8').replace(/^\uFEFF/, '');
@@ -55,16 +97,14 @@ export class ImportService {
             errores: [],
         };
 
-        // Verificar sección (UUID en v7)
         const seccion = await this.dataSource.query(
             `SELECT id FROM secciones WHERE id = $1`,
-            [query.seccion_id],   // string UUID ✓
+            [query.seccion_id],
         );
         if (!seccion.length) {
             throw new BadRequestException(`Sección ${query.seccion_id} no existe`);
         }
 
-        // Verificar periodo (INT en v7)
         const periodo = await this.dataSource.query(
             `SELECT id FROM periodos WHERE id = $1`,
             [query.periodo_id],
@@ -117,7 +157,6 @@ export class ImportService {
                             apellido_materno: row.apellido_materno?.trim() || null,
                             email: row.email?.trim() || null,
                             telefono: row.telefono?.trim() || null,
-                            // fecha_nacimiento nullable en v7 ✓
                             fecha_nacimiento: row.fecha_nacimiento ? new Date(row.fecha_nacimiento) : null,
                         })
                     );
@@ -131,7 +170,6 @@ export class ImportService {
                     result.omitidos++;
                 }
 
-                // seccion_id ahora es UUID string en v7 ✓
                 const yaMatriculado = await this.matriculaRepo.findOne({
                     where: {
                         alumno_id: cuenta.id,

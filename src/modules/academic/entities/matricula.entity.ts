@@ -18,7 +18,6 @@ export class Matricula {
     @JoinColumn({ name: 'alumno_id' })
     alumno: Alumno;
 
-    // ✅ v7: secciones.id ahora es UUID
     @Column({ name: 'seccion_id' })
     seccion_id: string;
 

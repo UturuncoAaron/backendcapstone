@@ -737,8 +737,11 @@ export class UsersService {
         return { message: 'Contraseña reseteada al DNI correctamente' };
     }
 
-    async updatePassword(id: string, newHash: string): Promise<void> {
-        await this.cuentaRepo.update(id, { password_hash: newHash, password_changed: true });
+    async updatePassword(id: string, newHash: string) {
+        await this.cuentaRepo.update({ id }, {
+            password_hash: newHash,
+            password_changed: true
+        });
     }
 
     // ══════════════════════════════════════════════════════════════════════════
