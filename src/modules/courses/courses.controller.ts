@@ -11,6 +11,8 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 
+interface AuthUser { id: string; rol: string; }
+
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('courses')
 export class CoursesController {
@@ -23,13 +25,10 @@ export class CoursesController {
     @Get()
     @Roles('alumno', 'docente', 'admin')
     findMyCourses(
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @Query('seccion_id') seccionId?: string,
     ) {
-        return this.coursesService.findMyCourses(
-            user.id, user.rol,
-            seccionId ? +seccionId : undefined,
-        );
+        return this.coursesService.findMyCourses(user.id, user.rol, seccionId);
     }
 
     // POST /api/courses
@@ -39,7 +38,7 @@ export class CoursesController {
         nombre: string;
         descripcion?: string;
         docente_id?: string;
-        seccion_id: number;
+        seccion_id: string;
         periodo_id: number;
         color?: string;
     }) {
@@ -49,7 +48,7 @@ export class CoursesController {
     // POST /api/courses/enroll
     @Post('enroll')
     @Roles('admin')
-    enroll(@Body() dto: { alumnoId: string; seccionId: number; periodoId: number }) {
+    enroll(@Body() dto: { alumnoId: string; seccionId: string; periodoId: number }) {
         return this.coursesService.enrollStudent(dto.alumnoId, dto.seccionId, dto.periodoId);
     }
 
@@ -64,7 +63,7 @@ export class CoursesController {
     @Post('generate/:seccionId/:periodoId')
     @Roles('admin')
     generateFromTemplate(
-        @Param('seccionId', ParseIntPipe) seccionId: string,
+        @Param('seccionId', ParseUUIDPipe) seccionId: string,
         @Param('periodoId', ParseIntPipe) periodoId: number,
     ) {
         return this.coursesService.generateCoursesFromTemplate(seccionId, periodoId);
@@ -73,7 +72,7 @@ export class CoursesController {
     // GET /api/courses/seccion/:id/students
     @Get('seccion/:id/students')
     @Roles('admin', 'docente')
-    getStudents(@Param('id', ParseIntPipe) id: number) {
+    getStudents(@Param('id', ParseUUIDPipe) id: string) {
         return this.coursesService.getEnrollmentsBySeccion(id);
     }
 
@@ -89,9 +88,9 @@ export class CoursesController {
     @Roles('alumno')
     getProgress(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.materialsService.getCourseProgress(id, user);
+        return this.materialsService.getCourseProgress(id, user.id);
     }
 
     // PATCH /api/courses/:id
@@ -99,7 +98,7 @@ export class CoursesController {
     @Roles('docente', 'admin')
     update(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @Body() dto: { nombre?: string; descripcion?: string; activo?: boolean },
     ) {
         return this.coursesService.update(id, user.id, user.rol, dto);

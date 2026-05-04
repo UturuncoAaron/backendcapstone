@@ -1,13 +1,28 @@
 import {
     Entity, PrimaryGeneratedColumn, Column,
     CreateDateColumn, UpdateDateColumn,
-    ManyToOne, JoinColumn,
+    ManyToOne, JoinColumn, Index, Unique,
 } from 'typeorm';
 import { Alumno } from '../../users/entities/alumno.entity.js';
 import { Course } from '../../courses/entities/course.entity.js';
 import { Period } from '../../academic/entities/period.entity.js';
 
+const decimalToNumber = {
+    to: (v: number | null | undefined) => v,
+    from: (v: string | null) => (v == null ? null : parseFloat(v)),
+};
+
+export const TIPOS_NOTA = [
+    'examen', 'tarea', 'practica',
+    'participacion', 'proyecto', 'otro',
+] as const;
+export type TipoNota = typeof TIPOS_NOTA[number];
+
 @Entity('notas')
+@Unique('notas_uq_alumno_curso_periodo_titulo',
+    ['alumno_id', 'curso_id', 'periodo_id', 'titulo'])
+@Index('idx_notas_curso_periodo', ['curso_id', 'periodo_id'])
+@Index('idx_notas_alumno_periodo', ['alumno_id', 'periodo_id'])
 export class Grade {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -33,53 +48,23 @@ export class Grade {
     @JoinColumn({ name: 'periodo_id' })
     periodo: Period;
 
-    @Column({ nullable: true, length: 200 })
-    titulo: string | null;
+    @Column({ length: 200 })
+    titulo: string;
+
+    @Column({ length: 20 })
+    tipo: TipoNota;
 
     @Column({
-        name: 'nota_examenes',
         type: 'decimal', precision: 4, scale: 2,
-        nullable: true,
+        nullable: true, transformer: decimalToNumber,
     })
-    nota_examenes: number | null;
-
-    @Column({
-        name: 'nota_tareas',
-        type: 'decimal', precision: 4, scale: 2,
-        nullable: true,
-    })
-    nota_tareas: number | null;
-
-    @Column({
-        name: 'nota_participacion',
-        type: 'decimal', precision: 4, scale: 2,
-        nullable: true,
-    })
-    nota_participacion: number | null;
-
-    @Column({
-        name: 'nota_final',
-        type: 'decimal', precision: 4, scale: 2,
-        nullable: true,
-    })
-    nota_final: number | null;
-
-    @Column({
-        nullable: true,
-        length: 5,
-        generatedType: 'STORED',
-        asExpression: `CASE
-            WHEN nota_final >= 18 THEN 'AD'
-            WHEN nota_final >= 14 THEN 'A'
-            WHEN nota_final >= 11 THEN 'B'
-            WHEN nota_final IS NOT NULL THEN 'C'
-            ELSE NULL
-        END`,
-    })
-    escala: string | null;
+    nota: number | null;
 
     @Column({ type: 'text', nullable: true })
     observaciones: string | null;
+
+    @Column({ type: 'date', nullable: true })
+    fecha: string | null;
 
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;

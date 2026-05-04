@@ -1,82 +1,123 @@
 import {
-    Controller, Get, Post, Param, Body,
-    Query, ParseUUIDPipe, UseGuards,
+    Controller, Get, Post, Put, Patch, Delete,
+    Param, Body, Query, ParseUUIDPipe, UseGuards, HttpCode,
 } from '@nestjs/common';
 import { GradesService } from './grades.service.js';
 import { CreateGradeDto } from './dto/create-grade.dto.js';
+import { UpdateGradeDto } from './dto/update-grade.dto.js';
+import { BulkGradesDto } from './dto/bulk-grades.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 
+interface AuthUser { id: string; rol: string; }
+
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('grades')
 export class GradesController {
-    constructor(private readonly gradesService: GradesService) { }
+    constructor(private readonly grades: GradesService) { }
 
-    // Alumno: ver sus propias notas
-    // GET /api/grades/my
+    // GET /api/grades/my?anio=2025
     @Get('my')
     @Roles('alumno')
-    getMyGrades(@CurrentUser() user: any) {
-        return this.gradesService.getMyGrades(user.sub);
+    getMyGrades(@CurrentUser() user: AuthUser, @Query('anio') anio?: string) {
+        return this.grades.getGradesByAlumno(
+            user.id, anio ? parseInt(anio, 10) : undefined,
+        );
     }
 
-    // Docente: ver actividades (títulos) registradas en un curso
+    // GET /api/grades/alumno/:alumnoId?anio=2025
+    @Get('alumno/:alumnoId')
+    @Roles('docente', 'admin', 'padre')
+    getGradesByAlumno(
+        @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
+        @CurrentUser() user: AuthUser,
+        @Query('anio') anio?: string,
+    ) {
+        return this.grades.getGradesByAlumnoForUser(
+            alumnoId, user, anio ? parseInt(anio, 10) : undefined,
+        );
+    }
+
+    // GET /api/grades/course/:cursoId?periodoId=1
+    @Get('course/:cursoId')
+    @Roles('docente', 'admin')
+    getCourseGrid(
+        @Param('cursoId', ParseUUIDPipe) cursoId: string,
+        @CurrentUser() user: AuthUser,
+        @Query('periodoId') periodoId?: string,
+    ) {
+        return this.grades.getCourseGrid(
+            cursoId, user, periodoId ? parseInt(periodoId, 10) : undefined,
+        );
+    }
+
     // GET /api/grades/course/:cursoId/actividades?periodoId=1
     @Get('course/:cursoId/actividades')
     @Roles('docente', 'admin')
     getActividades(
         @Param('cursoId', ParseUUIDPipe) cursoId: string,
+        @CurrentUser() user: AuthUser,
         @Query('periodoId') periodoId?: string,
     ) {
-        return this.gradesService.getActividadesByCourse(
-            cursoId,
-            periodoId ? parseInt(periodoId) : undefined,
+        return this.grades.getActividadesByCourse(
+            cursoId, user, periodoId ? parseInt(periodoId, 10) : undefined,
         );
     }
 
-    // Docente: lista de alumnos con su nota para una actividad
-    // GET /api/grades/course/:cursoId?periodoId=1&titulo=Examen Parcial
-    // Sin titulo → notas finales del bimestre
-    @Get('course/:cursoId')
-    @Roles('docente', 'admin')
-    getGradesByCourse(
-        @Param('cursoId', ParseUUIDPipe) cursoId: string,
-        @Query('periodoId') periodoId?: string,
-        @Query('titulo') titulo?: string,
-    ) {
-        return this.gradesService.getGradesByCourse(
-            cursoId,
-            periodoId ? parseInt(periodoId) : undefined,
-            titulo,
-        );
+    // GET /api/grades/:id
+    @Get(':id')
+    @Roles('docente', 'admin', 'padre', 'alumno')
+    getOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+        return this.grades.getOneFor(id, user);
     }
 
-    // Padre/Admin/Docente: todas las notas de un alumno
-    // GET /api/grades/alumno/:alumnoId
-    @Get('alumno/:alumnoId')
-    @Roles('docente', 'admin', 'padre')
-    getGradesByAlumno(@Param('alumnoId', ParseUUIDPipe) alumnoId: string) {
-        return this.gradesService.getGradesByAlumno(alumnoId);
-    }
-
-    // Docente: registrar o actualizar una nota
-    // POST /api/grades
+    // POST /api/grades   (409 si ya existe)
     @Post()
     @Roles('docente', 'admin')
-    upsertGrade(@Body() dto: CreateGradeDto) {
-        return this.gradesService.upsertGrade(dto);
+    create(@Body() dto: CreateGradeDto, @CurrentUser() user: AuthUser) {
+        return this.grades.create(dto, user);
     }
 
-    // Docente: guardar notas de todo el salón de una vez
-    // POST /api/grades/bulk
-    @Post('bulk')
+    // PUT /api/grades/:id
+    @Put(':id')
     @Roles('docente', 'admin')
-    upsertBulk(@Body() dtos: CreateGradeDto[]) {
-        if (!Array.isArray(dtos) || dtos.length === 0) {
-            return { guardadas: 0, errores: [] };
-        }
-        return this.gradesService.upsertBulk(dtos);
+    replace(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: CreateGradeDto,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.grades.replace(id, dto, user);
+    }
+
+    // PATCH /api/grades/:id
+    @Patch(':id')
+    @Roles('docente', 'admin')
+    update(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: UpdateGradeDto,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.grades.update(id, dto, user);
+    }
+
+    // DELETE /api/grades/:id
+    @Delete(':id')
+    @HttpCode(204)
+    @Roles('docente', 'admin')
+    remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+        return this.grades.remove(id, user);
+    }
+
+    // POST /api/grades/course/:cursoId/bulk
+    @Post('course/:cursoId/bulk')
+    @Roles('docente', 'admin')
+    bulk(
+        @Param('cursoId', ParseUUIDPipe) cursoId: string,
+        @Body() dto: BulkGradesDto,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.grades.upsertBulk(cursoId, dto.items, user);
     }
 }

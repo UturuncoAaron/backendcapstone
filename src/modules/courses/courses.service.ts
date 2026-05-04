@@ -17,7 +17,9 @@ export class CoursesService {
         private readonly dataSource: DataSource,
     ) { }
 
-    async findMyCourses(userId: string, rol: string, seccionId?: number) {
+    // ── Listas ────────────────────────────────────────────────
+
+    async findMyCourses(userId: string, rol: string, seccionId?: string) {
         if (rol === 'docente') {
             return this.courseRepo.find({
                 where: { docente_id: userId, activo: true },
@@ -73,9 +75,15 @@ export class CoursesService {
         return course;
     }
 
+    // ── CRUD ──────────────────────────────────────────────────
+
     async create(dto: {
-        nombre: string; descripcion?: string; docente_id?: string;
-        seccion_id: number; periodo_id: number; color?: string;
+        nombre: string;
+        descripcion?: string;
+        docente_id?: string;
+        seccion_id: string;
+        periodo_id: number;
+        color?: string;
     }) {
         const course = this.courseRepo.create({
             nombre: dto.nombre.trim(),
@@ -84,18 +92,20 @@ export class CoursesService {
             seccion_id: dto.seccion_id,
             periodo_id: dto.periodo_id,
             color: dto.color ?? '#6B7280',
-        } as any);
+        });
         return this.courseRepo.save(course);
     }
 
-    async update(id: string, docenteId: string, rol: string,
+    async update(
+        id: string, docenteId: string, rol: string,
         dto: Partial<{ nombre: string; descripcion: string; activo: boolean }>,
     ) {
         const course = await this.courseRepo.findOne({ where: { id } });
         if (!course) throw new NotFoundException(`Curso ${id} no encontrado`);
 
-        if (rol === 'docente' && course.docente_id !== docenteId)
+        if (rol === 'docente' && course.docente_id !== docenteId) {
             throw new ForbiddenException('No tienes permiso para editar este curso');
+        }
 
         Object.assign(course, dto);
         return this.courseRepo.save(course);
@@ -107,21 +117,29 @@ export class CoursesService {
 
         const [docente] = await this.dataSource.query(
             `SELECT d.id, d.nombre, d.apellido_paterno
-             FROM docentes d JOIN cuentas c ON c.id = d.id AND c.activo = true
-             WHERE d.id = $1`,
+               FROM docentes d
+               JOIN cuentas c ON c.id = d.id AND c.activo = true
+              WHERE d.id = $1`,
             [docenteId],
         );
         if (!docente) throw new NotFoundException(`Docente ${docenteId} no encontrado`);
 
         course.docente_id = docenteId;
         await this.courseRepo.save(course);
-        return { curso: course.nombre, docente: `${docente.nombre} ${docente.apellido_paterno}` };
+        return {
+            curso: course.nombre,
+            docente: `${docente.nombre} ${docente.apellido_paterno}`,
+        };
     }
+
+    // ── Generador desde plantilla CNEB ────────────────────────
 
     async generateCoursesFromTemplate(seccionId: string, periodoId: number) {
         const [seccion] = await this.dataSource.query(
             `SELECT s.id, s.nombre, g.nombre AS grado, g.orden
-             FROM secciones s JOIN grados g ON g.id = s.grado_id WHERE s.id = $1`,
+               FROM secciones s
+               JOIN grados g ON g.id = s.grado_id
+              WHERE s.id = $1`,
             [seccionId],
         );
         if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
@@ -131,7 +149,7 @@ export class CoursesService {
             `SELECT nombre FROM cursos WHERE seccion_id = $1 AND periodo_id = $2`,
             [seccionId, periodoId],
         );
-        const nombresExistentes = new Set(existentes.map((c: any) => c.nombre));
+        const nombresExistentes = new Set(existentes.map((c: { nombre: string }) => c.nombre));
 
         let creados = 0, omitidos = 0;
         for (const nombreCurso of plantilla) {
@@ -145,26 +163,33 @@ export class CoursesService {
         }
 
         return {
-            grado: seccion.grado, seccion: seccion.nombre,
-            total_plantilla: plantilla.length, creados, omitidos,
+            grado: seccion.grado,
+            seccion: seccion.nombre,
+            total_plantilla: plantilla.length,
+            creados, omitidos,
             mensaje: `${creados} cursos creados, ${omitidos} ya existían`,
         };
     }
 
-    // ── Matrículas ────────────────────────────────────────────────
+    // ── Matrículas ────────────────────────────────────────────
 
-    async enrollStudent(alumnoId: string, seccionId: number, periodoId: number) {
+    async enrollStudent(alumnoId: string, seccionId: string, periodoId: number) {
         const existing = await this.enrollmentRepo.findOne({
             where: { alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId },
         });
 
         if (existing) {
-            if (!existing.activo) { existing.activo = true; return this.enrollmentRepo.save(existing); }
+            if (!existing.activo) {
+                existing.activo = true;
+                return this.enrollmentRepo.save(existing);
+            }
             return existing;
         }
 
         return this.enrollmentRepo.save(
-            this.enrollmentRepo.create({ alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId }),
+            this.enrollmentRepo.create({
+                alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId,
+            }),
         );
     }
 
@@ -179,7 +204,7 @@ export class CoursesService {
         return { message: 'Alumno retirado de la sección' };
     }
 
-    async getEnrollmentsBySeccion(seccionId: number) {
+    async getEnrollmentsBySeccion(seccionId: string) {
         return this.enrollmentRepo.find({
             where: { seccion_id: seccionId, activo: true },
             relations: ['alumno'],

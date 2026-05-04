@@ -5,7 +5,7 @@ import {
 } from 'typeorm';
 import { Docente } from '../../users/entities/docente.entity.js';
 import { Section } from '../../academic/entities/section.entity.js';
-import { Period }  from '../../academic/entities/period.entity.js';
+import { Period } from '../../academic/entities/period.entity.js';
 
 @Entity('cursos')
 export class Course {
@@ -26,7 +26,7 @@ export class Course {
     docente: Docente | null;
 
     @Column({ name: 'seccion_id' })
-    seccion_id: number;
+    seccion_id: string;
 
     @ManyToOne(() => Section, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'seccion_id' })

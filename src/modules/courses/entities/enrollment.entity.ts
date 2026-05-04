@@ -19,7 +19,7 @@ export class Enrollment {
     alumno: Alumno;
 
     @Column({ name: 'seccion_id' })
-    seccion_id: number;
+    seccion_id: string;
 
     @ManyToOne(() => Section, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'seccion_id' })

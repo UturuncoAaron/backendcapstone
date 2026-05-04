@@ -1,8 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+    Injectable, NotFoundException, BadRequestException,
+    ForbiddenException, ConflictException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-import { Grade } from './entities/grade.entity.js';
+import { Repository, DataSource, EntityManager } from 'typeorm';
+import { Grade, type TipoNota } from './entities/grade.entity.js';
 import { CreateGradeDto } from './dto/create-grade.dto.js';
+import { UpdateGradeDto } from './dto/update-grade.dto.js';
+
+interface AuthUser { id: string; rol: string; }
 
 @Injectable()
 export class GradesService {
@@ -12,233 +18,352 @@ export class GradesService {
         private readonly dataSource: DataSource,
     ) { }
 
-    // ══════════════════════════════════════════════════════════════
-    // ALUMNO: ver sus propias notas agrupadas por curso y periodo
-    // GET /api/grades/my
-    // ══════════════════════════════════════════════════════════════
-    async getMyGrades(alumnoId: string) {
-        return this.dataSource.query(`
-            SELECT
-                n.id,
-                n.alumno_id,
-                n.curso_id,
-                n.periodo_id,
-                n.titulo,
-                n.nota_examenes,
-                n.nota_tareas,
-                n.nota_participacion,
-                n.nota_final,
-                n.escala,
-                n.observaciones,
-                c.nombre   AS curso_nombre,
-                c.color    AS curso_color,
-                p.bimestre AS bimestre,
-                p.anio     AS anio,
-                p.nombre   AS periodo_nombre
-            FROM notas n
-            JOIN cursos   c ON c.id = n.curso_id
-            JOIN periodos p ON p.id = n.periodo_id
-            WHERE n.alumno_id = $1
-            ORDER BY p.anio DESC, p.bimestre ASC, c.nombre ASC, n.created_at ASC
-        `, [alumnoId]);
-    }
+    // ── Auth helpers ──────────────────────────────────
 
-    // ══════════════════════════════════════════════════════════════
-    // DOCENTE: ver todas las actividades (títulos) de un curso/periodo
-    // GET /api/grades/course/:cursoId/actividades?periodoId=1
-    // Devuelve los títulos distintos registrados para poder
-    // cargar la lista de alumnos por actividad
-    // ══════════════════════════════════════════════════════════════
-    async getActividadesByCourse(cursoId: string, periodoId?: number) {
-        const curso = await this.dataSource.query(
-            `SELECT id, seccion_id, periodo_id FROM cursos WHERE id = $1`,
+    /** El docente sólo escribe en cursos suyos. Admin puede todo. */
+    private async assertCanWriteCurso(
+        cursoId: string,
+        user: AuthUser,
+        em?: EntityManager,
+    ) {
+        const runner: EntityManager = em ?? this.dataSource.manager;
+        const [curso] = await runner.query(
+            `SELECT docente_id FROM cursos WHERE id = $1 AND activo = true`,
             [cursoId],
         );
-        if (!curso.length) throw new NotFoundException(`Curso ${cursoId} no encontrado`);
-
-        const resolvedPeriodoId = periodoId ?? curso[0].periodo_id;
-
-        // Títulos distintos registrados (actividades creadas)
-        const actividades = await this.dataSource.query(`
-            SELECT DISTINCT
-                n.titulo,
-                COUNT(n.id)            AS total_alumnos,
-                COUNT(n.nota_final)    AS con_nota,
-                MIN(n.created_at)      AS created_at
-            FROM notas n
-            WHERE n.curso_id   = $1
-              AND n.periodo_id = $2
-              AND n.titulo IS NOT NULL
-            GROUP BY n.titulo
-            ORDER BY MIN(n.created_at) ASC
-        `, [cursoId, resolvedPeriodoId]);
-
-        return { curso_id: cursoId, periodo_id: resolvedPeriodoId, actividades };
+        if (!curso) throw new NotFoundException('Curso no encontrado');
+        if (user.rol !== 'admin' && curso.docente_id !== user.id) {
+            throw new ForbiddenException('No eres el docente de este curso');
+        }
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // DOCENTE: notas de un curso para una actividad específica
-    // GET /api/grades/course/:cursoId?periodoId=1&titulo=Examen Parcial
-    // Devuelve todos los alumnos con su nota (o null si no tiene)
-    // ══════════════════════════════════════════════════════════════
-    async getGradesByCourse(cursoId: string, periodoId?: number, titulo?: string) {
-        const curso = await this.dataSource.query(
-            `SELECT id, seccion_id, periodo_id FROM cursos WHERE id = $1`,
-            [cursoId],
+    /** Padre sólo ve hijos suyos (tabla padre_alumno del schema v7). */
+    private async assertPadreOfAlumno(padreId: string, alumnoId: string) {
+        const rows = await this.dataSource.query(
+            `SELECT 1 FROM padre_alumno
+              WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
+            [padreId, alumnoId],
         );
-        if (!curso.length) throw new NotFoundException(`Curso ${cursoId} no encontrado`);
-
-        const resolvedPeriodoId = periodoId ?? curso[0].periodo_id;
-
-        // Alumnos matriculados en la sección del curso en ese periodo
-        const alumnos = await this.dataSource.query(`
-            SELECT DISTINCT ON (a.id)
-                a.id               AS alumno_id,
-                a.nombre,
-                a.apellido_paterno,
-                a.apellido_materno,
-                a.codigo_estudiante
-            FROM matriculas m
-            JOIN alumnos  a  ON a.id  = m.alumno_id
-            JOIN cuentas  ct ON ct.id = a.id AND ct.activo = true
-            WHERE m.seccion_id = $1
-              AND m.periodo_id = $2
-              AND m.activo     = true
-            ORDER BY a.id, a.apellido_paterno, a.nombre
-        `, [curso[0].seccion_id, resolvedPeriodoId]);
-
-        // Notas existentes filtradas por titulo si viene
-        const where: any = { curso_id: cursoId, periodo_id: resolvedPeriodoId };
-        if (titulo) {
-            where.titulo = titulo;
-        } else {
-            // Sin titulo = notas finales del bimestre
-            where.titulo = null as any;
+        if (rows.length === 0) {
+            throw new ForbiddenException('No eres padre/madre de ese alumno');
         }
-
-        const notas = await this.gradeRepo.find({ where });
-
-        return alumnos.map((a: any) => {
-            const nota = notas.find(n => n.alumno_id === a.alumno_id);
-            return {
-                id:                  nota?.id                  ?? null,
-                alumno_id:           a.alumno_id,
-                alumno: {
-                    nombre:           a.nombre,
-                    apellido_paterno:  a.apellido_paterno,
-                    apellido_materno:  a.apellido_materno,
-                    codigo_estudiante: a.codigo_estudiante,
-                },
-                curso_id:            cursoId,
-                periodo_id:          resolvedPeriodoId,
-                titulo:              nota?.titulo              ?? titulo ?? null,
-                nota_examenes:       nota?.nota_examenes       ?? null,
-                nota_tareas:         nota?.nota_tareas         ?? null,
-                nota_participacion:  nota?.nota_participacion  ?? null,
-                nota_final:          nota?.nota_final          ?? null,
-                escala:              nota?.escala              ?? null,
-                observaciones:       nota?.observaciones       ?? null,
-            };
-        });
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // DOCENTE: registrar o actualizar nota (upsert)
-    // La clave única es alumno + curso + periodo + titulo
-    // POST /api/grades
-    // ══════════════════════════════════════════════════════════════
-    async upsertGrade(dto: CreateGradeDto) {
-        const numericFields = [
-            'nota_examenes', 'nota_tareas',
-            'nota_participacion', 'nota_final',
-        ] as const;
+    // ── CREATE ────────────────────────────────────────
 
-        for (const field of numericFields) {
-            const val = dto[field];
-            if (val !== undefined && val !== null && (val < 0 || val > 20)) {
-                throw new BadRequestException(`${field} debe estar entre 0 y 20`);
-            }
-        }
+    async create(dto: CreateGradeDto, user: AuthUser): Promise<Grade> {
+        await this.assertCanWriteCurso(dto.curso_id, user);
 
-        // Buscar por la clave correcta según si tiene titulo o no
-        const existing = await this.gradeRepo.findOne({
+        const exists = await this.gradeRepo.findOne({
             where: {
-                alumno_id:  dto.alumno_id,
-                curso_id:   dto.curso_id,
+                alumno_id: dto.alumno_id,
+                curso_id: dto.curso_id,
                 periodo_id: dto.periodo_id,
-                titulo:     dto.titulo ?? null as any,
+                titulo: dto.titulo,
             },
         });
-
-        if (existing) {
-            if (dto.nota_examenes      !== undefined) existing.nota_examenes      = dto.nota_examenes      ?? null;
-            if (dto.nota_tareas        !== undefined) existing.nota_tareas        = dto.nota_tareas        ?? null;
-            if (dto.nota_participacion !== undefined) existing.nota_participacion = dto.nota_participacion ?? null;
-            if (dto.nota_final         !== undefined) existing.nota_final         = dto.nota_final         ?? null;
-            if (dto.observaciones      !== undefined) existing.observaciones      = dto.observaciones      ?? null;
-            return this.gradeRepo.save(existing);
+        if (exists) {
+            throw new ConflictException(
+                `Ya existe nota "${dto.titulo}" para ese alumno; ` +
+                `usa PUT/PATCH /grades/${exists.id}`,
+            );
         }
 
         return this.gradeRepo.save(this.gradeRepo.create({
-            alumno_id:           dto.alumno_id,
-            curso_id:            dto.curso_id,
-            periodo_id:          dto.periodo_id,
-            titulo:              dto.titulo              ?? null,
-            nota_examenes:       dto.nota_examenes       ?? null,
-            nota_tareas:         dto.nota_tareas         ?? null,
-            nota_participacion:  dto.nota_participacion  ?? null,
-            nota_final:          dto.nota_final          ?? null,
-            observaciones:       dto.observaciones       ?? null,
+            alumno_id: dto.alumno_id,
+            curso_id: dto.curso_id,
+            periodo_id: dto.periodo_id,
+            titulo: dto.titulo,
+            tipo: dto.tipo,
+            nota: dto.nota ?? null,
+            observaciones: dto.observaciones ?? null,
+            fecha: dto.fecha ?? null,
         }));
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // DOCENTE: guardar notas de todo el salón de una vez
-    // POST /api/grades/bulk
-    // ══════════════════════════════════════════════════════════════
-    async upsertBulk(dtos: CreateGradeDto[]) {
-        const results = await Promise.allSettled(
-            dtos.map(dto => this.upsertGrade(dto)),
-        );
+    // ── PUT ───────────────────────────────────────────
 
-        const ok      = results.filter(r => r.status === 'fulfilled').length;
-        const errores = results
-            .map((r, i) => r.status === 'rejected'
-                ? { index: i, alumno_id: dtos[i].alumno_id, error: (r as any).reason?.message }
-                : null)
-            .filter(Boolean);
+    async replace(id: string, dto: CreateGradeDto, user: AuthUser): Promise<Grade> {
+        const existing = await this.gradeRepo.findOne({ where: { id } });
+        if (!existing) throw new NotFoundException('Nota no encontrada');
+        await this.assertCanWriteCurso(existing.curso_id, user);
 
-        return { guardadas: ok, errores };
+        if (
+            dto.alumno_id !== existing.alumno_id ||
+            dto.curso_id !== existing.curso_id ||
+            dto.periodo_id !== existing.periodo_id ||
+            dto.titulo !== existing.titulo
+        ) {
+            throw new BadRequestException(
+                'No puedes mover la nota a otro alumno/curso/periodo/titulo. ' +
+                'Borra esta y crea una nueva.',
+            );
+        }
+
+        existing.tipo = dto.tipo;
+        existing.nota = dto.nota ?? null;
+        existing.observaciones = dto.observaciones ?? null;
+        existing.fecha = dto.fecha ?? null;
+        return this.gradeRepo.save(existing);
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // PADRE/ADMIN: todas las notas de un alumno
-    // GET /api/grades/alumno/:alumnoId
-    // ══════════════════════════════════════════════════════════════
-    async getGradesByAlumno(alumnoId: string) {
+    // ── PATCH ─────────────────────────────────────────
+
+    async update(id: string, dto: UpdateGradeDto, user: AuthUser): Promise<Grade> {
+        const existing = await this.gradeRepo.findOne({ where: { id } });
+        if (!existing) throw new NotFoundException('Nota no encontrada');
+        await this.assertCanWriteCurso(existing.curso_id, user);
+
+        if (dto.titulo !== undefined && dto.titulo !== existing.titulo) {
+            const dup = await this.gradeRepo.findOne({
+                where: {
+                    alumno_id: existing.alumno_id,
+                    curso_id: existing.curso_id,
+                    periodo_id: existing.periodo_id,
+                    titulo: dto.titulo,
+                },
+            });
+            if (dup) {
+                throw new ConflictException(
+                    `Ya existe nota con titulo "${dto.titulo}" para ese alumno`,
+                );
+            }
+            existing.titulo = dto.titulo;
+        }
+
+        if (dto.tipo !== undefined) existing.tipo = dto.tipo;
+        if (dto.nota !== undefined) existing.nota = dto.nota ?? null;
+        if (dto.observaciones !== undefined) existing.observaciones = dto.observaciones ?? null;
+        if (dto.fecha !== undefined) existing.fecha = dto.fecha ?? null;
+
+        return this.gradeRepo.save(existing);
+    }
+
+    // ── DELETE ────────────────────────────────────────
+
+    async remove(id: string, user: AuthUser): Promise<void> {
+        const existing = await this.gradeRepo.findOne({ where: { id } });
+        if (!existing) throw new NotFoundException('Nota no encontrada');
+        await this.assertCanWriteCurso(existing.curso_id, user);
+        await this.gradeRepo.delete(id);
+    }
+
+    // ── GET ONE ───────────────────────────────────────
+
+    async getOneFor(id: string, user: AuthUser): Promise<Grade> {
+        const grade = await this.gradeRepo.findOne({ where: { id } });
+        if (!grade) throw new NotFoundException('Nota no encontrada');
+
+        if (user.rol === 'alumno' && grade.alumno_id !== user.id) {
+            throw new ForbiddenException();
+        }
+        if (user.rol === 'docente') {
+            const [curso] = await this.dataSource.query(
+                `SELECT docente_id FROM cursos WHERE id = $1`, [grade.curso_id],
+            );
+            if (!curso || curso.docente_id !== user.id) {
+                throw new ForbiddenException();
+            }
+        }
+        if (user.rol === 'padre') {
+            await this.assertPadreOfAlumno(user.id, grade.alumno_id);
+        }
+        return grade;
+    }
+
+    // ── LISTAS ────────────────────────────────────────
+
+    async getGradesByAlumno(alumnoId: string, anio?: number) {
+        const params: (string | number)[] = [alumnoId];
+        let anioFilter = '';
+        if (anio !== undefined) {
+            params.push(anio);
+            anioFilter = `AND p.anio = $${params.length}`;
+        }
         return this.dataSource.query(`
             SELECT
-                n.id,
-                n.alumno_id,
-                n.curso_id,
-                n.periodo_id,
-                n.titulo,
-                n.nota_examenes,
-                n.nota_tareas,
-                n.nota_participacion,
-                n.nota_final,
-                n.escala,
-                n.observaciones,
-                c.nombre   AS curso_nombre,
-                c.color    AS curso_color,
-                p.bimestre AS bimestre,
-                p.anio     AS anio,
-                p.nombre   AS periodo_nombre
+                n.id, n.titulo, n.tipo, n.nota,
+                n.observaciones, n.fecha,
+                n.curso_id, n.periodo_id,
+                c.nombre AS curso_nombre, c.color AS curso_color,
+                p.bimestre, p.anio, p.nombre AS periodo_nombre
             FROM notas n
             JOIN cursos   c ON c.id = n.curso_id
             JOIN periodos p ON p.id = n.periodo_id
             WHERE n.alumno_id = $1
-            ORDER BY p.anio DESC, p.bimestre ASC, c.nombre ASC, n.created_at ASC
-        `, [alumnoId]);
+            ${anioFilter}
+            ORDER BY p.anio DESC, p.bimestre ASC,
+                     c.nombre ASC, n.fecha ASC NULLS LAST, n.created_at ASC
+        `, params);
+    }
+
+    async getGradesByAlumnoForUser(
+        alumnoId: string, user: AuthUser, anio?: number,
+    ) {
+        if (user.rol === 'padre') {
+            await this.assertPadreOfAlumno(user.id, alumnoId);
+        }
+        return this.getGradesByAlumno(alumnoId, anio);
+    }
+
+    async getActividadesByCourse(
+        cursoId: string, user: AuthUser, periodoId?: number,
+    ) {
+        const [curso] = await this.dataSource.query(
+            `SELECT id, periodo_id, docente_id FROM cursos WHERE id = $1`,
+            [cursoId],
+        );
+        if (!curso) throw new NotFoundException('Curso no encontrado');
+        if (user.rol === 'docente' && curso.docente_id !== user.id) {
+            throw new ForbiddenException('No eres el docente de este curso');
+        }
+        const resolvedPeriodoId = periodoId ?? curso.periodo_id;
+        const actividades = await this.dataSource.query(`
+            SELECT
+                titulo, tipo,
+                COUNT(*)              AS total_alumnos,
+                COUNT(nota)           AS con_nota,
+                AVG(nota)::numeric(4,2) AS promedio,
+                MIN(fecha)            AS fecha,
+                MIN(created_at)       AS created_at
+            FROM notas
+            WHERE curso_id = $1 AND periodo_id = $2
+            GROUP BY titulo, tipo
+            ORDER BY MIN(created_at) ASC
+        `, [cursoId, resolvedPeriodoId]);
+        return { curso_id: cursoId, periodo_id: resolvedPeriodoId, actividades };
+    }
+
+    /** Planilla del docente: alumnos × actividades del periodo. */
+    async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: number) {
+        const [curso] = await this.dataSource.query(
+            `SELECT id, seccion_id, periodo_id, docente_id
+               FROM cursos WHERE id = $1`,
+            [cursoId],
+        );
+        if (!curso) throw new NotFoundException('Curso no encontrado');
+        if (user.rol === 'docente' && curso.docente_id !== user.id) {
+            throw new ForbiddenException('No eres el docente de este curso');
+        }
+        const resolvedPeriodoId = periodoId ?? curso.periodo_id;
+
+        const alumnos = await this.dataSource.query(`
+            SELECT a.id AS alumno_id, a.codigo_estudiante,
+                   a.nombre, a.apellido_paterno, a.apellido_materno
+            FROM matriculas m
+            JOIN alumnos a  ON a.id  = m.alumno_id
+            JOIN cuentas ct ON ct.id = a.id AND ct.activo = true
+            WHERE m.seccion_id = $1
+              AND m.periodo_id = $2
+              AND m.activo     = true
+            ORDER BY a.apellido_paterno, a.apellido_materno NULLS LAST, a.nombre
+        `, [curso.seccion_id, resolvedPeriodoId]);
+
+        const notas = await this.gradeRepo
+            .createQueryBuilder('n')
+            .select(['n.id', 'n.alumno_id', 'n.titulo', 'n.tipo',
+                'n.nota', 'n.observaciones', 'n.fecha'])
+            .where('n.curso_id = :cursoId', { cursoId })
+            .andWhere('n.periodo_id = :periodoId', { periodoId: resolvedPeriodoId })
+            .orderBy('n.fecha', 'ASC', 'NULLS LAST')
+            .addOrderBy('n.created_at', 'ASC')
+            .getMany();
+
+        const actividadesMap = new Map<string, { titulo: string; tipo: TipoNota }>();
+        for (const n of notas) {
+            if (!actividadesMap.has(n.titulo)) {
+                actividadesMap.set(n.titulo, { titulo: n.titulo, tipo: n.tipo });
+            }
+        }
+        const actividades = [...actividadesMap.values()];
+
+        const filas = alumnos.map((a: any) => {
+            const notasAlumno = notas.filter((n) => n.alumno_id === a.alumno_id);
+            const porActividad: Record<string, any> = {};
+            for (const act of actividades) {
+                const n = notasAlumno.find((x) => x.titulo === act.titulo);
+                porActividad[act.titulo] = n
+                    ? { id: n.id, nota: n.nota, observaciones: n.observaciones, fecha: n.fecha }
+                    : null;
+            }
+            return {
+                alumno_id: a.alumno_id,
+                codigo_estudiante: a.codigo_estudiante,
+                alumno: {
+                    nombre: a.nombre,
+                    apellido_paterno: a.apellido_paterno,
+                    apellido_materno: a.apellido_materno,
+                },
+                notas: porActividad,
+                promedio: this.promedio(notasAlumno.map((n) => n.nota)),
+            };
+        });
+
+        return { curso_id: cursoId, periodo_id: resolvedPeriodoId, actividades, filas };
+    }
+
+    private promedio(valores: (number | null)[]): number | null {
+        const limpios = valores.filter((v): v is number => v != null);
+        if (limpios.length === 0) return null;
+        const avg = limpios.reduce((a, b) => a + b, 0) / limpios.length;
+        return Math.round(avg * 100) / 100;
+    }
+
+    // ── BULK transaccional ────────────────────────────
+
+    async upsertBulk(
+        cursoId: string, items: CreateGradeDto[], user: AuthUser,
+    ): Promise<{ guardadas: number }> {
+        if (items.length === 0) return { guardadas: 0 };
+
+        for (const it of items) {
+            if (it.curso_id !== cursoId) {
+                throw new BadRequestException(
+                    'Todos los items deben pertenecer al curso de la URL',
+                );
+            }
+        }
+
+        const periodoIds = new Set(items.map((i) => i.periodo_id));
+        if (periodoIds.size > 1) {
+            throw new BadRequestException('El bulk debe ser de un solo periodo');
+        }
+
+        return this.dataSource.transaction(async (em) => {
+            await this.assertCanWriteCurso(cursoId, user, em);
+            const repo = em.getRepository(Grade);
+            let guardadas = 0;
+
+            for (const dto of items) {
+                let row = await repo.findOne({
+                    where: {
+                        alumno_id: dto.alumno_id,
+                        curso_id: dto.curso_id,
+                        periodo_id: dto.periodo_id,
+                        titulo: dto.titulo,
+                    },
+                });
+                if (row) {
+                    row.tipo = dto.tipo;
+                    row.nota = dto.nota ?? null;
+                    row.observaciones = dto.observaciones ?? null;
+                    row.fecha = dto.fecha ?? null;
+                } else {
+                    row = repo.create({
+                        alumno_id: dto.alumno_id,
+                        curso_id: dto.curso_id,
+                        periodo_id: dto.periodo_id,
+                        titulo: dto.titulo,
+                        tipo: dto.tipo,
+                        nota: dto.nota ?? null,
+                        observaciones: dto.observaciones ?? null,
+                        fecha: dto.fecha ?? null,
+                    });
+                }
+                await repo.save(row);
+                guardadas++;
+            }
+            return { guardadas };
+        });
     }
 }
