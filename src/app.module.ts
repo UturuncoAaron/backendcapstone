@@ -29,6 +29,7 @@ import { PermissionsModule } from './modules/permissions/permissions.module.js';
 import { PsychologyModule } from './modules/psychology/psychology.module.js';
 import { MessagingModule } from './modules/messaging/messaging.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
+import { AssistsModule } from './modules/assists/assists.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -65,6 +66,7 @@ console.log('NODE_ENV:', process.env.NODE_ENV, '| isDev:', isDev);
     AcademicModule,
     CoursesModule,
     ScheduleModule,
+    AssistsModule,
 
     // ── Educational content ───────────────────────────────────────
     MaterialsModule,

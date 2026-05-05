@@ -1,3 +1,6 @@
+// Ubicación en tu proyecto: src/modules/users/users.controller.ts
+// Versión COMPLETA con endpoints de auxiliar.
+
 import {
     Controller, Get, Post, Put, Patch, Delete,
     Body, Param, Query, ParseUUIDPipe,
@@ -10,6 +13,7 @@ import {
     CreatePadreDto,
     CreateAdminDto,
     CreatePsicologaDto,
+    CreateAuxiliarDto,
     LinkPadreAlumnoDto,
     ResetPasswordDto,
 } from './dto/users.dto.js';
@@ -97,6 +101,20 @@ export class UsersController {
         });
     }
 
+    // 🆕 ─────────────────────────────────────────────────────────
+    @Get('auxiliares')
+    findAuxiliares(
+        @Query('q') q?: string,
+        @Query('page') page = '1',
+        @Query('limit') limit = '20',
+    ) {
+        return this.usersService.findAuxiliares({
+            q,
+            page: Math.max(1, parseInt(page)),
+            limit: Math.min(100, parseInt(limit)),
+        });
+    }
+
     // ══════════════════════════════════════════════════════════════
     // BÚSQUEDA AUTOCOMPLETE
     // IMPORTANTE: rutas con sufijo ANTES de /:id
@@ -115,6 +133,12 @@ export class UsersController {
     @Get('docentes/search')
     searchDocentes(@Query('q') q: string) {
         return this.usersService.searchDocentes(q);
+    }
+
+    // 🆕 ─────────────────────────────────────────────────────────
+    @Get('auxiliares/search')
+    searchAuxiliares(@Query('q') q: string) {
+        return this.usersService.searchAuxiliares(q);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -146,6 +170,12 @@ export class UsersController {
         return this.usersService.findPsicologaById(id);
     }
 
+    // 🆕 ─────────────────────────────────────────────────────────
+    @Get('auxiliares/:id')
+    findAuxiliar(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.findAuxiliarById(id);
+    }
+
     // ══════════════════════════════════════════════════════════════
     // CREAR INDIVIDUAL
     // ══════════════════════════════════════════════════════════════
@@ -175,8 +205,14 @@ export class UsersController {
         return this.usersService.createPsicologa(dto);
     }
 
+    // 🆕 ─────────────────────────────────────────────────────────
+    @Post('auxiliares')
+    createAuxiliar(@Body() dto: CreateAuxiliarDto) {
+        return this.usersService.createAuxiliar(dto);
+    }
+
     // ══════════════════════════════════════════════════════════════
-    // CREAR MASIVO (seed/testing — borrar en producción)
+    // CREAR MASIVO (seed/testing)
     // ══════════════════════════════════════════════════════════════
 
     @Post('alumnos/bulk')
@@ -202,6 +238,12 @@ export class UsersController {
     @Post('psicologos/bulk')
     async createPsicologasBulk(@Body() dtos: CreatePsicologaDto[]) {
         return this.usersService.createBulk('psicologa', dtos);
+    }
+
+    // 🆕 ─────────────────────────────────────────────────────────
+    @Post('auxiliares/bulk')
+    async createAuxiliaresBulk(@Body() dtos: CreateAuxiliarDto[]) {
+        return this.usersService.createBulk('auxiliar', dtos);
     }
 
     // ══════════════════════════════════════════════════════════════

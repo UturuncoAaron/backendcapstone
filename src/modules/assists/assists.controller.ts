@@ -1,103 +1,128 @@
 import {
     Controller, Get, Post, Patch, Delete,
-    Body, Param, ParseUUIDPipe, HttpCode, HttpStatus, Query,
+    Body, Param, ParseUUIDPipe, Query, HttpCode, HttpStatus,
+    UseGuards,
 } from '@nestjs/common';
 import { AssistsService } from './assists.service.js';
+import type { AuthUser } from './assists.service.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import {
+    RegisterAsistenciaDto, BulkAsistenciaDto, UpdateAsistenciaDto,
+    ListAsistenciasQueryDto, ReporteAsistenciaQueryDto, ScanQrDto,
+} from './dto/asistencia.dto.js';
 
-@Controller()
+@Controller('asistencias')
+@UseGuards(JwtAuthGuard)
 export class AssistsController {
-    constructor(private readonly assistsService: AssistsService) { }
+    constructor(private readonly svc: AssistsService) { }
 
-    // ── Lecturas ────────────────────────────────────────────────
+    // ── GENERAL (tutor de sección / auxiliar / admin) ──
 
-    // GET /api/courses/:courseId/assists?fecha=YYYY-MM-DD
-    // GET /api/courses/:courseId/assists?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
-    @Get('courses/:courseId/assists')
-    listByCourse(
-        @Param('courseId', ParseUUIDPipe) courseId: string,
-        @Query('fecha') fecha?: string,
-        @Query('desde') desde?: string,
-        @Query('hasta') hasta?: string,
-    ) {
-        if (fecha) return this.assistsService.getByCursoFecha(courseId, fecha);
-        return this.assistsService.getByCurso(courseId, desde, hasta);
-    }
+    /** Escanea el QR del carnet del alumno y marca asistencia general automática. */
+    @Post('general/scan')
+    generalScan(
+        @CurrentUser() user: AuthUser,
+        @Body() dto: ScanQrDto,
+    ) { return this.svc.generalScan(dto, user); }
 
-    // GET /api/assists/alumno/:alumnoId?cursoId=&desde=&hasta=
-    @Get('assists/alumno/:alumnoId')
-    listByAlumno(
+    /** Registra/actualiza la asistencia general de un alumno en una sección. */
+    @Post('general/:seccionId')
+    generalRegister(
+        @Param('seccionId', ParseUUIDPipe) seccionId: string,
+        @CurrentUser() user: AuthUser,
+        @Body() dto: RegisterAsistenciaDto,
+    ) { return this.svc.generalRegister(seccionId, dto, user); }
+
+    /** Registra asistencia general de varios alumnos en una sola llamada. */
+    @Post('general/:seccionId/bulk')
+    generalBulk(
+        @Param('seccionId', ParseUUIDPipe) seccionId: string,
+        @CurrentUser() user: AuthUser,
+        @Body() dto: BulkAsistenciaDto,
+    ) { return this.svc.generalBulk(seccionId, dto, user); }
+
+    /** Lista asistencias generales de una sección (por fecha o rango). */
+    @Get('general/:seccionId')
+    generalList(
+        @Param('seccionId', ParseUUIDPipe) seccionId: string,
+        @Query() q: ListAsistenciasQueryDto,
+    ) { return this.svc.generalListBySeccion(seccionId, q); }
+
+    /** Lista asistencias generales históricas de un alumno. */
+    @Get('general/alumno/:alumnoId')
+    generalByAlumno(
         @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
-        @Query('cursoId') cursoId?: string,
-        @Query('desde') desde?: string,
-        @Query('hasta') hasta?: string,
-    ) {
-        return this.assistsService.getByAlumno(alumnoId, cursoId, desde, hasta);
-    }
+        @Query() q: ListAsistenciasQueryDto,
+    ) { return this.svc.generalListByAlumno(alumnoId, q); }
 
-    // GET /api/assists/:id
-    @Get('assists/:id')
-    findOne(@Param('id', ParseUUIDPipe) id: string) {
-        return this.assistsService.findOne(id);
-    }
-
-    // ── Escrituras (solo docente del curso) ─────────────────────
-
-    // POST /api/courses/:courseId/assists  (registrar uno; upsert por alumno+fecha)
-    @Post('courses/:courseId/assists')
-    register(
-        @Param('courseId', ParseUUIDPipe) courseId: string,
-        @CurrentUser() user: any,
-        @Body() dto: {
-            alumno_id: string;
-            fecha: string;
-            presente: boolean;
-            justificacion?: string;
-        },
-    ) {
-        return this.assistsService.register({
-            curso_id: courseId,
-            alumno_id: dto.alumno_id,
-            fecha: dto.fecha,
-            presente: dto.presente,
-            justificacion: dto.justificacion,
-        }, user?.sub ?? 'dev');
-    }
-
-    // POST /api/courses/:courseId/assists/bulk  (registrar a todos en una fecha)
-    @Post('courses/:courseId/assists/bulk')
-    registerBulk(
-        @Param('courseId', ParseUUIDPipe) courseId: string,
-        @CurrentUser() user: any,
-        @Body() dto: {
-            fecha: string;
-            alumnos: { alumno_id: string; presente: boolean; justificacion?: string }[];
-        },
-    ) {
-        return this.assistsService.registerBulk({
-            curso_id: courseId,
-            fecha: dto.fecha,
-            alumnos: dto.alumnos,
-        }, user?.sub ?? 'dev');
-    }
-
-    // PATCH /api/assists/:id
-    @Patch('assists/:id')
-    update(
+    /** Modifica el estado u observación de un registro general. */
+    @Patch('general/:id')
+    generalUpdate(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
-        @Body() dto: { presente?: boolean; justificacion?: string | null },
-    ) {
-        return this.assistsService.update(id, dto, user?.sub ?? 'dev');
-    }
+        @CurrentUser() user: AuthUser,
+        @Body() dto: UpdateAsistenciaDto,
+    ) { return this.svc.generalUpdate(id, dto, user); }
 
-    // DELETE /api/assists/:id
-    @Delete('assists/:id')
-    @HttpCode(HttpStatus.OK)
-    remove(
+    /** Elimina un registro general. */
+    @Delete('general/:id') @HttpCode(HttpStatus.NO_CONTENT)
+    generalRemove(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
-    ) {
-        return this.assistsService.remove(id, user?.sub ?? 'dev');
+        @CurrentUser() user: AuthUser,
+    ) { return this.svc.generalRemove(id, user); }
+
+    // ── POR CURSO (docente del curso / admin) ──
+
+    /** Registra/actualiza la asistencia de un alumno en un curso. */
+    @Post('curso/:cursoId')
+    classRegister(
+        @Param('cursoId', ParseUUIDPipe) cursoId: string,
+        @CurrentUser() user: AuthUser,
+        @Body() dto: RegisterAsistenciaDto,
+    ) { return this.svc.classRegister(cursoId, dto, user); }
+
+    /** Registra asistencia de varios alumnos en un curso en una sola llamada. */
+    @Post('curso/:cursoId/bulk')
+    classBulk(
+        @Param('cursoId', ParseUUIDPipe) cursoId: string,
+        @CurrentUser() user: AuthUser,
+        @Body() dto: BulkAsistenciaDto,
+    ) { return this.svc.classBulk(cursoId, dto, user); }
+
+    /** Lista asistencias de un curso (por fecha o rango). */
+    @Get('curso/:cursoId')
+    classList(
+        @Param('cursoId', ParseUUIDPipe) cursoId: string,
+        @Query() q: ListAsistenciasQueryDto,
+    ) { return this.svc.classListByCurso(cursoId, q); }
+
+    /** Lista asistencias históricas de un alumno (filtrable por curso). */
+    @Get('curso/alumno/:alumnoId')
+    classByAlumno(
+        @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
+        @Query() q: ListAsistenciasQueryDto & { cursoId?: string },
+    ) { return this.svc.classListByAlumno(alumnoId, q); }
+
+    /** Modifica el estado u observación de un registro de curso. */
+    @Patch('curso/:id')
+    classUpdate(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+        @Body() dto: UpdateAsistenciaDto,
+    ) { return this.svc.classUpdate(id, dto, user); }
+
+    /** Elimina un registro de curso. */
+    @Delete('curso/:id') @HttpCode(HttpStatus.NO_CONTENT)
+    classRemove(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) { return this.svc.classRemove(id, user); }
+
+    // ── REPORTE ──
+
+    /** Reporte agregado de asistencias por sección o curso para Excel. */
+    @Get('reporte')
+    reporte(@Query() q: ReporteAsistenciaQueryDto) {
+        return this.svc.reporte(q);
     }
 }

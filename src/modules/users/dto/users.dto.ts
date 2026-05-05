@@ -1,6 +1,7 @@
+
 import {
     IsString, IsNotEmpty, IsOptional, IsEmail,
-    IsIn, MinLength, MaxLength, IsDateString,
+    IsDateString, IsIn, MinLength, MaxLength, Matches,
 } from 'class-validator';
 
 // ── CreateAlumnoDto ──────────────────────────────────────────────
@@ -198,4 +199,64 @@ export class LinkPadreAlumnoDto {
 export class ResetPasswordDto {
     @IsString() @MinLength(6)
     password: string;
+}
+export class CreateAuxiliarDto {
+    @IsString()
+    @IsIn(['dni', 'ce', 'pass'])
+    tipo_documento: string;
+
+    @IsString()
+    @IsNotEmpty()
+    @Matches(/^\d{8,12}$/, { message: 'Número de documento inválido' })
+    numero_documento: string;
+
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(100)
+    nombre: string;
+
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(100)
+    apellido_paterno: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    apellido_materno?: string;
+
+    @IsOptional()
+    @IsDateString()
+    fecha_nacimiento?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    cargo?: string;        // Default: "Auxiliar de Educación"
+
+    @IsOptional()
+    @IsEmail()
+    @MaxLength(255)
+    email?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(20)
+    telefono?: string;
+
+    @IsOptional()
+    @IsIn(['nombrado', 'contratado'])
+    tipo_contrato?: 'nombrado' | 'contratado';
+
+    @IsOptional()
+    @IsIn(['activo', 'inactivo', 'pendiente'])
+    estado_contrato?: 'activo' | 'inactivo' | 'pendiente';
+
+    @IsOptional()
+    @IsDateString()
+    fecha_inicio_contrato?: string;
+
+    @IsOptional()
+    @IsDateString()
+    fecha_fin_contrato?: string;
 }

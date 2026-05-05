@@ -15,6 +15,7 @@ import { Docente } from './entities/docente.entity.js';
 import { Padre } from './entities/padre.entity.js';
 import { Admin } from './entities/admin.entity.js';
 import { Psicologa } from './entities/psicologa.entity.js';
+import { Auxiliar } from './entities/auxiliar.entity.js';
 import { StorageService } from '../storage/storage.service.js';
 
 import {
@@ -23,12 +24,15 @@ import {
     CreatePadreDto,
     CreateAdminDto,
     CreatePsicologaDto,
+    CreateAuxiliarDto,
     LinkPadreAlumnoDto,
 } from './dto/users.dto.js';
 import { UpdateFullDto } from './dto/profile.dto.js';
 
 const ROLE_PREFIX: Record<string, string> = {
-    alumno: 'EST', docente: 'DOC', padre: 'PAD', admin: 'ADM', psicologa: 'PSI',
+    alumno: 'EST', docente: 'DOC', padre: 'PAD',
+    admin: 'ADM', psicologa: 'PSI',
+    auxiliar: 'AUX',
 };
 
 const PROFILE_FIELDS = [
@@ -38,9 +42,6 @@ const PROFILE_FIELDS = [
     'cargo', 'relacion',
 ] as const;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Campos que NUNCA deben salir en listados ni en respuestas al frontend
-// ─────────────────────────────────────────────────────────────────────────────
 const SENSITIVE_FIELDS = ['foto_storage_key', 'password_changed', 'password_hash'];
 
 @Injectable()
@@ -52,6 +53,7 @@ export class UsersService {
         @InjectRepository(Padre) private readonly padreRepo: Repository<Padre>,
         @InjectRepository(Admin) private readonly adminRepo: Repository<Admin>,
         @InjectRepository(Psicologa) private readonly psicologaRepo: Repository<Psicologa>,
+        @InjectRepository(Auxiliar) private readonly auxiliarRepo: Repository<Auxiliar>,
         private readonly dataSource: DataSource,
         private readonly storageService: StorageService,
     ) { }
@@ -98,26 +100,18 @@ export class UsersService {
             padre: this.padreRepo,
             admin: this.adminRepo,
             psicologa: this.psicologaRepo,
+            auxiliar: this.auxiliarRepo,
         };
         return map[rol] ?? null;
     }
 
-    /**
-     * Resuelve foto_storage_key → foto_url y elimina campos sensibles.
-     * Se aplica a TODOS los rows antes de devolverlos al frontend.
-     */
     private sanitize(row: Record<string, any>, forList = false): void {
-        // Resolver foto
         row.foto_url = row.foto_storage_key
             ? this.storageService.getPublicUrl(row.foto_storage_key)
             : null;
-
-        // Eliminar campos internos siempre
         for (const field of SENSITIVE_FIELDS) {
             delete row[field];
         }
-
-        // En listados eliminar campos que solo usa el detalle
         if (forList) {
             delete row.codigo_acceso;
             delete row.created_at;
@@ -218,10 +212,26 @@ export class UsersService {
         });
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // LISTAR POR ROL — solo campos necesarios para la tabla
-    // ══════════════════════════════════════════════════════════════════════════
-
+    async createAuxiliar(dto: CreateAuxiliarDto) {
+        await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
+        return this.dataSource.transaction(async (em) => {
+            const cuenta = await this.createCuenta(em, 'auxiliar', dto.tipo_documento, dto.numero_documento);
+            return em.save(em.create(Auxiliar, {
+                id: cuenta.id,
+                nombre: dto.nombre,
+                apellido_paterno: dto.apellido_paterno,
+                apellido_materno: dto.apellido_materno ?? null,
+                cargo: dto.cargo ?? 'Auxiliar de Educación',
+                email: dto.email ?? null,
+                telefono: dto.telefono ?? null,
+                fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+                tipo_contrato: dto.tipo_contrato ?? 'contratado',
+                estado_contrato: dto.estado_contrato ?? 'activo',
+                fecha_inicio_contrato: dto.fecha_inicio_contrato ? new Date(dto.fecha_inicio_contrato) : null,
+                fecha_fin_contrato: dto.fecha_fin_contrato ? new Date(dto.fecha_fin_contrato) : null,
+            }));
+        });
+    }
     async findAdmins(filters?: { q?: string; page?: number; limit?: number }) {
         const page = filters?.page ?? 1;
         const limit = filters?.limit ?? 20;
@@ -260,7 +270,7 @@ export class UsersService {
         rows.forEach(r => this.sanitize(r, true));
         return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
-    // users.service.ts
+
     async findAlumnos(filters: {
         q?: string;
         gradoId?: string;
@@ -292,13 +302,12 @@ export class UsersService {
                 'c.numero_documento  AS numero_documento',
                 'c.tipo_documento    AS tipo_documento',
                 'c.activo            AS activo',
-                'g.nombre            AS grado',       // ✅ nombre completo
+                'g.nombre            AS grado',
                 'g.id                AS grado_id',
                 's.nombre            AS seccion',
                 's.id                AS seccion_id',
             ]);
 
-        // ── Filtros dinámicos ──────────────────────────────────────
         if (filters.seccionId) {
             qb.andWhere('s.id = :seccionId', { seccionId: filters.seccionId });
         } else if (filters.gradoId) {
@@ -321,10 +330,7 @@ export class UsersService {
             );
         }
 
-        // ── Total para paginación ──────────────────────────────────
         const total = await qb.getCount();
-
-        // ── Página actual ──────────────────────────────────────────
         const rows = await qb
             .orderBy('a.apellido_paterno', 'ASC')
             .addOrderBy('a.nombre', 'ASC')
@@ -334,13 +340,7 @@ export class UsersService {
 
         rows.forEach(r => this.sanitize(r, true));
 
-        return {
-            data: rows,
-            total,
-            page,
-            limit,
-            totalPages: Math.ceil(total / limit),
-        };
+        return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
     async findDocentes(filters?: {
@@ -402,6 +402,7 @@ export class UsersService {
         rows.forEach(r => this.sanitize(r, true));
         return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
+
     async findPadres(filters?: { q?: string; page?: number; limit?: number }) {
         const page = filters?.page ?? 1;
         const limit = filters?.limit ?? 20;
@@ -482,8 +483,51 @@ export class UsersService {
         rows.forEach(r => this.sanitize(r, true));
         return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
+    async findAuxiliares(filters?: { q?: string; page?: number; limit?: number }) {
+        const page = filters?.page ?? 1;
+        const limit = filters?.limit ?? 20;
+        const offset = (page - 1) * limit;
+
+        const qb = this.auxiliarRepo
+            .createQueryBuilder('a')
+            .innerJoin('cuentas', 'c', 'c.id = a.id')
+            .select([
+                'a.id                    AS id',
+                'a.nombre                AS nombre',
+                'a.apellido_paterno      AS apellido_paterno',
+                'a.apellido_materno      AS apellido_materno',
+                'a.cargo                 AS cargo',
+                'a.email                 AS email',
+                'a.telefono              AS telefono',
+                'a.foto_storage_key      AS foto_storage_key',
+                'a.tipo_contrato         AS tipo_contrato',
+                'a.estado_contrato       AS estado_contrato',
+                'a.fecha_inicio_contrato AS fecha_inicio_contrato',
+                'a.fecha_fin_contrato    AS fecha_fin_contrato',
+                'c.numero_documento      AS numero_documento',
+                'c.tipo_documento        AS tipo_documento',
+                'c.activo                AS activo',
+            ])
+            .orderBy('a.apellido_paterno', 'ASC')
+            .addOrderBy('a.nombre', 'ASC');
+
+        if (filters?.q && filters.q.trim().length >= 2) {
+            const q = `%${filters.q.trim()}%`;
+            qb.andWhere(
+                `(a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
+                  OR a.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q)`,
+                { q },
+            );
+        }
+
+        const total = await qb.getCount();
+        const rows = await qb.limit(limit).offset(offset).getRawMany();
+        rows.forEach(r => this.sanitize(r, true));
+        return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
-    // BÚSQUEDAS (autocomplete) — sin cambios, no exponen datos sensibles
+    // BÚSQUEDAS (autocomplete)
     // ══════════════════════════════════════════════════════════════════════════
 
     async searchAlumnos(query: string) {
@@ -555,11 +599,27 @@ export class UsersService {
             .limit(10)
             .getRawMany();
     }
-
-    // ══════════════════════════════════════════════════════════════════════════
-    // OBTENER UNO POR ID — detalle completo con foto_url resuelta
-    // ══════════════════════════════════════════════════════════════════════════
-
+    async searchAuxiliares(query: string) {
+        if (!query || query.trim().length < 2) return [];
+        return this.auxiliarRepo
+            .createQueryBuilder('a')
+            .innerJoin('cuentas', 'c', 'c.id = a.id')
+            .select([
+                'a.id               AS id',
+                'a.nombre           AS nombre',
+                'a.apellido_paterno AS apellido_paterno',
+                'a.apellido_materno AS apellido_materno',
+                'c.numero_documento AS numero_documento',
+                'c.codigo_acceso    AS codigo_acceso',
+            ])
+            .where(
+                `a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
+                 OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
+                { q: `%${query.trim()}%` },
+            )
+            .limit(10)
+            .getRawMany();
+    }
     async findAlumnoById(id: string) {
         const row = await this.alumnoRepo
             .createQueryBuilder('a')
@@ -692,10 +752,35 @@ export class UsersService {
         return row;
     }
 
-    // ══════════════════════════════════════════════════════════════════════════
-    // ACTIVAR / DESACTIVAR
-    // ══════════════════════════════════════════════════════════════════════════
-
+    // 🆕 ─────────────────────────────────────────────────────────────────────
+    async findAuxiliarById(id: string) {
+        const row = await this.auxiliarRepo
+            .createQueryBuilder('a')
+            .innerJoin('cuentas', 'c', 'c.id = a.id')
+            .select([
+                'a.id                    AS id',
+                'a.nombre                AS nombre',
+                'a.apellido_paterno      AS apellido_paterno',
+                'a.apellido_materno      AS apellido_materno',
+                'a.cargo                 AS cargo',
+                'a.email                 AS email',
+                'a.telefono              AS telefono',
+                'a.foto_storage_key      AS foto_storage_key',
+                'a.tipo_contrato         AS tipo_contrato',
+                'a.estado_contrato       AS estado_contrato',
+                'a.fecha_inicio_contrato AS fecha_inicio_contrato',
+                'a.fecha_fin_contrato    AS fecha_fin_contrato',
+                'c.numero_documento      AS numero_documento',
+                'c.tipo_documento        AS tipo_documento',
+                'c.codigo_acceso         AS codigo_acceso',
+                'c.activo                AS activo',
+            ])
+            .where('a.id = :id', { id })
+            .getRawOne();
+        if (!row) throw new NotFoundException(`Auxiliar ${id} no encontrado`);
+        this.sanitize(row);
+        return row;
+    }
     async deactivate(id: string): Promise<{ message: string }> {
         const result = await this.cuentaRepo
             .createQueryBuilder()
@@ -783,6 +868,7 @@ export class UsersService {
             alumno: `${alumno.nombre} ${alumno.apellido_paterno}`,
         };
     }
+
     // ══════════════════════════════════════════════════════════════════════════
     // MÉTODOS PARA AUTH SERVICE
     // ══════════════════════════════════════════════════════════════════════════
@@ -820,7 +906,7 @@ export class UsersService {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // PERFIL COMPLETO — usado por /users/me y AuthService
+    // PERFIL COMPLETO
     // ══════════════════════════════════════════════════════════════════════════
 
     async getProfileById(id: string, rol: string) {
@@ -831,10 +917,10 @@ export class UsersService {
             case 'padre': row = await this.findPadreById(id); break;
             case 'admin': row = await this.findAdminById(id); break;
             case 'psicologa': row = await this.findPsicologaById(id); break;
+            case 'auxiliar': row = await this.findAuxiliarById(id); break;   // 🆕
             default:
                 return this.cuentaRepo.findOne({ where: { id }, select: ['id', 'rol', 'activo'] });
         }
-        // sanitize ya fue llamado dentro de findXxxById
         return row;
     }
 
@@ -850,7 +936,6 @@ export class UsersService {
     ): Promise<{ message: string }> {
         return this.dataSource.transaction(async (em) => {
 
-            // 1. Campos perfil especializado
             const profileData: Record<string, any> = {};
             for (const k of PROFILE_FIELDS) {
                 if (dto[k] !== undefined) profileData[k] = dto[k] || null;
@@ -860,7 +945,6 @@ export class UsersService {
                 if (repo) await em.getRepository(repo.target).update(id, profileData);
             }
 
-            // 2. Documento (solo admin sobre otro usuario)
             if (!isSelf && (dto.tipo_documento || dto.numero_documento)) {
                 const cuentaUpd: Record<string, any> = {};
                 if (dto.tipo_documento) cuentaUpd['tipo_documento'] = dto.tipo_documento;
@@ -878,7 +962,6 @@ export class UsersService {
                 await em.getRepository(Cuenta).update(id, cuentaUpd);
             }
 
-            // 3. Contraseña (opcional)
             if (dto.new_password) {
                 if (dto.new_password.length < 8) {
                     throw new BadRequestException('La contraseña debe tener al menos 8 caracteres');
@@ -948,6 +1031,7 @@ export class UsersService {
         const r = await repo.findOne({ where: { id }, select: ['foto_storage_key'] });
         return r?.foto_storage_key ?? null;
     }
+
     async createBulk(rol: string, dtos: any[]): Promise<any[]> {
         const results: any[] = [];
         for (const dto of dtos) {
@@ -959,6 +1043,7 @@ export class UsersService {
                     case 'padre': result = await this.createPadre(dto); break;
                     case 'admin': result = await this.createAdmin(dto); break;
                     case 'psicologa': result = await this.createPsicologa(dto); break;
+                    case 'auxiliar': result = await this.createAuxiliar(dto); break;   // 🆕
                 }
                 results.push({
                     ok: true,
@@ -975,6 +1060,7 @@ export class UsersService {
         }
         return results;
     }
+
     async findCuentaByNumeroDocumento(numero_documento: string) {
         return this.cuentaRepo.findOne({
             where: { numero_documento: numero_documento.trim() },
