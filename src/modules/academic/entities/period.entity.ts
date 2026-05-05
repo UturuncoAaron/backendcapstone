@@ -5,24 +5,23 @@ import {
 
 @Entity('periodos')
 export class Period {
-    @PrimaryGeneratedColumn()
-    id: number;
+    @PrimaryGeneratedColumn('uuid')
+    id: string;
 
-    /** Ej: 'I Bimestre 2026' */
     @Column({ length: 100 })
     nombre: string;
 
-    @Column()
+    @Column({ type: 'smallint' })
     anio: number;
 
-    @Column()
+    @Column({ type: 'smallint' })
     bimestre: number;
 
-    @Column({ type: 'date', name: 'fecha_inicio' })
-    fecha_inicio: Date;
+    @Column({ name: 'fecha_inicio', type: 'date' })
+    fecha_inicio: string;
 
-    @Column({ type: 'date', name: 'fecha_fin' })
-    fecha_fin: Date;
+    @Column({ name: 'fecha_fin', type: 'date' })
+    fecha_fin: string;
 
     @Column({ default: false })
     activo: boolean;

@@ -1,7 +1,7 @@
 import {
     Controller, Get, Post, Patch,
     Body, Param, Query,
-    ParseIntPipe, ParseUUIDPipe, UseGuards,
+    ParseUUIDPipe, UseGuards,
 } from '@nestjs/common';
 import { AcademicService } from './academic.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -24,7 +24,7 @@ export class AcademicController {
 
     @Get('grados/:id')
     @Roles('admin', 'docente')
-    findGrado(@Param('id', ParseIntPipe) id: number) {
+    findGrado(@Param('id', ParseUUIDPipe) id: string) {
         return this.academicService.findGradoById(id);
     }
 
@@ -32,19 +32,18 @@ export class AcademicController {
 
     @Get('secciones')
     @Roles('admin', 'docente')
-    findAllSecciones(
-        @Query('gradoId', new ParseIntPipe({ optional: true })) gradoId?: number,
-    ) {
+    findAllSecciones(@Query('gradoId') gradoId?: string) {
         return this.academicService.findAllSecciones(gradoId);
     }
 
     @Post('secciones')
     @Roles('admin')
     createSeccion(
-        @Body() body: { grado_id: number; nombre: string; capacidad?: number },
+        @Body() body: { grado_id: string; nombre: string; capacidad?: number },
     ) {
+        // ⚠️ NUNCA hagas Number(body.grado_id) — es un UUID, no un número.
         return this.academicService.createSeccion(
-            Number(body.grado_id),
+            body.grado_id,
             body.nombre,
             body.capacidad,
         );
@@ -99,16 +98,16 @@ export class AcademicController {
 
     @Patch('periodos/:id/activar')
     @Roles('admin')
-    activarPeriodo(@Param('id', ParseIntPipe) id: number) {
+    activarPeriodo(@Param('id', ParseUUIDPipe) id: string) {
         return this.academicService.activarPeriodo(id);
     }
 
     // ── MATRÍCULAS ───────────────────────────────────────────────
 
-   @Get('matriculas')
+    @Get('matriculas')
     @Roles('admin')
     findMatriculas(
-        @Query('periodo_id', new ParseIntPipe({ optional: true })) periodoId?: number,
+        @Query('periodo_id') periodoId?: string,
         @Query('seccion_id') seccionId?: string,
     ) {
         return this.academicService.findMatriculas(periodoId, seccionId);

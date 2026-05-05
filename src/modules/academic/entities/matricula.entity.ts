@@ -11,22 +11,22 @@ export class Matricula {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column({ name: 'alumno_id' })
+    @Column({ name: 'alumno_id', type: 'uuid' })
     alumno_id: string;
 
     @ManyToOne(() => Alumno, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'alumno_id' })
     alumno: Alumno;
 
-    @Column({ name: 'seccion_id' })
+    @Column({ name: 'seccion_id', type: 'uuid' })
     seccion_id: string;
 
     @ManyToOne(() => Section, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'seccion_id' })
     seccion: Section;
 
-    @Column({ name: 'periodo_id' })
-    periodo_id: number;
+    @Column({ name: 'periodo_id', type: 'uuid' })
+    periodo_id: string;
 
     @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'periodo_id' })

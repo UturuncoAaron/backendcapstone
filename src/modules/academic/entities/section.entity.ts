@@ -11,8 +11,8 @@ export class Section {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column({ name: 'grado_id' })
-    grado_id: number;
+    @Column({ name: 'grado_id', type: 'uuid' })
+    grado_id: string;
 
     @ManyToOne(() => GradeLevel, (g) => g.secciones, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'grado_id' })
@@ -21,10 +21,10 @@ export class Section {
     @Column({ length: 10 })
     nombre: string;
 
-    @Column({ default: 35 })
+    @Column({ type: 'smallint', default: 35 })
     capacidad: number;
 
-    @Column({ name: 'tutor_id', nullable: true })
+    @Column({ name: 'tutor_id', type: 'uuid', nullable: true })
     tutor_id: string | null;
 
     @ManyToOne(() => Docente, { nullable: true, onDelete: 'SET NULL' })

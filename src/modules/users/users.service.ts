@@ -975,4 +975,9 @@ export class UsersService {
         }
         return results;
     }
+    async findCuentaByNumeroDocumento(numero_documento: string) {
+        return this.cuentaRepo.findOne({
+            where: { numero_documento: numero_documento.trim() },
+        });
+    }
 }

@@ -29,6 +29,7 @@ export class ImportService {
             return this.parseExcel(buffer);
         }
     }
+
     parseExcel(buffer: Buffer): CsvRow[] {
         const workbook = xlsx.read(buffer, { type: 'buffer' });
         const sheetName = workbook.SheetNames[0];
@@ -128,21 +129,25 @@ export class ImportService {
                     continue;
                 }
 
+                const dni = row.numero_documento.trim();
+
                 let cuenta = await this.cuentaRepo.findOne({
                     where: {
                         tipo_documento: row.tipo_documento.toLowerCase() as any,
-                        numero_documento: row.numero_documento.trim(),
+                        numero_documento: dni,
                     },
                 });
 
                 if (!cuenta) {
-                    const password_hash = await bcrypt.hash(row.numero_documento.trim(), 10);
+                    const password_hash = await bcrypt.hash(dni, 10);
 
                     cuenta = await this.cuentaRepo.save(
                         this.cuentaRepo.create({
                             tipo_documento: row.tipo_documento.toLowerCase() as any,
-                            numero_documento: row.numero_documento.trim(),
+                            numero_documento: dni,
                             password_hash,
+                            codigo_acceso: `EST-${dni}`, 
+                            password_changed: false,
                             rol: 'alumno',
                             activo: true,
                         })
@@ -151,7 +156,7 @@ export class ImportService {
                     await this.alumnoRepo.save(
                         this.alumnoRepo.create({
                             id: cuenta.id,
-                            codigo_estudiante: row.codigo_estudiante?.trim() || `EST-${row.numero_documento.trim()}`,
+                            codigo_estudiante: row.codigo_estudiante?.trim() || `EST-${dni}`,
                             nombre: row.nombre.trim(),
                             apellido_paterno: row.apellido_paterno.trim(),
                             apellido_materno: row.apellido_materno?.trim() || null,
@@ -164,9 +169,14 @@ export class ImportService {
                     result.creados++;
                 } else {
                     if (cuenta.rol !== 'alumno') {
-                        result.errores.push({ fila, numero_documento: row.numero_documento, motivo: `La cuenta ya existe pero tiene rol de ${cuenta.rol}` });
+                        result.errores.push({ fila, numero_documento: dni, motivo: `La cuenta ya existe pero tiene rol de ${cuenta.rol}` });
                         continue;
                     }
+                    if (!cuenta.codigo_acceso) {
+                        cuenta.codigo_acceso = `EST-${dni}`;
+                        await this.cuentaRepo.save(cuenta);
+                    }
+
                     result.omitidos++;
                 }
 

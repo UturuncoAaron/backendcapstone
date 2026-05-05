@@ -1,5 +1,5 @@
 import {
-    Injectable, UnauthorizedException, BadRequestException,
+    Injectable, UnauthorizedException, BadRequestException, Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -9,19 +9,40 @@ import { UsersService } from '../users/users.service.js';
 
 @Injectable()
 export class AuthService {
+    private readonly logger = new Logger(AuthService.name);
+
     constructor(
         private readonly usersService: UsersService,
         private readonly jwtService: JwtService,
     ) { }
 
     async login(dto: LoginDto) {
-        const cuenta = await this.usersService.findCuentaByCodigoAcceso(
-            dto.codigo_acceso.trim().toUpperCase(),
-        );
-        if (!cuenta) throw new UnauthorizedException('Código de acceso o contraseña incorrectos');
+        const input = (dto.codigo_acceso ?? '').trim();
+        if (!input) {
+            throw new UnauthorizedException('Código de acceso o contraseña incorrectos');
+        }
+
+        // 1. Buscar por codigo_acceso (uppercase) — ej. EST-12345678
+        let cuenta = await this.usersService.findCuentaByCodigoAcceso(input.toUpperCase());
+        if (!cuenta) {
+            cuenta = await this.usersService.findCuentaByNumeroDocumento(input);
+        }
+
+        if (!cuenta) {
+            this.logger.warn(`Login fallido: código no encontrado (input="${input}")`);
+            throw new UnauthorizedException('Código de acceso o contraseña incorrectos');
+        }
+
+        if (!cuenta.activo) {
+            this.logger.warn(`Login fallido: cuenta inactiva (id=${cuenta.id})`);
+            throw new UnauthorizedException('Cuenta inactiva. Contacta al administrador.');
+        }
 
         const passwordOk = await bcrypt.compare(dto.password, cuenta.password_hash);
-        if (!passwordOk) throw new UnauthorizedException('Código de acceso o contraseña incorrectos');
+        if (!passwordOk) {
+            this.logger.warn(`Login fallido: password incorrecto (id=${cuenta.id})`);
+            throw new UnauthorizedException('Código de acceso o contraseña incorrectos');
+        }
 
         const payload = {
             sub: cuenta.id,
@@ -39,6 +60,8 @@ export class AuthService {
             this.usersService.updateUltimoAcceso(cuenta.id).catch(() => null);
         });
 
+        this.logger.log(`Login OK: ${cuenta.codigo_acceso ?? cuenta.numero_documento} (rol=${cuenta.rol})`);
+
         return {
             token,
             password_changed: cuenta.password_changed,
@@ -49,13 +72,16 @@ export class AuthService {
     async changePassword(userId: string, dto: ChangePasswordDto) {
         const cuenta = await this.usersService.findCuentaById(userId);
         if (!cuenta || !cuenta.activo) throw new UnauthorizedException('Cuenta no encontrada');
+
         const isSame = await bcrypt.compare(dto.new_password, cuenta.password_hash);
         if (isSame) throw new BadRequestException('La nueva contraseña no puede ser igual a tu número de documento actual');
+
         const newHash = await bcrypt.hash(dto.new_password, 10);
         await this.usersService.updatePassword(userId, newHash);
 
         return { message: 'Contraseña actualizada correctamente' };
     }
+
     async getProfile(userId: string) {
         const cuenta = await this.usersService.findCuentaById(userId);
         if (!cuenta || !cuenta.activo) throw new UnauthorizedException('Usuario no encontrado o inactivo');
@@ -68,7 +94,6 @@ export class AuthService {
         };
     }
 
-    // ── Usa getProfileById para que foto_storage_key se resuelva
     private async getPerfil(id: string, rol: string) {
         const perfil = await this.usersService.getProfileById(id, rol);
         if (!perfil) throw new UnauthorizedException('Rol no reconocido');

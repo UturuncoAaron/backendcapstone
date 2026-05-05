@@ -1,5 +1,5 @@
 import {
-    Injectable, NotFoundException, ConflictException,
+    Injectable, NotFoundException, ConflictException, BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -34,13 +34,13 @@ export class AcademicService {
         return this.gradoRepo.find({ order: { orden: 'ASC' } });
     }
 
-    findGradoById(id: number) {
+    findGradoById(id: string) {
         return this.gradoRepo.findOne({ where: { id }, relations: ['secciones'] });
     }
 
     // ── SECCIONES ────────────────────────────────────────────────
 
-    findAllSecciones(gradoId?: number) {
+    findAllSecciones(gradoId?: string) {
         const where: any = {};
         if (gradoId) where.grado_id = gradoId;
         return this.seccionRepo.find({
@@ -50,7 +50,9 @@ export class AcademicService {
         });
     }
 
-    async createSeccion(gradoId: number, nombre: string, capacidad = 35) {
+    async createSeccion(gradoId: string, nombre: string, capacidad = 35) {
+        if (!gradoId) throw new BadRequestException('grado_id es requerido');
+
         const grado = await this.gradoRepo.findOne({ where: { id: gradoId } });
         if (!grado) throw new NotFoundException(`Grado ${gradoId} no encontrado`);
 
@@ -64,9 +66,12 @@ export class AcademicService {
 
         const periodoActivo = await this.periodoRepo.findOne({ where: { activo: true } });
 
-        // saved.id es string UUID ✓ — periodoActivo.id es number (SERIAL) ✓
+        // saved.id y periodoActivo.id son ambos UUID (string).
         const cursosGenerados = periodoActivo
-            ? await this.coursesService.generateCoursesFromTemplate(saved.id, periodoActivo.id)
+            ? await this.coursesService.generateCoursesFromTemplate(
+                saved.id as any,
+                periodoActivo.id as any,
+            )
             : null;
 
         return {
@@ -77,7 +82,6 @@ export class AcademicService {
         };
     }
 
-    // seccionId: number → string (UUID en v7)
     async asignarTutor(seccionId: string, docenteId: string | null, force = false) {
         const seccion = await this.seccionRepo.findOne({ where: { id: seccionId } });
         if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
@@ -244,7 +248,7 @@ export class AcademicService {
         return this.periodoRepo.save(this.periodoRepo.create(dto));
     }
 
-    async activarPeriodo(id: number) {
+    async activarPeriodo(id: string) {
         await this.periodoRepo
             .createQueryBuilder()
             .update()
@@ -258,8 +262,7 @@ export class AcademicService {
 
     // ── MATRÍCULAS ───────────────────────────────────────────────
 
-    // seccionId: number → string (UUID en v7)
-    async findMatriculas(periodoId?: number, seccionId?: string) {
+    async findMatriculas(periodoId?: string, seccionId?: string) {
         const params: any[] = [];
         const conditions: string[] = [];
 

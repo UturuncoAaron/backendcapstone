@@ -4,10 +4,10 @@ import { Type } from 'class-transformer';
 export class ImportQueryDto {
     @IsUUID()
     seccion_id: string;
-    @Type(() => Number)
-    @IsInt()
-    @Min(1)
-    periodo_id: number; 
+
+    @IsUUID()
+    periodo_id: string;
+
     @Type(() => Number)
     @IsInt()
     @IsOptional()
@@ -33,6 +33,7 @@ export interface ImportResult {
     omitidos: number;
     errores: ImportError[];
 }
+
 export interface ImportError {
     fila: number;
     numero_documento: string;
