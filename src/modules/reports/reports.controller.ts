@@ -1,10 +1,14 @@
-import { Controller, Get, Query, Res } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { ReportsService } from './reports.service.js';
 import { QueryReportDto } from './dto/query-report.dto.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
 
-// TODO: agregar JwtAuthGuard + Roles('admin') cuando se implemente JWT
 @Controller('admin/reports')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('admin')
 export class ReportsController {
     constructor(private readonly reportsService: ReportsService) { }
 

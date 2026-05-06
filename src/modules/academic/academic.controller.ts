@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('academic')
@@ -64,7 +65,7 @@ export class AcademicController {
 
     @Get('tutoria/me')
     @Roles('docente', 'admin')
-    getMiTutoria(@CurrentUser() user: any) {
+    getMiTutoria(@CurrentUser() user: AuthUser) {
         return this.academicService.getTutoriaForDocente(user.id);
     }
 

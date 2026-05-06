@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('libretas')
@@ -22,7 +23,7 @@ export class LibretasController {
 
     @Get('me')
     @Roles('alumno', 'padre')
-    findMine(@CurrentUser() user: any) {
+    findMine(@CurrentUser() user: AuthUser) {
         const tipo: LibretaTipo = user.rol === 'padre' ? 'padre' : 'alumno';
         return this.libretasService.findByCuenta(user.id, tipo);
     }
@@ -31,7 +32,7 @@ export class LibretasController {
     @Roles('padre')
     findByHijo(
         @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.libretasService.findHijoForPadre(user.id, alumnoId);
     }
@@ -50,7 +51,7 @@ export class LibretasController {
     @Roles('admin', 'docente')
     @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
     upsertAlumno(
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @UploadedFile() file: Express.Multer.File,
         @Body() body: {
             cuenta_id: string;
@@ -72,7 +73,7 @@ export class LibretasController {
     @Roles('admin')
     @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
     upsertPadre(
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @UploadedFile() file: Express.Multer.File,
         @Body() body: {
             cuenta_id: string;
@@ -97,7 +98,7 @@ export class LibretasController {
     @HttpCode(HttpStatus.OK)
     remove(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.libretasService.remove(id, user.id, user.rol);
     }

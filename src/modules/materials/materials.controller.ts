@@ -14,6 +14,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { CreateMaterialDto } from './dto/create-material.dto.js';
 import { UpdateMaterialDto } from './dto/update-material.dto.js';
 import { ToggleMaterialDto } from './dto/toggle-material.dto.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -29,9 +30,9 @@ export class MaterialsController {
     @Roles('alumno', 'docente', 'admin', 'padre')
     findAll(
         @Param('courseId', ParseUUIDPipe) courseId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        const alumnoId = user?.rol === 'alumno' ? user.sub : undefined;
+        const alumnoId = user?.rol === 'alumno' ? user.id : undefined;
         return this.materialsService.findByCourse(courseId, alumnoId);
     }
 
@@ -58,9 +59,9 @@ export class MaterialsController {
     @HttpCode(HttpStatus.OK)
     markViewed(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.materialsService.markViewed(id, user.sub);
+        return this.materialsService.markViewed(id, user.id);
     }
 
     @Post()
@@ -96,12 +97,12 @@ export class MaterialsController {
     @Roles('docente', 'admin')
     update(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @Body() dto: UpdateMaterialDto,
     ) {
         return this.materialsService.update(
             id,
-            user?.sub ?? 'dev',
+            user?.id ?? 'dev',
             user?.rol ?? 'admin',
             dto,
         );
@@ -112,11 +113,11 @@ export class MaterialsController {
     @HttpCode(HttpStatus.OK)
     remove(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.materialsService.remove(
             id,
-            user?.sub ?? 'dev',
+            user?.id ?? 'dev',
             user?.rol ?? 'admin',
         );
     }

@@ -7,8 +7,7 @@ import { Repository, DataSource, EntityManager } from 'typeorm';
 import { Grade, type TipoNota } from './entities/grade.entity.js';
 import { CreateGradeDto } from './dto/create-grade.dto.js';
 import { UpdateGradeDto } from './dto/update-grade.dto.js';
-
-interface AuthUser { id: string; rol: string; }
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Injectable()
 export class GradesService {
@@ -207,7 +206,7 @@ export class GradesService {
     }
 
     async getActividadesByCourse(
-        cursoId: string, user: AuthUser, periodoId?: number,
+        cursoId: string, user: AuthUser, periodoId?: string,
     ) {
         const [curso] = await this.dataSource.query(
             `SELECT id, periodo_id, docente_id FROM cursos WHERE id = $1`,
@@ -235,7 +234,7 @@ export class GradesService {
     }
 
     /** Planilla del docente: alumnos × actividades del periodo. */
-    async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: number) {
+    async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: string) {
         const [curso] = await this.dataSource.query(
             `SELECT id, seccion_id, periodo_id, docente_id
                FROM cursos WHERE id = $1`,

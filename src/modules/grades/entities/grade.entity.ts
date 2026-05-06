@@ -12,8 +12,10 @@ const decimalToNumber = {
     from: (v: string | null) => (v == null ? null : parseFloat(v)),
 };
 
+// El tipo 'examen' fue retirado: hoy solo hay tareas (con o sin alternativas).
+// La migración 0001 reescribe filas históricas con tipo='examen' a tipo='tarea'.
 export const TIPOS_NOTA = [
-    'examen', 'tarea', 'practica',
+    'tarea', 'practica',
     'participacion', 'proyecto', 'otro',
 ] as const;
 export type TipoNota = typeof TIPOS_NOTA[number];
@@ -42,7 +44,7 @@ export class Grade {
     curso: Course;
 
     @Column({ name: 'periodo_id' })
-    periodo_id: number;
+    periodo_id: string;
 
     @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'periodo_id' })

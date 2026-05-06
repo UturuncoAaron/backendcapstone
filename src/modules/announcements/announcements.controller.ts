@@ -10,6 +10,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('announcements')
@@ -33,7 +34,7 @@ export class AnnouncementsController {
     @Post()
     @Roles('admin')
     create(
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @Body() dto: CreateAnnouncementDto,
     ) {
         return this.announcementsService.create(user.id, dto);

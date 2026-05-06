@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('courses/:courseId/semanas')
@@ -20,7 +21,7 @@ export class SemanasController {
     @Roles('alumno', 'docente', 'admin', 'padre')
     async list(
         @Param('courseId', ParseUUIDPipe) courseId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         const semanas = await this.semanasService.listForCourse(courseId);
         return user?.rol === 'alumno' ? semanas.filter((s) => !s.oculta) : semanas;

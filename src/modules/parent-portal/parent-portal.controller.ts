@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('padre')
@@ -14,7 +15,7 @@ export class ParentPortalController {
 
     // GET /api/parent/children
     @Get('children')
-    getChildren(@CurrentUser() user: any) {
+    getChildren(@CurrentUser() user: AuthUser) {
         return this.service.getChildren(user.id);
     }
 
@@ -22,7 +23,7 @@ export class ParentPortalController {
     @Get('children/:id/grades')
     getChildGrades(
         @Param('id', ParseUUIDPipe) alumnoId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.getChildGrades(user.id, alumnoId);
     }
@@ -31,7 +32,7 @@ export class ParentPortalController {
     @Get('children/:id/attendance')
     getChildAttendance(
         @Param('id', ParseUUIDPipe) alumnoId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.getChildAttendance(user.id, alumnoId);
     }
@@ -40,7 +41,7 @@ export class ParentPortalController {
     @Get('children/:id/libretas')
     getChildLibretas(
         @Param('id', ParseUUIDPipe) alumnoId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.getChildLibretas(user.id, alumnoId);
     }

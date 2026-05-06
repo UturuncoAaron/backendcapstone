@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 import {
     CreateConversationDto,
     SendMessageDto,
@@ -26,33 +27,33 @@ export class MessagingController {
     @Post('conversations')
     createConversation(
         @Body() dto: CreateConversationDto,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.createConversation(user.sub, dto);
+        return this.service.createConversation(user.id, dto);
     }
 
     // GET /api/messaging/conversations — lista mis conversaciones con no leídos
     @Get('conversations')
-    getMyConversations(@CurrentUser() user: any) {
-        return this.service.getMyConversations(user.sub);
+    getMyConversations(@CurrentUser() user: AuthUser) {
+        return this.service.getMyConversations(user.id);
     }
 
     // GET /api/messaging/conversations/:id
     @Get('conversations/:id')
     getConversation(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.getConversationById(id, user.sub);
+        return this.service.getConversationById(id, user.id);
     }
 
     // PATCH /api/messaging/conversations/:id/archive
     @Patch('conversations/:id/archive')
     archiveConversation(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.archiveConversation(id, user.sub);
+        return this.service.archiveConversation(id, user.id);
     }
 
     // ── Messages ──────────────────────────────────────────────────────────────
@@ -62,9 +63,9 @@ export class MessagingController {
     sendMessage(
         @Param('id', ParseUUIDPipe) conversationId: string,
         @Body() dto: SendMessageDto,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.sendMessage(conversationId, user.sub, dto);
+        return this.service.sendMessage(conversationId, user.id, dto);
     }
 
     // GET /api/messaging/conversations/:id/messages?limit=30&before=<timestamp>
@@ -73,11 +74,11 @@ export class MessagingController {
         @Param('id', ParseUUIDPipe) conversationId: string,
         @Query('limit') limit: string,
         @Query('before') before: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.getMessages(
             conversationId,
-            user.sub,
+            user.id,
             limit ? parseInt(limit) : 30,
             before,
         );
@@ -88,18 +89,18 @@ export class MessagingController {
     updateMessage(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: UpdateMessageDto,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.updateMessage(id, user.sub, dto);
+        return this.service.updateMessage(id, user.id, dto);
     }
 
     // DELETE /api/messaging/messages/:id
     @Delete('messages/:id')
     deleteMessage(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.deleteMessage(id, user.sub);
+        return this.service.deleteMessage(id, user.id);
     }
 
     // ── Read receipts ─────────────────────────────────────────────────────────
@@ -108,8 +109,8 @@ export class MessagingController {
     @Post('conversations/:id/read')
     markAsRead(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.markAsRead(id, user.sub);
+        return this.service.markAsRead(id, user.id);
     }
 }

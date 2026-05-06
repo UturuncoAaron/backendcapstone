@@ -13,7 +13,7 @@ export class TareaPendienteDto {
     titulo: string;
     cursoNombre: string;
     fechaLimite: string;
-    tipo: 'tarea' | 'examen';
+    tipo: 'tarea';
 }
 
 export class ComunicadoDto {

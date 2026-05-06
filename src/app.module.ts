@@ -37,7 +37,6 @@ class DevBypassGuard implements CanActivate {
 }
 
 const isDev = process.env.NODE_ENV === 'development';
-console.log('NODE_ENV:', process.env.NODE_ENV, '| isDev:', isDev);
 
 @Module({
   imports: [

@@ -8,6 +8,7 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { CreateForumBodyDto, ToggleForumDto } from './dto/forum.dto.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('courses/:courseId/forums')
@@ -19,7 +20,7 @@ export class ForumController {
     @Roles('alumno', 'docente', 'admin')
     getForums(
         @Param('courseId', ParseUUIDPipe) courseId: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         const soloVisibles = user?.rol === 'alumno';
         return this.forumService.getForumsByCourse(courseId, soloVisibles);
@@ -58,9 +59,9 @@ export class ForumController {
     createPost(
         @Param('forumId', ParseUUIDPipe) forumId: string,
         @Body() dto: { contenido: string; parent_post_id?: string },
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.forumService.createPost(forumId, user.sub, dto);
+        return this.forumService.createPost(forumId, user.id, dto);
     }
 
     // DELETE /api/courses/:courseId/forums/:forumId/posts/:postId
