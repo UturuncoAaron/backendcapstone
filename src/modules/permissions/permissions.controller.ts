@@ -9,6 +9,7 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { UseGuards } from '@nestjs/common';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller('permissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -44,9 +45,9 @@ export class PermissionsController {
     @Post()
     create(
         @Body() dto: CreatePermisoDto,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.create(dto, user.sub);
+        return this.service.create(dto, user.id);
     }
 
     // PATCH /api/permissions/:id — activar/desactivar permiso

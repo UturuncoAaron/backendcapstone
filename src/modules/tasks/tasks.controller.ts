@@ -20,6 +20,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 import {
   CreateTaskDto,
   SubmitTaskDto,
@@ -43,66 +44,10 @@ export class TasksController {
   @Roles('docente', 'admin', 'alumno')
   getCourseTasks(
     @Param('id', ParseUUIDPipe) cursoId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
     const incluirInactivas = user?.rol !== 'alumno';
-    return this.tasksService.getCourseTasks(cursoId, 'tarea', incluirInactivas);
-  }
-
-  // ── Exámenes (mismo backend, tipo='examen') ─────────────────
-
-  @Get('courses/:id/exams')
-  @Roles('docente', 'admin', 'alumno')
-  getCourseExams(
-    @Param('id', ParseUUIDPipe) cursoId: string,
-    @CurrentUser() user: any,
-  ) {
-    const incluirInactivas = user?.rol !== 'alumno';
-    return this.tasksService.getCourseTasks(
-      cursoId,
-      'examen',
-      incluirInactivas,
-    );
-  }
-
-  @Post('courses/:id/exams')
-  @Roles('docente', 'admin')
-  createExam(
-    @Param('id', ParseUUIDPipe) cursoId: string,
-    @Body() dto: CreateTaskDto,
-  ) {
-    return this.tasksService.createTask(cursoId, { ...dto, tipo: 'examen' });
-  }
-
-  @Get('courses/:cursoId/exams/:id')
-  @Roles('docente', 'admin', 'alumno')
-  getExam(@Param('id', ParseUUIDPipe) examId: string) {
-    return this.tasksService.getTaskForAlumno(examId);
-  }
-
-  @Patch('courses/:cursoId/exams/:id/toggle')
-  @Roles('docente', 'admin')
-  toggleExam(
-    @Param('id', ParseUUIDPipe) examId: string,
-    @Body() dto: ToggleTaskDto,
-  ) {
-    return this.tasksService.toggleTask(examId, dto);
-  }
-
-  @Post('courses/:cursoId/exams/:id/submit')
-  @Roles('alumno')
-  submitExam(
-    @Param('id', ParseUUIDPipe) examId: string,
-    @Body() dto: SubmitAlternativasDto,
-    @CurrentUser() user: any,
-  ) {
-    return this.tasksService.submitAlternativas(examId, user.sub, dto);
-  }
-
-  @Get('courses/:cursoId/exams/:id/results')
-  @Roles('docente', 'admin', 'alumno')
-  getExamResults(@Param('id', ParseUUIDPipe) examId: string) {
-    return this.tasksService.getSubmissions(examId);
+    return this.tasksService.getCourseTasks(cursoId, incluirInactivas);
   }
 
   @Post('courses/:id/tasks')
@@ -187,8 +132,8 @@ export class TasksController {
 
   @Get('my-submissions')
   @Roles('alumno')
-  getMySubmissions(@CurrentUser() user: any) {
-    return this.tasksService.getMySubmissions(user.sub);
+  getMySubmissions(@CurrentUser() user: AuthUser) {
+    return this.tasksService.getMySubmissions(user.id);
   }
 
   @Get('tasks/:id')
@@ -202,9 +147,9 @@ export class TasksController {
   submitTask(
     @Param('id', ParseUUIDPipe) taskId: string,
     @Body() dto: SubmitTaskDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.tasksService.submitTask(taskId, user.sub, dto);
+    return this.tasksService.submitTask(taskId, user.id, dto);
   }
 
   @Post('tasks/:id/submit-file')
@@ -217,7 +162,7 @@ export class TasksController {
   )
   submitTaskFile(
     @Param('id', ParseUUIDPipe) taskId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
     @UploadedFile(
       new ParseFilePipe({
         fileIsRequired: true,
@@ -232,7 +177,7 @@ export class TasksController {
     )
     file: Express.Multer.File,
   ) {
-    return this.tasksService.submitTaskWithFile(taskId, user.sub, file);
+    return this.tasksService.submitTaskWithFile(taskId, user.id, file);
   }
 
   @Post('tasks/:id/submit-alternativas')
@@ -240,17 +185,17 @@ export class TasksController {
   submitAlternativas(
     @Param('id', ParseUUIDPipe) taskId: string,
     @Body() dto: SubmitAlternativasDto,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.tasksService.submitAlternativas(taskId, user.sub, dto);
+    return this.tasksService.submitAlternativas(taskId, user.id, dto);
   }
 
   @Get('tasks/:id/my-submission')
   @Roles('alumno')
   getMySubmission(
     @Param('id', ParseUUIDPipe) taskId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.tasksService.getMySubmission(taskId, user.sub);
+    return this.tasksService.getMySubmission(taskId, user.id);
   }
 }

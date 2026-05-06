@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller('notifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -18,30 +19,30 @@ export class NotificationsController {
     // GET /api/notifications?unread=true
     @Get()
     getMyNotifications(
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @Query('unread') unread: string,
     ) {
-        return this.service.getMyNotifications(user.sub, unread === 'true');
+        return this.service.getMyNotifications(user.id, unread === 'true');
     }
 
     // GET /api/notifications/unread-count
     @Get('unread-count')
-    getUnreadCount(@CurrentUser() user: any) {
-        return this.service.getUnreadCount(user.sub).then(count => ({ count }));
+    getUnreadCount(@CurrentUser() user: AuthUser) {
+        return this.service.getUnreadCount(user.id).then(count => ({ count }));
     }
 
     // PATCH /api/notifications/:id/read
     @Patch(':id/read')
     markOneAsRead(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
-        return this.service.markOneAsRead(id, user.sub);
+        return this.service.markOneAsRead(id, user.id);
     }
 
     // PATCH /api/notifications/read-all
     @Patch('read-all')
-    markAllAsRead(@CurrentUser() user: any) {
-        return this.service.markAllAsRead(user.sub);
+    markAllAsRead(@CurrentUser() user: AuthUser) {
+        return this.service.markAllAsRead(user.id);
     }
 }

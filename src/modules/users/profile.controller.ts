@@ -10,8 +10,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { UsersService } from './users.service.js';
 import { UpdateFullDto } from './dto/profile.dto.js';
-
-interface JwtUser { id: string; rol: string; }
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard)
@@ -20,14 +19,14 @@ export class ProfileController {
 
     // ── GET /api/users/me ─────────────────────────────────────────────────
     @Get('me')
-    getMe(@CurrentUser() user: JwtUser) {
+    getMe(@CurrentUser() user: AuthUser) {
         return this.usersService.getProfileById(user.id, user.rol);
     }
 
     // ── PUT /api/users/me ─────────────────────────────────────────────────
 
     @Put('me')
-    updateMe(@CurrentUser() user: JwtUser, @Body() dto: UpdateFullDto) {
+    updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateFullDto) {
         return this.usersService.updateFull(user.id, user.rol, dto, true);
     }
 
@@ -45,7 +44,7 @@ export class ProfileController {
         },
     }))
     uploadFoto(
-        @CurrentUser() user: JwtUser,
+        @CurrentUser() user: AuthUser,
         @UploadedFile() file: Express.Multer.File,
     ) {
         if (!file) throw new BadRequestException('No se recibió ningún archivo');

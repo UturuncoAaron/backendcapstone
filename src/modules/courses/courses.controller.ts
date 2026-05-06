@@ -10,8 +10,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
-
-interface AuthUser { id: string; rol: string; }
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('courses')

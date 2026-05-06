@@ -42,10 +42,9 @@ export class TasksService {
 
     async getCourseTasks(
         cursoId: string,
-        tipo: 'tarea' | 'examen' = 'tarea',
         incluirInactivas = false,
     ) {
-        const where: Record<string, unknown> = { curso_id: cursoId, tipo };
+        const where: Record<string, unknown> = { curso_id: cursoId };
         if (!incluirInactivas) where['activo'] = true;
         const tareas = await this.taskRepo.find({
             where,

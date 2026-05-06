@@ -5,6 +5,7 @@ import {
 import { LiveClassesService } from './live-classes.service.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { EstadoClase } from './entities/live-class.entity.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller()
 export class LiveClassesController {
@@ -73,7 +74,7 @@ export class LiveClassesController {
     @Patch('live-classes/:id')
     update(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @Body() dto: {
             titulo?: string;
             descripcion?: string;
@@ -86,7 +87,7 @@ export class LiveClassesController {
         if (dto.fecha_hora) parsed.fecha_hora = new Date(dto.fecha_hora);
         return this.liveClassesService.update(
             id, parsed,
-            user?.sub ?? 'dev',
+            user?.id ?? 'dev',
             user?.rol ?? 'admin',
         );
     }
@@ -95,12 +96,12 @@ export class LiveClassesController {
     @Patch('live-classes/:id/status')
     updateEstado(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
         @Body() dto: { estado: EstadoClase },
     ) {
         return this.liveClassesService.updateEstado(
             id, dto.estado,
-            user?.sub ?? 'dev',
+            user?.id ?? 'dev',
             user?.rol ?? 'admin',
         );
     }
@@ -110,11 +111,11 @@ export class LiveClassesController {
     @HttpCode(HttpStatus.OK)
     remove(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: any,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.liveClassesService.remove(
             id,
-            user?.sub ?? 'dev',
+            user?.id ?? 'dev',
             user?.rol ?? 'admin',
         );
     }

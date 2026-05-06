@@ -12,8 +12,7 @@ import {
     CreateAppointmentDto, UpdateAppointmentDto,
     CreateAvailabilityDto, CreateBlockDto,
 } from './dto/psychology.dto.js';
-
-interface JwtUser { id: string; rol: string; }
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller('psychology')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -25,7 +24,7 @@ export class PsychologyController {
 
     @Post('records')
     @Roles('psicologa')
-    createRecord(@Body() dto: CreateRecordDto, @CurrentUser() user: JwtUser) {
+    createRecord(@Body() dto: CreateRecordDto, @CurrentUser() user: AuthUser) {
         return this.service.createRecord(user.id, dto);
     }
 
@@ -33,7 +32,7 @@ export class PsychologyController {
     @Roles('psicologa')
     getRecords(
         @Param('studentId', ParseUUIDPipe) studentId: string,
-        @CurrentUser() user: JwtUser,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.getRecordsByStudent(user.id, studentId);
     }
@@ -43,7 +42,7 @@ export class PsychologyController {
     updateRecord(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: UpdateRecordDto,
-        @CurrentUser() user: JwtUser,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.updateRecord(user.id, id, dto);
     }
@@ -52,7 +51,7 @@ export class PsychologyController {
     @Roles('psicologa')
     deleteRecord(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: JwtUser,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.deleteRecord(user.id, id);
     }
@@ -61,25 +60,25 @@ export class PsychologyController {
 
     @Post('appointments')
     @Roles('psicologa', 'docente')
-    createAppointment(@Body() dto: CreateAppointmentDto, @CurrentUser() user: JwtUser) {
+    createAppointment(@Body() dto: CreateAppointmentDto, @CurrentUser() user: AuthUser) {
         return this.service.createAppointment(user.id, dto);
     }
 
     @Get('appointments/mine')
     @Roles('psicologa', 'docente')
-    getMyAppointments(@CurrentUser() user: JwtUser) {
+    getMyAppointments(@CurrentUser() user: AuthUser) {
         return this.service.getMyAppointments(user.id);
     }
 
     @Get('appointments/parent')
     @Roles('padre')
-    getParentAppointments(@CurrentUser() user: JwtUser) {
+    getParentAppointments(@CurrentUser() user: AuthUser) {
         return this.service.getAppointmentsByParent(user.id);
     }
 
     @Get('appointments/student')
     @Roles('alumno')
-    getStudentAppointments(@CurrentUser() user: JwtUser) {
+    getStudentAppointments(@CurrentUser() user: AuthUser) {
         return this.service.getAppointmentsByStudent(user.id);
     }
 
@@ -88,7 +87,7 @@ export class PsychologyController {
     updateAppointment(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: UpdateAppointmentDto,
-        @CurrentUser() user: JwtUser,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.updateAppointment(id, user.id, dto);
     }
@@ -97,7 +96,7 @@ export class PsychologyController {
 
     @Post('availability')
     @Roles('psicologa')
-    setAvailability(@Body() dto: CreateAvailabilityDto, @CurrentUser() user: JwtUser) {
+    setAvailability(@Body() dto: CreateAvailabilityDto, @CurrentUser() user: AuthUser) {
         return this.service.setAvailability(user.id, dto);
     }
 
@@ -111,7 +110,7 @@ export class PsychologyController {
     @Roles('psicologa')
     removeAvailability(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: JwtUser,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.removeAvailability(user.id, id);
     }
@@ -120,13 +119,13 @@ export class PsychologyController {
 
     @Post('blocks')
     @Roles('psicologa')
-    createBlock(@Body() dto: CreateBlockDto, @CurrentUser() user: JwtUser) {
+    createBlock(@Body() dto: CreateBlockDto, @CurrentUser() user: AuthUser) {
         return this.service.createBlock(user.id, dto);
     }
 
     @Get('blocks')
     @Roles('psicologa')
-    getBlocks(@CurrentUser() user: JwtUser) {
+    getBlocks(@CurrentUser() user: AuthUser) {
         return this.service.getBlocks(user.id);
     }
 
@@ -134,7 +133,7 @@ export class PsychologyController {
     @Roles('psicologa')
     removeBlock(
         @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: JwtUser,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.removeBlock(user.id, id);
     }
@@ -178,7 +177,7 @@ export class PsychologyController {
     // Mis alumnos asignados (vista de la psicóloga)
     @Get('my-students')
     @Roles('psicologa')
-    getMyStudents(@CurrentUser() user: JwtUser) {
+    getMyStudents(@CurrentUser() user: AuthUser) {
         return this.service.getStudentsOfPsychologist(user.id);
     }
 
@@ -197,7 +196,7 @@ export class PsychologyController {
     @Roles('psicologa')
     getStudentParents(
         @Param('studentId', ParseUUIDPipe) studentId: string,
-        @CurrentUser() user: JwtUser,
+        @CurrentUser() user: AuthUser,
     ) {
         return this.service.getStudentParents(user.id, studentId);
     }

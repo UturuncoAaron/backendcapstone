@@ -21,8 +21,14 @@ export class Task {
     @Column({ length: 200 })
     titulo: string;
 
+    /**
+     * Histórico: la columna existía con valores 'tarea' | 'examen' cuando
+     * había un módulo de exámenes. Hoy todo es tarea — la columna se mantiene
+     * para no romper el schema y forzamos `'tarea'` siempre en código.
+     * La migración 0001 convierte los registros 'examen' a 'tarea'.
+     */
     @Column({ type: 'varchar', length: 16, default: 'tarea' })
-    tipo: 'tarea' | 'examen';
+    tipo: 'tarea';
 
     @Column({ type: 'text', nullable: true })
     instrucciones: string | null;

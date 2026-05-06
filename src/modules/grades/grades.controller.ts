@@ -10,8 +10,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
-
-interface AuthUser { id: string; rol: string; }
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('grades')
@@ -40,30 +39,26 @@ export class GradesController {
         );
     }
 
-    // GET /api/grades/course/:cursoId?periodoId=1
+    // GET /api/grades/course/:cursoId?periodoId=<uuid>
     @Get('course/:cursoId')
     @Roles('docente', 'admin')
     getCourseGrid(
         @Param('cursoId', ParseUUIDPipe) cursoId: string,
         @CurrentUser() user: AuthUser,
-        @Query('periodoId') periodoId?: string,
+        @Query('periodoId', new ParseUUIDPipe({ optional: true })) periodoId?: string,
     ) {
-        return this.grades.getCourseGrid(
-            cursoId, user, periodoId ? parseInt(periodoId, 10) : undefined,
-        );
+        return this.grades.getCourseGrid(cursoId, user, periodoId);
     }
 
-    // GET /api/grades/course/:cursoId/actividades?periodoId=1
+    // GET /api/grades/course/:cursoId/actividades?periodoId=<uuid>
     @Get('course/:cursoId/actividades')
     @Roles('docente', 'admin')
     getActividades(
         @Param('cursoId', ParseUUIDPipe) cursoId: string,
         @CurrentUser() user: AuthUser,
-        @Query('periodoId') periodoId?: string,
+        @Query('periodoId', new ParseUUIDPipe({ optional: true })) periodoId?: string,
     ) {
-        return this.grades.getActividadesByCourse(
-            cursoId, user, periodoId ? parseInt(periodoId, 10) : undefined,
-        );
+        return this.grades.getActividadesByCourse(cursoId, user, periodoId);
     }
 
     // GET /api/grades/:id

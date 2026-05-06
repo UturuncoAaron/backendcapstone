@@ -12,11 +12,7 @@ import {
     ListAsistenciasQueryDto, ReporteAsistenciaQueryDto, ScanQrDto,
 } from './dto/asistencia.dto.js';
 import { QrService } from '../qr/qr.service.js';
-
-export interface AuthUser {
-    sub: string;
-    rol: 'alumno' | 'docente' | 'admin' | 'padre' | 'psicologa' | 'auxiliar';
-}
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Injectable()
 export class AssistsService {
@@ -40,7 +36,7 @@ export class AssistsService {
 
     /** Garantiza que la request viene de un usuario autenticado. */
     private requireAuth(user: AuthUser | undefined): asserts user is AuthUser {
-        if (!user?.sub) throw new UnauthorizedException('Usuario no autenticado');
+        if (!user?.id) throw new UnauthorizedException('Usuario no autenticado');
     }
 
     /** Solo el docente del curso (o admin) puede gestionar asistencia por curso. */
@@ -53,7 +49,7 @@ export class AssistsService {
         );
         if (!rows[0]) throw new NotFoundException(`Curso ${cursoId} no encontrado`);
         if (!rows[0].activo) throw new BadRequestException(`Curso ${cursoId} inactivo`);
-        if (rows[0].docente_id !== user.sub) {
+        if (rows[0].docente_id !== user.id) {
             throw new ForbiddenException('Solo el docente del curso puede gestionar su asistencia');
         }
     }
@@ -80,7 +76,7 @@ export class AssistsService {
         );
         if (!rows[0]) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
         if (!rows[0].activo) throw new BadRequestException(`Sección ${seccionId} inactiva`);
-        if (rows[0].tutor_id !== user.sub) {
+        if (rows[0].tutor_id !== user.id) {
             throw new ForbiddenException('Solo el tutor de la sección puede registrar asistencia general');
         }
     }
@@ -219,7 +215,7 @@ export class AssistsService {
                 fecha: dto.fecha,
                 estado: dto.estado,
                 observacion: dto.observacion ?? null,
-                registrado_por: user.sub,
+                registrado_por: user.id,
             },
             ['alumno_id', 'seccion_id', 'fecha'],
         );
@@ -251,7 +247,7 @@ export class AssistsService {
             fecha: dto.fecha,
             estado: a.estado,
             observacion: a.observacion ?? null,
-            registrado_por: user.sub,
+            registrado_por: user.id,
         }));
 
         await this.generalRepo.upsert(records, ['alumno_id', 'seccion_id', 'fecha']);
@@ -344,7 +340,7 @@ export class AssistsService {
                 fecha,
                 estado,
                 observacion: null,
-                registrado_por: user.sub,
+                registrado_por: user.id,
             },
             ['alumno_id', 'seccion_id', 'fecha'],
         );
@@ -358,7 +354,7 @@ export class AssistsService {
         });
 
         this.logger.log(
-            `Scan QR: alumno=${info.alumno_id} sec=${info.seccion_id} estado=${estado} por=${user.sub}`,
+            `Scan QR: alumno=${info.alumno_id} sec=${info.seccion_id} estado=${estado} por=${user.id}`,
         );
 
         return {
@@ -443,7 +439,7 @@ export class AssistsService {
                 fecha: dto.fecha,
                 estado: dto.estado,
                 observacion: dto.observacion ?? null,
-                registrado_por: user.sub,
+                registrado_por: user.id,
             },
             ['alumno_id', 'curso_id', 'fecha'],
         );
@@ -475,7 +471,7 @@ export class AssistsService {
             fecha: dto.fecha,
             estado: a.estado,
             observacion: a.observacion ?? null,
-            registrado_por: user.sub,
+            registrado_por: user.id,
         }));
 
         await this.classRepo.upsert(records, ['alumno_id', 'curso_id', 'fecha']);

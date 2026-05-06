@@ -1,5 +1,5 @@
 import {
-    IsUUID, IsInt, IsNumber, IsOptional, IsString,
+    IsUUID, IsNumber, IsOptional, IsString,
     Min, Max, MaxLength, IsIn, IsDateString,
 } from 'class-validator';
 import { TIPOS_NOTA, type TipoNota } from '../entities/grade.entity.js';
@@ -11,8 +11,8 @@ export class CreateGradeDto {
     @IsUUID()
     curso_id: string;
 
-    @IsInt()
-    periodo_id: number;
+    @IsUUID()
+    periodo_id: string;
 
     @IsString()
     @MaxLength(200)

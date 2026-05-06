@@ -7,6 +7,7 @@ import { LoginDto, ChangePasswordDto } from './dto/login.dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
+import type { AuthUser } from './types/auth-user.js';
 
 @Controller('auth')
 export class AuthController {
@@ -21,10 +22,8 @@ export class AuthController {
 
   @Get('profile')
   @UseGuards(JwtAuthGuard)
-  getProfile(@CurrentUser() user: any) {
-    // 💡 Aseguramos usar el ID correcto
-    const userId = user.id || user.sub;
-    return this.authService.getProfile(userId);
+  getProfile(@CurrentUser() user: AuthUser) {
+    return this.authService.getProfile(user.id);
   }
 
   // POST /api/auth/change-password
@@ -32,11 +31,10 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   changePasswordPost(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
     @Body() dto: ChangePasswordDto,
   ) {
-    const userId = user.id || user.sub;
-    return this.authService.changePassword(userId, dto);
+    return this.authService.changePassword(user.id, dto);
   }
 
   // PATCH /api/auth/change-password
@@ -44,11 +42,9 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   changePassword(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthUser,
     @Body() dto: ChangePasswordDto,
   ) {
-    // 💡 Aseguramos usar el ID correcto
-    const userId = user.id || user.sub;
-    return this.authService.changePassword(userId, dto);
+    return this.authService.changePassword(user.id, dto);
   }
 }
