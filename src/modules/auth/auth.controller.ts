@@ -2,6 +2,7 @@ import {
   Controller, Post, Get, Patch,
   Body, UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
+
 import { AuthService } from './auth.service.js';
 import { LoginDto, ChangePasswordDto } from './dto/login.dto.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
@@ -26,18 +27,6 @@ export class AuthController {
     return this.authService.getProfile(user.id);
   }
 
-  // POST /api/auth/change-password
-  @Post('change-password')
-  @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
-  changePasswordPost(
-    @CurrentUser() user: AuthUser,
-    @Body() dto: ChangePasswordDto,
-  ) {
-    return this.authService.changePassword(user.id, dto);
-  }
-
-  // PATCH /api/auth/change-password
   @Patch('change-password')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
