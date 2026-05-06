@@ -36,9 +36,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             throw new UnauthorizedException('Token inválido o usuario inactivo');
         }
 
-        // Lo que queda disponible en @CurrentUser() y request.user
+        // Lo que queda disponible en @CurrentUser() y request.user.
+        // `sub` se incluye como alias retro-compatible: varios módulos
+        // (assists, tasks, messaging, etc.) lo leían directo del payload JWT
+        // antes de que existiera `validate()`. Estandarizar a `id` queda
+        // pendiente para una PR de limpieza, pero ambos apuntan al mismo UUID.
         return {
             id: cuenta.id,
+            sub: cuenta.id,
             rol: cuenta.rol,
             tipo_documento: cuenta.tipo_documento,
             numero_documento: cuenta.numero_documento,
