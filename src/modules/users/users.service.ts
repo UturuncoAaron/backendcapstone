@@ -29,6 +29,22 @@ import {
 } from './dto/users.dto.js';
 import { UpdateFullDto } from './dto/profile.dto.js';
 
+// ── Tipos exportados ──────────────────────────────────────────────────────────
+
+export interface DocenteSelectItem {
+    id: string;
+    nombre: string;
+    apellido_paterno: string;
+    apellido_materno: string | null;
+    especialidad: string | null;
+    foto_url: string | null;
+    tutoria_actual?: {
+        seccion_id: string;
+        seccion_label: string;
+    } | null;
+}
+// ── Constantes ────────────────────────────────────────────────────────────────
+
 const ROLE_PREFIX: Record<string, string> = {
     alumno: 'EST', docente: 'DOC', padre: 'PAD',
     admin: 'ADM', psicologa: 'PSI',
@@ -43,6 +59,8 @@ const PROFILE_FIELDS = [
 ] as const;
 
 const SENSITIVE_FIELDS = ['foto_storage_key', 'password_changed', 'password_hash'];
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class UsersService {
@@ -232,6 +250,11 @@ export class UsersService {
             }));
         });
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // LISTAR USUARIOS (paginado)
+    // ══════════════════════════════════════════════════════════════════════════
+
     async findAdmins(filters?: { q?: string; page?: number; limit?: number }) {
         const page = filters?.page ?? 1;
         const limit = filters?.limit ?? 20;
@@ -339,7 +362,6 @@ export class UsersService {
             .getRawMany();
 
         rows.forEach(r => this.sanitize(r, true));
-
         return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
@@ -375,16 +397,16 @@ export class UsersService {
             .addOrderBy('d.nombre', 'ASC');
 
         if (filters?.includeTutoria) {
-            qb.leftJoin('secciones', 's', 's.tutor_id = d.id AND s.activo = true')
+            qb.leftJoin('secciones', 's', 's.tutor_id = d.id')
                 .leftJoin('grados', 'g', 'g.id = s.grado_id')
                 .addSelect(`
-              CASE WHEN s.id IS NULL THEN NULL
-                   ELSE jsonb_build_object(
-                       'seccion_id',    s.id,
-                       'seccion_label', g.nombre || ' – Sección ' || s.nombre
-                   )
-              END AS tutoria_actual
-          `);
+                    CASE WHEN s.id IS NULL THEN NULL
+                         ELSE jsonb_build_object(
+                             'seccion_id',    s.id::text,
+                             'seccion_label', g.nombre || ' – Sección ' || s.nombre
+                         )
+                    END AS tutoria_actual
+                `);
         }
 
         if (filters?.q && filters.q.trim().length >= 2) {
@@ -439,7 +461,6 @@ export class UsersService {
         const total = await qb.getCount();
         const rows = await qb.limit(limit).offset(offset).getRawMany();
         rows.forEach(r => this.sanitize(r, true));
-
         return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
@@ -483,6 +504,7 @@ export class UsersService {
         rows.forEach(r => this.sanitize(r, true));
         return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
+
     async findAuxiliares(filters?: { q?: string; page?: number; limit?: number }) {
         const page = filters?.page ?? 1;
         const limit = filters?.limit ?? 20;
@@ -524,6 +546,71 @@ export class UsersService {
         const rows = await qb.limit(limit).offset(offset).getRawMany();
         rows.forEach(r => this.sanitize(r, true));
         return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SELECTS / DIALOGS (sin paginación)
+    // ══════════════════════════════════════════════════════════════════════════
+    async findDocentesForSelect(includeTutoria = false): Promise<DocenteSelectItem[]> {
+        const qb = this.docenteRepo
+            .createQueryBuilder('d')
+            .innerJoin('cuentas', 'c', 'c.id = d.id AND c.activo = TRUE')
+            .select([
+                'd.id               AS id',
+                'd.nombre           AS nombre',
+                'd.apellido_paterno AS apellido_paterno',
+                'd.apellido_materno AS apellido_materno',
+                'd.especialidad     AS especialidad',
+                'd.foto_storage_key AS foto_storage_key',
+            ])
+            .orderBy('d.apellido_paterno', 'ASC')
+            .addOrderBy('d.nombre', 'ASC');
+
+        if (includeTutoria) {
+            qb.leftJoin('secciones', 's', 's.tutor_id = d.id')
+                .leftJoin('grados', 'g', 'g.id = s.grado_id')
+                .addSelect(`
+                    CASE WHEN s.id IS NULL THEN NULL
+                         ELSE jsonb_build_object(
+                             'seccion_id',    s.id::text,
+                             'seccion_label', g.nombre || ' – Sección ' || s.nombre
+                         )
+                    END AS tutoria_actual
+                `);
+        }
+
+        const rows = await qb.getRawMany();
+
+        return rows.map((r): DocenteSelectItem => {
+            const item: DocenteSelectItem = {
+                id: r.id,
+                nombre: r.nombre,
+                apellido_paterno: r.apellido_paterno,
+                apellido_materno: r.apellido_materno ?? null,
+                especialidad: r.especialidad ?? null,
+                foto_url: r.foto_storage_key
+                    ? this.storageService.getPublicUrl(r.foto_storage_key)
+                    : null,
+            };
+
+            if (includeTutoria) {
+                // TypeORM getRawMany puede devolver jsonb como string o como objeto
+                // dependiendo del driver — normalizamos explícitamente.
+                if (r.tutoria_actual == null) {
+                    item.tutoria_actual = null;
+                } else if (typeof r.tutoria_actual === 'string') {
+                    try {
+                        item.tutoria_actual = JSON.parse(r.tutoria_actual);
+                    } catch {
+                        item.tutoria_actual = null;
+                    }
+                } else {
+                    item.tutoria_actual = r.tutoria_actual;
+                }
+            }
+
+            return item;
+        });
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -599,6 +686,7 @@ export class UsersService {
             .limit(10)
             .getRawMany();
     }
+
     async searchAuxiliares(query: string) {
         if (!query || query.trim().length < 2) return [];
         return this.auxiliarRepo
@@ -620,6 +708,11 @@ export class UsersService {
             .limit(10)
             .getRawMany();
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // FIND BY ID
+    // ══════════════════════════════════════════════════════════════════════════
+
     async findAlumnoById(id: string) {
         const row = await this.alumnoRepo
             .createQueryBuilder('a')
@@ -752,7 +845,6 @@ export class UsersService {
         return row;
     }
 
-    // 🆕 ─────────────────────────────────────────────────────────────────────
     async findAuxiliarById(id: string) {
         const row = await this.auxiliarRepo
             .createQueryBuilder('a')
@@ -781,6 +873,11 @@ export class UsersService {
         this.sanitize(row);
         return row;
     }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // ACTIVAR / DESACTIVAR
+    // ══════════════════════════════════════════════════════════════════════════
+
     async deactivate(id: string): Promise<{ message: string }> {
         const result = await this.cuentaRepo
             .createQueryBuilder()
@@ -825,7 +922,7 @@ export class UsersService {
     async updatePassword(id: string, newHash: string) {
         await this.cuentaRepo.update({ id }, {
             password_hash: newHash,
-            password_changed: true
+            password_changed: true,
         });
     }
 
@@ -910,18 +1007,16 @@ export class UsersService {
     // ══════════════════════════════════════════════════════════════════════════
 
     async getProfileById(id: string, rol: string) {
-        let row: any;
         switch (rol) {
-            case 'alumno': row = await this.findAlumnoById(id); break;
-            case 'docente': row = await this.findDocenteById(id); break;
-            case 'padre': row = await this.findPadreById(id); break;
-            case 'admin': row = await this.findAdminById(id); break;
-            case 'psicologa': row = await this.findPsicologaById(id); break;
-            case 'auxiliar': row = await this.findAuxiliarById(id); break;   // 🆕
+            case 'alumno':    return this.findAlumnoById(id);
+            case 'docente':   return this.findDocenteById(id);
+            case 'padre':     return this.findPadreById(id);
+            case 'admin':     return this.findAdminById(id);
+            case 'psicologa': return this.findPsicologaById(id);
+            case 'auxiliar':  return this.findAuxiliarById(id);
             default:
                 return this.cuentaRepo.findOne({ where: { id }, select: ['id', 'rol', 'activo'] });
         }
-        return row;
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -935,7 +1030,6 @@ export class UsersService {
         isSelf: boolean,
     ): Promise<{ message: string }> {
         return this.dataSource.transaction(async (em) => {
-
             const profileData: Record<string, any> = {};
             for (const k of PROFILE_FIELDS) {
                 if (dto[k] !== undefined) profileData[k] = dto[k] || null;
@@ -1032,18 +1126,22 @@ export class UsersService {
         return r?.foto_storage_key ?? null;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // BULK CREATE
+    // ══════════════════════════════════════════════════════════════════════════
+
     async createBulk(rol: string, dtos: any[]): Promise<any[]> {
         const results: any[] = [];
         for (const dto of dtos) {
             try {
                 let result: any;
                 switch (rol) {
-                    case 'alumno': result = await this.createAlumno(dto); break;
-                    case 'docente': result = await this.createDocente(dto); break;
-                    case 'padre': result = await this.createPadre(dto); break;
-                    case 'admin': result = await this.createAdmin(dto); break;
+                    case 'alumno':    result = await this.createAlumno(dto);    break;
+                    case 'docente':   result = await this.createDocente(dto);   break;
+                    case 'padre':     result = await this.createPadre(dto);     break;
+                    case 'admin':     result = await this.createAdmin(dto);     break;
                     case 'psicologa': result = await this.createPsicologa(dto); break;
-                    case 'auxiliar': result = await this.createAuxiliar(dto); break;   // 🆕
+                    case 'auxiliar':  result = await this.createAuxiliar(dto);  break;
                 }
                 results.push({
                     ok: true,

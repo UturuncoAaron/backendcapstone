@@ -30,6 +30,7 @@ import { PsychologyModule } from './modules/psychology/psychology.module.js';
 import { MessagingModule } from './modules/messaging/messaging.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { AssistsModule } from './modules/assists/assists.module.js';
+import { AppointmentsModule } from './modules/appointments/appointments.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -81,6 +82,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
     // ── Psychology ────────────────────────────────────────────────
     PsychologyModule,
+    AppointmentsModule, 
 
     // ── Parent portal ─────────────────────────────────────────────
     ParentPortalModule,

@@ -153,7 +153,7 @@ export class AppointmentsService {
         if (q.to) qb.andWhere('a.fecha_hora <= :to', { to: new Date(q.to) });
 
         const [items, total] = await qb
-            .orderBy('a.fecha_hora', order)
+            .orderBy('a.scheduledAt', order)
             .skip((page - 1) * limit).take(limit)
             .getManyAndCount();
 

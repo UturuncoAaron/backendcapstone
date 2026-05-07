@@ -116,7 +116,7 @@ export class UsersController {
     }
 
     // ══════════════════════════════════════════════════════════════
-    // BÚSQUEDA AUTOCOMPLETE
+    // BÚSQUEDA AUTOCOMPLETE + SELECTS
     // IMPORTANTE: rutas con sufijo ANTES de /:id
     // ══════════════════════════════════════════════════════════════
 
@@ -135,12 +135,16 @@ export class UsersController {
         return this.usersService.searchDocentes(q);
     }
 
-    // 🆕 ─────────────────────────────────────────────────────────
+    // ↓ AQUÍ junto a search, antes de /:id
+    @Get('docentes/select')
+    findDocentesForSelect(@Query('include') include?: string) {
+        return this.usersService.findDocentesForSelect(include === 'tutoria');
+    }
+
     @Get('auxiliares/search')
     searchAuxiliares(@Query('q') q: string) {
         return this.usersService.searchAuxiliares(q);
     }
-
     // ══════════════════════════════════════════════════════════════
     // OBTENER UNO POR ID
     // ══════════════════════════════════════════════════════════════
@@ -170,7 +174,7 @@ export class UsersController {
         return this.usersService.findPsicologaById(id);
     }
 
-    // 🆕 ─────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────
     @Get('auxiliares/:id')
     findAuxiliar(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findAuxiliarById(id);
@@ -210,42 +214,6 @@ export class UsersController {
     createAuxiliar(@Body() dto: CreateAuxiliarDto) {
         return this.usersService.createAuxiliar(dto);
     }
-
-    // ══════════════════════════════════════════════════════════════
-    // CREAR MASIVO (seed/testing)
-    // ══════════════════════════════════════════════════════════════
-
-    @Post('alumnos/bulk')
-    async createAlumnosBulk(@Body() dtos: CreateAlumnoDto[]) {
-        return this.usersService.createBulk('alumno', dtos);
-    }
-
-    @Post('docentes/bulk')
-    async createDocentesBulk(@Body() dtos: CreateDocenteDto[]) {
-        return this.usersService.createBulk('docente', dtos);
-    }
-
-    @Post('padres/bulk')
-    async createPadresBulk(@Body() dtos: CreatePadreDto[]) {
-        return this.usersService.createBulk('padre', dtos);
-    }
-
-    @Post('admins/bulk')
-    async createAdminsBulk(@Body() dtos: CreateAdminDto[]) {
-        return this.usersService.createBulk('admin', dtos);
-    }
-
-    @Post('psicologos/bulk')
-    async createPsicologasBulk(@Body() dtos: CreatePsicologaDto[]) {
-        return this.usersService.createBulk('psicologa', dtos);
-    }
-
-    // 🆕 ─────────────────────────────────────────────────────────
-    @Post('auxiliares/bulk')
-    async createAuxiliaresBulk(@Body() dtos: CreateAuxiliarDto[]) {
-        return this.usersService.createBulk('auxiliar', dtos);
-    }
-
     // ══════════════════════════════════════════════════════════════
     // ACTUALIZAR
     // ══════════════════════════════════════════════════════════════
@@ -274,18 +242,6 @@ export class UsersController {
     @HttpCode(HttpStatus.OK)
     reactivate(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.reactivate(id);
-    }
-
-    // ══════════════════════════════════════════════════════════════
-    // RESET PASSWORD
-    // ══════════════════════════════════════════════════════════════
-
-    @Patch(':id/reset-password')
-    resetPassword(
-        @Param('id', ParseUUIDPipe) id: string,
-        @Body() _dto: ResetPasswordDto,
-    ) {
-        return this.usersService.resetPassword(id);
     }
 
     // ══════════════════════════════════════════════════════════════
