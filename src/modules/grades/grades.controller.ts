@@ -1,6 +1,7 @@
 import {
     Controller, Get, Post, Put, Patch, Delete,
-    Param, Body, Query, ParseUUIDPipe, UseGuards, HttpCode,
+    Param, Body, Query, ParseUUIDPipe, ParseIntPipe,
+    UseGuards, HttpCode,
 } from '@nestjs/common';
 import { GradesService } from './grades.service.js';
 import { CreateGradeDto } from './dto/create-grade.dto.js';
@@ -39,24 +40,24 @@ export class GradesController {
         );
     }
 
-    // GET /api/grades/course/:cursoId?periodoId=<uuid>
+    // GET /api/grades/course/:cursoId?periodoId=<int>
     @Get('course/:cursoId')
     @Roles('docente', 'admin')
     getCourseGrid(
         @Param('cursoId', ParseUUIDPipe) cursoId: string,
         @CurrentUser() user: AuthUser,
-        @Query('periodoId', new ParseUUIDPipe({ optional: true })) periodoId?: string,
+        @Query('periodoId', new ParseIntPipe({ optional: true })) periodoId?: number,
     ) {
         return this.grades.getCourseGrid(cursoId, user, periodoId);
     }
 
-    // GET /api/grades/course/:cursoId/actividades?periodoId=<uuid>
+    // GET /api/grades/course/:cursoId/actividades?periodoId=<int>
     @Get('course/:cursoId/actividades')
     @Roles('docente', 'admin')
     getActividades(
         @Param('cursoId', ParseUUIDPipe) cursoId: string,
         @CurrentUser() user: AuthUser,
-        @Query('periodoId', new ParseUUIDPipe({ optional: true })) periodoId?: string,
+        @Query('periodoId', new ParseIntPipe({ optional: true })) periodoId?: number,
     ) {
         return this.grades.getActividadesByCourse(cursoId, user, periodoId);
     }
