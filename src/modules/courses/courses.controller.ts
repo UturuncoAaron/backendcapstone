@@ -69,10 +69,15 @@ export class CoursesController {
     }
 
     // GET /api/courses/seccion/:id/students
+    // Alumnos pueden ver compañeros de su propia sección (sin email, lo redacta el service).
+    // El service valida que el alumno esté matriculado antes de devolver datos.
     @Get('seccion/:id/students')
-    @Roles('admin', 'docente')
-    getStudents(@Param('id', ParseUUIDPipe) id: string) {
-        return this.coursesService.getEnrollmentsBySeccion(id);
+    @Roles('alumno', 'docente', 'admin')
+    getStudents(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.coursesService.getEnrollmentsBySeccion(id, user);
     }
 
     // GET /api/courses/:id

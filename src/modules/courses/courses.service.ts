@@ -204,11 +204,41 @@ export class CoursesService {
         return { message: 'Alumno retirado de la sección' };
     }
 
-    async getEnrollmentsBySeccion(seccionId: string) {
-        return this.enrollmentRepo.find({
+    /**
+     * Lista los alumnos matriculados activos en una sección.
+     *
+     * - admin / docente: ven todos los datos del alumno (incluido email).
+     * - alumno: sólo puede consultar la sección donde él mismo está matriculado.
+     *           Se redacta `email` (PII) para no exponer datos de compañeros.
+     *           Cualquier otro caso lanza ForbiddenException.
+     */
+    async getEnrollmentsBySeccion(
+        seccionId: string,
+        caller?: { id: string; rol: string },
+    ) {
+        if (caller?.rol === 'alumno') {
+            const matriculado = await this.enrollmentRepo.findOne({
+                where: { seccion_id: seccionId, alumno_id: caller.id, activo: true },
+            });
+            if (!matriculado) {
+                throw new ForbiddenException('No estás matriculado en esta sección');
+            }
+        }
+
+        const enrollments = await this.enrollmentRepo.find({
             where: { seccion_id: seccionId, activo: true },
             relations: ['alumno'],
             order: { alumno: { apellido_paterno: 'ASC' } },
         });
+
+        if (caller?.rol === 'alumno') {
+            return enrollments.map((e) =>
+                e.alumno
+                    ? { ...e, alumno: { ...e.alumno, email: null } }
+                    : e,
+            );
+        }
+
+        return enrollments;
     }
 }
