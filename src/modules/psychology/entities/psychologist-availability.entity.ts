@@ -1,10 +1,9 @@
 import {
     Entity, PrimaryGeneratedColumn, Column,
-    ManyToOne, JoinColumn,
-    CreateDateColumn, UpdateDateColumn,
+    ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn,
 } from 'typeorm';
 import { Psicologa } from '../../users/entities/psicologa.entity.js';
-
+import type { WeekDay } from '../psychology.types.js';
 @Entity('psicologa_disponibilidad')
 export class PsychologistAvailability {
     @PrimaryGeneratedColumn('uuid')
@@ -18,7 +17,7 @@ export class PsychologistAvailability {
     psychologist: Psicologa;
 
     @Column({ name: 'dia_semana', length: 15 })
-    weekDay: string;
+    weekDay: WeekDay;
 
     @Column({ name: 'hora_inicio', type: 'time' })
     startTime: string;
@@ -29,9 +28,9 @@ export class PsychologistAvailability {
     @Column({ default: true })
     activo: boolean;
 
-    @CreateDateColumn({ name: 'created_at' })
+    @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
     createdAt: Date;
 
-    @UpdateDateColumn({ name: 'updated_at' })
+    @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
     updatedAt: Date;
 }

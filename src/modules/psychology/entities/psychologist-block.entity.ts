@@ -1,10 +1,11 @@
 import {
     Entity, PrimaryGeneratedColumn, Column,
-    ManyToOne, JoinColumn, CreateDateColumn,
+    ManyToOne, JoinColumn, CreateDateColumn, Index,
 } from 'typeorm';
 import { Psicologa } from '../../users/entities/psicologa.entity.js';
 
 @Entity('psicologa_bloqueos')
+@Index(['psychologistId', 'startDate', 'endDate'])
 export class PsychologistBlock {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -16,15 +17,15 @@ export class PsychologistBlock {
     @JoinColumn({ name: 'psicologa_id' })
     psychologist: Psicologa;
 
-    @Column({ name: 'fecha_inicio', type: 'timestamp' })
+    @Column({ name: 'fecha_inicio', type: 'timestamptz' })
     startDate: Date;
 
-    @Column({ name: 'fecha_fin', type: 'timestamp' })
+    @Column({ name: 'fecha_fin', type: 'timestamptz' })
     endDate: Date;
 
     @Column({ length: 200, nullable: true })
-    motivo: string;
+    motivo: string | null;
 
-    @CreateDateColumn({ name: 'created_at' })
+    @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
     createdAt: Date;
 }

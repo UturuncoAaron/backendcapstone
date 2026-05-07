@@ -1,12 +1,12 @@
 import {
     Entity, PrimaryGeneratedColumn, Column,
-    ManyToOne, JoinColumn,
-    CreateDateColumn, UpdateDateColumn,
+    ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn, Index,
 } from 'typeorm';
 import { Psicologa } from '../../users/entities/psicologa.entity.js';
 import { Alumno } from '../../users/entities/alumno.entity.js';
-
+import type { RecordCategory } from '../psychology.types.js';
 @Entity('fichas_psicologia')
+@Index(['studentId', 'createdAt'])
 export class PsychologyRecord {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -26,7 +26,7 @@ export class PsychologyRecord {
     student: Alumno;
 
     @Column({ length: 30 })
-    categoria: string;
+    categoria: RecordCategory;
 
     @Column({ type: 'text' })
     contenido: string;
@@ -34,9 +34,9 @@ export class PsychologyRecord {
     @Column({ name: 'es_privada', default: true })
     isPrivate: boolean;
 
-    @CreateDateColumn({ name: 'created_at' })
+    @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
     createdAt: Date;
 
-    @UpdateDateColumn({ name: 'updated_at' })
+    @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
     updatedAt: Date;
 }

@@ -1,109 +1,90 @@
 import {
-    IsString, IsUUID, IsOptional,
-    IsEnum, IsDateString, IsInt, Min, Max, Length,
+    IsString, IsUUID, IsOptional, IsEnum, IsDateString,
+    Length, Matches, IsInt, Min, Max,
 } from 'class-validator';
-
-// ── Psychology records ────────────────────────────────────────────────────────
-
+import { RECORD_CATEGORIES, WEEK_DAYS } from '../psychology.types.js';
+import type { RecordCategory, WeekDay } from '../psychology.types.js';
+ 
+// ── Fichas ───────────────────────────────────────────────────────────────────
+ 
 export class CreateRecordDto {
     @IsUUID()
     studentId: string;
-
-    @IsEnum(['conductual', 'academico', 'familiar', 'emocional', 'otro'])
-    categoria: string;
-
+ 
+    @IsEnum(RECORD_CATEGORIES)
+    categoria: RecordCategory;
+ 
     @IsString()
+    @Length(1, 10000)
     contenido: string;
 }
-
+ 
 export class UpdateRecordDto {
     @IsOptional()
-    @IsEnum(['conductual', 'academico', 'familiar', 'emocional', 'otro'])
-    categoria?: string;
-
+    @IsEnum(RECORD_CATEGORIES)
+    categoria?: RecordCategory;
+ 
     @IsOptional()
     @IsString()
+    @Length(1, 10000)
     contenido?: string;
 }
-
-// ── Appointments ──────────────────────────────────────────────────────────────
-
-export class CreateAppointmentDto {
-    @IsUUID()
-    parentId: string;
-
-    @IsUUID()
-    studentId: string;
-
-    @IsEnum(['academico', 'conductual', 'psicologico', 'familiar', 'otro'])
-    tipo: string;
-
-    @IsEnum(['presencial', 'virtual', 'telefonico'])
-    modalidad: string;
-
-    @IsString()
-    motivo: string;
-
-    @IsDateString()
-    scheduledAt: string;
-
-    @IsOptional()
-    @IsInt()
-    @Min(15)
-    @Max(120)
-    durationMin?: number;
-
-    @IsOptional()
-    @IsString()
-    priorNotes?: string;
-}
-
-export class UpdateAppointmentDto {
-    @IsOptional()
-    @IsEnum(['pendiente', 'confirmada', 'realizada', 'cancelada', 'no_asistio'])
-    estado?: string;
-
-    @IsOptional()
-    @IsDateString()
-    scheduledAt?: string;
-
-    @IsOptional()
-    @IsEnum(['presencial', 'virtual', 'telefonico'])
-    modalidad?: string;
-
-    @IsOptional()
-    @IsString()
-    followUpNotes?: string;
-
-    @IsOptional()
-    @IsUUID()
-    rescheduledFromId?: string;
-}
-
-// ── Availability ──────────────────────────────────────────────────────────────
-
+ 
+// ── Disponibilidad ──────────────────────────────────────────────────────────
+ 
 export class CreateAvailabilityDto {
-    @IsEnum(['lunes', 'martes', 'miercoles', 'jueves', 'viernes'])
-    weekDay: string;
-
-    @IsString()
+    @IsEnum(WEEK_DAYS)
+    weekDay: WeekDay;
+ 
+    @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'startTime debe ser HH:mm' })
     startTime: string;
-
-    @IsString()
+ 
+    @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'endTime debe ser HH:mm' })
     endTime: string;
 }
-
-// ── Blocks ────────────────────────────────────────────────────────────────────
-
+ 
+// ── Bloqueos ────────────────────────────────────────────────────────────────
+ 
 export class CreateBlockDto {
     @IsDateString()
     startDate: string;
-
+ 
     @IsDateString()
     endDate: string;
-
+ 
     @IsOptional()
     @IsString()
     @Length(1, 200)
     motivo?: string;
+}
+ 
+// ── Slots ───────────────────────────────────────────────────────────────────
+ 
+export class GetSlotsQueryDto {
+    @IsDateString()
+    from: string;
+ 
+    @IsDateString()
+    to: string;
+ 
+    @IsOptional()
+    @IsInt()
+    @Min(15)
+    @Max(180)
+    durationMin?: number;
+}
+ 
+// ── Listados con paginación ─────────────────────────────────────────────────
+ 
+export class PageQueryDto {
+    @IsOptional()
+    @IsInt()
+    @Min(1)
+    page?: number;
+ 
+    @IsOptional()
+    @IsInt()
+    @Min(1)
+    @Max(100)
+    limit?: number;
 }

@@ -3,19 +3,6 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { AuthUser } from '../../auth/types/auth-user.js';
 
-/**
- * Reportes de ASISTENCIAS.
- *
- * Trabajamos sobre `asistencias_generales` (asistencia general del día por
- * sección). La asistencia por curso (`asistencias_clase`) queda fuera del
- * scope de esta primera fase.
- *
- * Roles autorizados:
- *   - admin → todo
- *   - tutor (docente designado tutor de la sección) → su(s) sección(es)
- *   - auxiliar → todas las secciones (escanea QR y consulta listas)
- *   - psicologa → lectura para fichas de seguimiento
- */
 @Injectable()
 export class AttendanceReportsService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}

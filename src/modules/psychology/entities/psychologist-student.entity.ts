@@ -30,6 +30,6 @@ export class PsychologistStudent {
     @Column({ type: 'date', nullable: true })
     hasta: string | null;
 
-    @CreateDateColumn({ name: 'created_at' })
+    @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
     createdAt: Date;
 }

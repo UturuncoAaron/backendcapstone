@@ -1,30 +1,30 @@
-export class HorarioItemDto {
+export interface HorarioItem {
     dia: string;
     horaInicio: string;
     horaFin: string;
     aula: string | null;
     cursoNombre: string;
-    docenteNombre: string;
     color: string;
+    docenteNombre: string;
 }
 
-export class TareaPendienteDto {
+export interface TareaPendienteItem {
     id: string;
     titulo: string;
+    tipo: string;
+    fechaLimite: Date;
     cursoNombre: string;
-    fechaLimite: string;
-    tipo: 'tarea';
 }
 
-export class ComunicadoDto {
+export interface ComunicadoItem {
     id: string;
     titulo: string;
     contenido: string;
-    fecha: string;
+    fecha: Date;
 }
 
-export class AlumnoDashboardDto {
-    horario: HorarioItemDto[];
-    tareasPendientes: TareaPendienteDto[];
-    comunicados: ComunicadoDto[];
+export interface AlumnoDashboardDto {
+    horario: HorarioItem[];
+    tareasPendientes: TareaPendienteItem[];
+    comunicados: ComunicadoItem[];
 }

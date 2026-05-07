@@ -1,50 +1,68 @@
 import {
-    Injectable, NotFoundException,
-    ForbiddenException, BadRequestException,
+    Injectable, NotFoundException, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
-import { Psicologa } from '../users/entities/psicologa.entity.js';
+import { Repository, DataSource, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { PsychologistStudent } from './entities/psychologist-student.entity.js';
 import { PsychologistAvailability } from './entities/psychologist-availability.entity.js';
 import { PsychologistBlock } from './entities/psychologist-block.entity.js';
 import { PsychologyRecord } from './entities/psychology-record.entity.js';
-import { Appointment } from './entities/appointment.entity.js';
 import {
     CreateRecordDto, UpdateRecordDto,
-    CreateAppointmentDto, UpdateAppointmentDto,
-    CreateAvailabilityDto, CreateBlockDto,
+    CreateAvailabilityDto, CreateBlockDto, PageQueryDto,
 } from './dto/psychology.dto.js';
+import { UsersService } from '../users/users.service.js';
+import { WEEK_DAY_BY_INDEX } from './psychology.types.js';
+
+const DEFAULT_SLOT_MINUTES = 30;
 
 @Injectable()
 export class PsychologyService {
 
     constructor(
-        @InjectRepository(Psicologa) private psychologistRepo: Repository<Psicologa>,
-        @InjectRepository(PsychologistStudent) private assignmentRepo: Repository<PsychologistStudent>,
-        @InjectRepository(PsychologistAvailability) private availabilityRepo: Repository<PsychologistAvailability>,
-        @InjectRepository(PsychologistBlock) private blockRepo: Repository<PsychologistBlock>,
-        @InjectRepository(PsychologyRecord) private recordRepo: Repository<PsychologyRecord>,
-        @InjectRepository(Appointment) private appointmentRepo: Repository<Appointment>,
+        @InjectRepository(PsychologistStudent)      private readonly assignmentRepo: Repository<PsychologistStudent>,
+        @InjectRepository(PsychologistAvailability) private readonly availabilityRepo: Repository<PsychologistAvailability>,
+        @InjectRepository(PsychologistBlock)        private readonly blockRepo: Repository<PsychologistBlock>,
+        @InjectRepository(PsychologyRecord)         private readonly recordRepo: Repository<PsychologyRecord>,
         private readonly dataSource: DataSource,
+        private readonly usersService: UsersService,
     ) { }
 
-    // ════════════════════════════════════════════════════════════
-    // PSYCHOLOGY RECORDS — solo psicóloga asignada
-    // ════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════
+    // FICHAS PSICOLÓGICAS
+    // ════════════════════════════════════════════════════════════════
 
     async createRecord(psychologistId: string, dto: CreateRecordDto): Promise<PsychologyRecord> {
-        await this.assertAssigned(psychologistId, dto.studentId);
-        const record = this.recordRepo.create({ ...dto, psychologistId });
-        return this.recordRepo.save(record);
+        return this.dataSource.transaction(async (em) => {
+            // Auto-asignar al primer contacto
+            await em.query(
+                `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde)
+                 VALUES ($1, $2, TRUE, CURRENT_DATE)
+                 ON CONFLICT (psicologa_id, alumno_id)
+                 DO UPDATE SET activo = TRUE, hasta = NULL`,
+                [psychologistId, dto.studentId],
+            );
+            const record = em.create(PsychologyRecord, { ...dto, psychologistId });
+            return em.save(record);
+        });
     }
 
-    async getRecordsByStudent(psychologistId: string, studentId: string): Promise<PsychologyRecord[]> {
+    async getRecordsByStudent(
+        psychologistId: string,
+        studentId: string,
+        q: PageQueryDto,
+    ) {
         await this.assertAssigned(psychologistId, studentId);
-        return this.recordRepo.find({
+        const page  = q.page  ?? 1;
+        const limit = q.limit ?? 25;
+
+        const [items, total] = await this.recordRepo.findAndCount({
             where: { studentId },
             order: { createdAt: 'DESC' },
+            skip: (page - 1) * limit,
+            take: limit,
         });
+        return { data: items, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
     async updateRecord(psychologistId: string, recordId: string, dto: UpdateRecordDto): Promise<PsychologyRecord> {
@@ -62,73 +80,26 @@ export class PsychologyService {
         await this.recordRepo.remove(record);
     }
 
-    // ════════════════════════════════════════════════════════════
-    // APPOINTMENTS
-    // ════════════════════════════════════════════════════════════
-
-    async createAppointment(createdById: string, dto: CreateAppointmentDto): Promise<Appointment> {
-        const scheduledAt = new Date(dto.scheduledAt);
-        if (scheduledAt < new Date()) {
-            throw new BadRequestException('La fecha de la cita no puede ser en el pasado');
-        }
-        const appointment = this.appointmentRepo.create({
-            ...dto,
-            scheduledAt,
-            createdById,
-            durationMin: dto.durationMin ?? 30,
-        });
-        return this.appointmentRepo.save(appointment);
-    }
-
-    async getMyAppointments(createdById: string): Promise<Appointment[]> {
-        return this.appointmentRepo.find({
-            where: { createdById },
-            relations: ['parent', 'student'],
-            order: { scheduledAt: 'DESC' },
-        });
-    }
-
-    async getAppointmentsByParent(parentId: string): Promise<Appointment[]> {
-        return this.appointmentRepo.find({
-            where: { parentId },
-            relations: ['student'],
-            order: { scheduledAt: 'DESC' },
-        });
-    }
-
-    async getAppointmentsByStudent(studentId: string): Promise<Appointment[]> {
-        return this.appointmentRepo.find({
-            where: { studentId },
-            order: { scheduledAt: 'DESC' },
-        });
-    }
-
-    async updateAppointment(id: string, createdById: string, dto: UpdateAppointmentDto): Promise<Appointment> {
-        const appointment = await this.appointmentRepo.findOne({ where: { id } });
-        if (!appointment) throw new NotFoundException('Cita no encontrada');
-        if (appointment.createdById !== createdById) {
-            throw new ForbiddenException('Solo quien creó la cita puede modificarla');
-        }
-        if (dto.scheduledAt) appointment.scheduledAt = new Date(dto.scheduledAt);
-        Object.assign(appointment, dto);
-        return this.appointmentRepo.save(appointment);
-    }
-
-    // ════════════════════════════════════════════════════════════
-    // AVAILABILITY
-    // ════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════
+    // DISPONIBILIDAD
+    // ════════════════════════════════════════════════════════════════
 
     async setAvailability(psychologistId: string, dto: CreateAvailabilityDto): Promise<PsychologistAvailability> {
+        if (dto.endTime <= dto.startTime) {
+            throw new BadRequestException('endTime debe ser mayor que startTime');
+        }
         const existing = await this.availabilityRepo.findOne({
             where: { psychologistId, weekDay: dto.weekDay },
         });
         if (existing) {
-            Object.assign(existing, dto);
-            existing.activo = true;
+            existing.startTime = dto.startTime;
+            existing.endTime   = dto.endTime;
+            existing.activo    = true;
             return this.availabilityRepo.save(existing);
         }
-        const availability = this.availabilityRepo.create({ ...dto, psychologistId });
-        return this.availabilityRepo.save(availability);
+        return this.availabilityRepo.save(
+            this.availabilityRepo.create({ ...dto, psychologistId }),
+        );
     }
 
     async getAvailability(psychologistId: string): Promise<PsychologistAvailability[]> {
@@ -145,25 +116,26 @@ export class PsychologyService {
         await this.availabilityRepo.save(availability);
     }
 
-    // ════════════════════════════════════════════════════════════
-    // BLOCKS
-    // ════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════
+    // BLOQUEOS
+    // ════════════════════════════════════════════════════════════════
 
     async createBlock(psychologistId: string, dto: CreateBlockDto): Promise<PsychologistBlock> {
-        const block = this.blockRepo.create({
-            ...dto,
-            psychologistId,
-            startDate: new Date(dto.startDate),
-            endDate: new Date(dto.endDate),
-        });
-        return this.blockRepo.save(block);
+        const startDate = new Date(dto.startDate);
+        const endDate   = new Date(dto.endDate);
+        if (endDate <= startDate) {
+            throw new BadRequestException('endDate debe ser mayor que startDate');
+        }
+        return this.blockRepo.save(this.blockRepo.create({
+            psychologistId, startDate, endDate, motivo: dto.motivo ?? null,
+        }));
     }
 
-    async getBlocks(psychologistId: string): Promise<PsychologistBlock[]> {
-        return this.blockRepo.find({
-            where: { psychologistId },
-            order: { startDate: 'ASC' },
-        });
+    async getBlocks(psychologistId: string, from?: string, to?: string): Promise<PsychologistBlock[]> {
+        const where: any = { psychologistId };
+        if (from) where.endDate   = MoreThanOrEqual(new Date(from));
+        if (to)   where.startDate = LessThanOrEqual(new Date(to));
+        return this.blockRepo.find({ where, order: { startDate: 'ASC' } });
     }
 
     async removeBlock(psychologistId: string, id: string): Promise<void> {
@@ -172,86 +144,115 @@ export class PsychologyService {
         await this.blockRepo.remove(block);
     }
 
-    // ════════════════════════════════════════════════════════════
-    // AVAILABLE SLOTS — lo que ve el padre para agendar
-    // ════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════
+    // SLOTS DISPONIBLES (lo que ve el padre/alumno para agendar)
+    // ════════════════════════════════════════════════════════════════
 
-    async getAvailableSlots(psychologistId: string, from: Date, to: Date): Promise<Date[]> {
-        const weekDays = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+    async getAvailableSlots(
+        psychologistId: string,
+        from: Date,
+        to: Date,
+        slotMinutes: number = DEFAULT_SLOT_MINUTES,
+    ): Promise<Date[]> {
+        if (to <= from) throw new BadRequestException('Rango inválido');
+        // Tope para no generar miles de slots por error
+        const maxRangeMs = 1000 * 60 * 60 * 24 * 60; // 60 días
+        if (to.getTime() - from.getTime() > maxRangeMs) {
+            throw new BadRequestException('El rango no puede ser mayor a 60 días');
+        }
 
-        const [availability, blocks, bookedAppointments] = await Promise.all([
+        const [availability, blocks, booked] = await Promise.all([
             this.availabilityRepo.find({ where: { psychologistId, activo: true } }),
             this.blockRepo.find({
                 where: {
                     psychologistId,
                     startDate: LessThanOrEqual(to),
-                    endDate: MoreThanOrEqual(from),
+                    endDate:   MoreThanOrEqual(from),
                 },
+                select: ['startDate', 'endDate'],
             }),
-            this.appointmentRepo.find({
-                where: {
-                    createdById: psychologistId,
-                    scheduledAt: Between(from, to),
-                },
-                select: ['scheduledAt', 'durationMin'],
-            }),
+            // Citas activas dirigidas a la psicóloga en el rango
+            this.dataSource.query<{ fecha_hora: Date; duracion_min: number }[]>(
+                `SELECT fecha_hora, duracion_min
+                   FROM citas
+                  WHERE convocado_a_id = $1
+                    AND estado IN ('pendiente','confirmada')
+                    AND fecha_hora >= $2 - INTERVAL '3 hours'
+                    AND fecha_hora <= $3
+                  ORDER BY fecha_hora`,
+                [psychologistId, from, to],
+            ),
         ]);
 
         const slots: Date[] = [];
-        const cursor = new Date(from);
         const now = new Date();
+        const cursor = new Date(from);
+        cursor.setHours(0, 0, 0, 0);
 
         while (cursor <= to) {
-            const dayName = weekDays[cursor.getDay()];
-            const dayAvailability = availability.find(a => a.weekDay === dayName);
+            const dayName = WEEK_DAY_BY_INDEX[cursor.getDay()];
+            const dayAvail = availability.find(a => a.weekDay === dayName);
+            if (dayAvail) {
+                const [hS, mS] = dayAvail.startTime.split(':').map(Number);
+                const [hE, mE] = dayAvail.endTime.split(':').map(Number);
 
-            if (dayAvailability) {
-                const [hStart, mStart] = dayAvailability.startTime.split(':').map(Number);
-                const [hEnd, mEnd] = dayAvailability.endTime.split(':').map(Number);
+                const dayStart = new Date(cursor); dayStart.setHours(hS, mS, 0, 0);
+                const dayEnd   = new Date(cursor); dayEnd.setHours(hE, mE, 0, 0);
 
-                let slotTime = new Date(cursor);
-                slotTime.setHours(hStart, mStart, 0, 0);
+                let slotStart = new Date(dayStart);
+                while (slotStart.getTime() + slotMinutes * 60_000 <= dayEnd.getTime()) {
+                    const slotEnd = new Date(slotStart.getTime() + slotMinutes * 60_000);
 
-                const endTime = new Date(cursor);
-                endTime.setHours(hEnd, mEnd, 0, 0);
-
-                while (slotTime < endTime) {
-                    const slotEnd = new Date(slotTime.getTime() + 30 * 60_000);
-
-                    const isBlocked = blocks.some(b => slotTime >= b.startDate && slotTime < b.endDate);
-                    const isBooked = bookedAppointments.some(a => {
-                        const apptEnd = new Date(a.scheduledAt.getTime() + a.durationMin * 60_000);
-                        return slotTime < apptEnd && slotEnd > a.scheduledAt;
-                    });
-
-                    if (!isBlocked && !isBooked && slotTime > now) {
-                        slots.push(new Date(slotTime));
+                    if (slotStart > now && slotStart >= from && slotEnd <= to) {
+                        const isBlocked = blocks.some(b =>
+                            slotStart < b.endDate && slotEnd > b.startDate,
+                        );
+                        const isBooked = booked.some(b => {
+                            const bEnd = new Date(b.fecha_hora.getTime() + b.duracion_min * 60_000);
+                            return slotStart < bEnd && slotEnd > b.fecha_hora;
+                        });
+                        if (!isBlocked && !isBooked) slots.push(new Date(slotStart));
                     }
-
-                    slotTime = slotEnd;
+                    slotStart = new Date(slotStart.getTime() + slotMinutes * 60_000);
                 }
             }
-
             cursor.setDate(cursor.getDate() + 1);
         }
-
         return slots;
     }
 
-    // ════════════════════════════════════════════════════════════
-    // ASSIGNMENTS
-    // ════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════
+    // ASIGNACIONES (vista de la psicóloga: mis alumnos)
+    // ════════════════════════════════════════════════════════════════
 
-    async assignStudent(psychologistId: string, studentId: string): Promise<PsychologistStudent> {
-        const existing = await this.assignmentRepo.findOne({ where: { psychologistId, studentId } });
-        if (existing) {
-            existing.activo = true;
-            existing.hasta = null;
-            return this.assignmentRepo.save(existing);
-        }
-        return this.assignmentRepo.save(
-            this.assignmentRepo.create({ psychologistId, studentId }),
+    async getMyStudents(psychologistId: string, q: PageQueryDto) {
+        const page  = q.page  ?? 1;
+        const limit = q.limit ?? 50;
+        const offset = (page - 1) * limit;
+
+        const [{ count }] = await this.dataSource.query(
+            `SELECT COUNT(*)::int AS count FROM psicologa_alumno
+              WHERE psicologa_id = $1 AND activo = TRUE`,
+            [psychologistId],
         );
+
+        const rows = await this.dataSource.query(
+            `SELECT
+                a.id,
+                a.codigo_estudiante,
+                a.nombre,
+                a.apellido_paterno,
+                a.apellido_materno,
+                TRIM(CONCAT(a.apellido_paterno, ' ', COALESCE(a.apellido_materno, ''))) AS apellidos,
+                pa.activo, pa.desde, pa.hasta
+             FROM psicologa_alumno pa
+             INNER JOIN alumnos a ON a.id = pa.alumno_id
+             WHERE pa.psicologa_id = $1 AND pa.activo = TRUE
+             ORDER BY a.apellido_paterno, a.nombre
+             LIMIT $2 OFFSET $3`,
+            [psychologistId, limit, offset],
+        );
+        return { data: rows, total: count, page, limit, totalPages: Math.ceil(count / limit) };
     }
 
     async unassignStudent(psychologistId: string, studentId: string): Promise<void> {
@@ -260,63 +261,61 @@ export class PsychologyService {
         });
         if (!assignment) throw new NotFoundException('Asignación no encontrada');
         assignment.activo = false;
-        assignment.hasta = new Date().toISOString().split('T')[0];
+        assignment.hasta  = new Date().toISOString().split('T')[0];
         await this.assignmentRepo.save(assignment);
     }
 
-    async getStudentsOfPsychologist(psychologistId: string) {
-        return this.dataSource.query(
-            `SELECT
-                a.id,
-                a.codigo_estudiante,
-                a.nombre,
-                a.apellido_paterno,
-                a.apellido_materno,
-                TRIM(CONCAT(a.apellido_paterno, ' ',
-                            COALESCE(a.apellido_materno, ''))) AS apellidos,
-                pa.activo,
-                pa.desde,
-                pa.hasta
-             FROM psicologa_alumno pa
-             INNER JOIN alumnos a ON a.id = pa.alumno_id
-             WHERE pa.psicologa_id = $1 AND pa.activo = true
-             ORDER BY a.apellido_paterno, a.nombre`,
-            [psychologistId],
-        );
+    // ════════════════════════════════════════════════════════════════
+    // DIRECTORIO (reusa UsersService — sanitizado)
+    // ════════════════════════════════════════════════════════════════
+
+    async searchStudents(query: string) {
+        const rows = await this.usersService.searchAlumnos(query);
+        return rows.map((r: any) => this.stripCredentials(r));
     }
 
-    async getStudentParents(psychologistId: string, studentId: string) {
-        await this.assertAssigned(psychologistId, studentId);
-        return this.dataSource.query(
-            `SELECT
-                p.id,
-                p.nombre,
-                p.apellido_paterno,
-                p.apellido_materno,
-                p.relacion,
-                p.email,
-                p.telefono,
-                c.codigo_acceso
+    async listStudents(q: { search?: string; page?: number; limit?: number }) {
+        const result = await this.usersService.findAlumnos({
+            q: q.search,
+            page:  q.page  ?? 1,
+            limit: q.limit ?? 50,
+        });
+        result.data = result.data.map((r: any) => this.stripCredentials(r));
+        return result;
+    }
+
+    async getStudentParents(studentId: string) {
+        const rows = await this.dataSource.query(
+            `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno,
+                    p.relacion, p.email, p.telefono
              FROM padre_alumno pa
              JOIN padres  p ON p.id = pa.padre_id
-             JOIN cuentas c ON c.id = p.id AND c.activo = true
+             JOIN cuentas c ON c.id = p.id AND c.activo = TRUE
              WHERE pa.alumno_id = $1
              ORDER BY p.apellido_paterno, p.nombre`,
             [studentId],
         );
+        return rows;
     }
 
-    // ════════════════════════════════════════════════════════════
-    // PRIVATE HELPERS
-    // ════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════
+    // HELPERS
+    // ════════════════════════════════════════════════════════════════
 
+    /** Garantiza que la psicóloga atiende a este alumno (si no, auto-asigna o falla). */
     private async assertAssigned(psychologistId: string, studentId: string): Promise<void> {
-        const assignment = await this.assignmentRepo.findOne({
+        const exists = await this.assignmentRepo.findOne({
             where: { psychologistId, studentId, activo: true },
             select: ['psychologistId'],
         });
-        if (!assignment) {
+        if (!exists) {
             throw new ForbiddenException('Este alumno no está asignado a tu lista');
         }
+    }
+
+    /** Quita campos sensibles antes de devolver al frontend (NUNCA exponer credenciales). */
+    private stripCredentials<T extends Record<string, any>>(row: T): Omit<T, 'codigo_acceso' | 'numero_documento' | 'tipo_documento'> {
+        const { codigo_acceso, numero_documento, tipo_documento, ...safe } = row;
+        return safe as any;
     }
 }
