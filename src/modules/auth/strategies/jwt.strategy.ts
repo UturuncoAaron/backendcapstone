@@ -5,7 +5,6 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cuenta } from '../../users/entities/cuenta.entity.js';
-import type { AuthUser, Rol } from '../types/auth-user.js';
 
 export interface JwtPayload {
     sub: string;
@@ -28,7 +27,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         });
     }
 
-    async validate(payload: JwtPayload): Promise<AuthUser> {
+    async validate(payload: JwtPayload) {
         const cuenta = await this.cuentaRepo.findOne({
             where: { id: payload.sub, activo: true },
         });
@@ -37,10 +36,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             throw new UnauthorizedException('Token inválido o usuario inactivo');
         }
 
-        // Forma canónica de request.user en toda la app: usar AuthUser.
+        // Lo que queda disponible en @CurrentUser() y request.user
+        // Exponemos `id` y `sub` (alias) para compatibilidad con todos los módulos:
+        // unos usan user.id (psychology, announcements) y otros user.sub (assists, tasks, permissions).
         return {
             id: cuenta.id,
-            rol: cuenta.rol as Rol,
+            sub: cuenta.id,
+            rol: cuenta.rol,
             tipo_documento: cuenta.tipo_documento,
             numero_documento: cuenta.numero_documento,
         };

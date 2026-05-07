@@ -1,25 +1,19 @@
-import { IsInt, IsOptional, Min, Max } from 'class-validator';
+import { IsInt, IsOptional, Min, Max, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 
+/**
+ * Query params del módulo de reportes.
+ * Los IDs son UUIDs en la base de datos; bimestre sigue siendo entero (1..4).
+ */
 export class QueryReportDto {
-    @Type(() => Number)
-    @IsInt()
-    @IsOptional()
-    periodo_id?: number;
+    @IsOptional() @IsUUID() periodo_id?: string;
 
-    @Type(() => Number)
-    @IsInt()
-    @Min(1) @Max(4)
     @IsOptional()
+    @Type(() => Number)
+    @IsInt() @Min(1) @Max(4)
     bimestre?: number;
 
-    @Type(() => Number)
-    @IsInt()
-    @IsOptional()
-    grado_id?: number;
+    @IsOptional() @IsUUID() grado_id?: string;
 
-    @Type(() => Number)
-    @IsInt()
-    @IsOptional()
-    seccion_id?: number;
+    @IsOptional() @IsUUID() seccion_id?: string;
 }
