@@ -151,7 +151,7 @@ export class PsychologyController {
     ) {
         return this.service.listStudents({
             search: q,
-            page:  page ? parseInt(page, 10) : 1,
+            page: page ? parseInt(page, 10) : 1,
             limit: limit ? parseInt(limit, 10) : 50,
         });
     }
@@ -160,5 +160,12 @@ export class PsychologyController {
     @Roles('psicologa', 'docente', 'auxiliar')
     getStudentParents(@Param('studentId', ParseUUIDPipe) studentId: string) {
         return this.service.getStudentParents(studentId);
+    }
+
+    // ── Listado público de psicólogas (para que padre/alumno agenden) ───────
+    @Get('psicologas')
+    @Roles('alumno', 'padre', 'psicologa', 'docente', 'auxiliar', 'admin')
+    listActivePsicologas(@Query('q') q?: string) {
+        return this.service.listActivePsicologas(q);
     }
 }

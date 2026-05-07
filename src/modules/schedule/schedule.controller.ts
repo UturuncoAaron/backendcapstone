@@ -3,6 +3,8 @@ import {
     Param, Body, ParseIntPipe, ParseUUIDPipe,
     UseGuards,
 } from '@nestjs/common';
+// NOTE: seccion_id y periodo_id en BD son UUID (ver entidades section.entity.ts y
+// period.entity.ts). Antes se usaba ParseIntPipe acá y reventaba con 400.
 import { ScheduleService } from './schedule.service.js';
 import { UpsertFranjaDto } from './dto/schedule.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -21,8 +23,8 @@ export class ScheduleController {
     @Get('section/:seccionId/period/:periodoId')
     @Roles('admin', 'docente')
     getBySection(
-        @Param('seccionId', ParseIntPipe) seccionId: number,
-        @Param('periodoId', ParseIntPipe) periodoId: number,
+        @Param('seccionId', ParseUUIDPipe) seccionId: string,
+        @Param('periodoId', ParseUUIDPipe) periodoId: string,
     ) {
         return this.scheduleService.getHorarioBySeccion(seccionId, periodoId);
     }

@@ -158,7 +158,7 @@ export class AppointmentsService {
             .getManyAndCount();
 
         return {
-            data: items,
+            data: await this.enrichWithProfileNames(items),
             total, page, limit,
             totalPages: Math.ceil(total / limit),
         };
@@ -184,7 +184,10 @@ export class AppointmentsService {
             .skip((page - 1) * limit).take(limit)
             .getManyAndCount();
 
-        return { data: items, total, page, limit, totalPages: Math.ceil(total / limit) };
+        return {
+            data: await this.enrichWithProfileNames(items),
+            total, page, limit, totalPages: Math.ceil(total / limit),
+        };
     }
 
     async getOne(caller: CallerContext, id: string): Promise<Appointment> {
@@ -193,7 +196,8 @@ export class AppointmentsService {
             .getOne();
         if (!appt) throw new NotFoundException('Cita no encontrada');
         this.assertCanRead(caller, appt);
-        return appt;
+        const [enriched] = await this.enrichWithProfileNames([appt]);
+        return enriched;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -442,5 +446,53 @@ export class AppointmentsService {
              DO UPDATE SET activo = TRUE, hasta = NULL`,
             [psychologistId, studentId],
         );
+    }
+
+    /**
+     * Enriquece cada cita con el nombre real del `convocadoA`. La tabla
+     * `cuentas` no guarda nombre/apellido (esos viven en `psicologas`,
+     * `alumnos`, `padres`, `docentes`, `auxiliares`, `admins`); por eso
+     * `leftJoinAndSelect('a.convocadoA', ...)` deja esos campos `undefined`.
+     *
+     * Hacemos UNA sola consulta UNION sobre las 6 tablas de roles para
+     * resolver todos los nombres en O(1) ronda de BD, sin tocar el schema.
+     */
+    private async enrichWithProfileNames(items: Appointment[]): Promise<Appointment[]> {
+        if (items.length === 0) return items;
+
+        const ids = Array.from(new Set(items.map(a => a.convocadoAId).filter(Boolean)));
+        if (ids.length === 0) return items;
+
+        const rows = await this.dataSource.query<{
+            id: string; nombre: string; apellido_paterno: string; apellido_materno: string | null;
+        }[]>(
+            `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas WHERE id = ANY($1::uuid[])
+              UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM alumnos    WHERE id = ANY($1::uuid[])
+              UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM padres     WHERE id = ANY($1::uuid[])
+              UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM docentes   WHERE id = ANY($1::uuid[])
+              UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM auxiliares WHERE id = ANY($1::uuid[])
+              UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM admins     WHERE id = ANY($1::uuid[])`,
+            [ids],
+        );
+
+        const byId = new Map(rows.map(r => [r.id, r]));
+
+        for (const a of items) {
+            const profile = byId.get(a.convocadoAId);
+            if (profile && a.convocadoA) {
+                // Mutación segura: sólo agregamos campos que no existen en Cuenta.
+                Object.assign(a.convocadoA as unknown as Record<string, unknown>, {
+                    nombre: profile.nombre,
+                    apellido_paterno: profile.apellido_paterno,
+                    apellido_materno: profile.apellido_materno,
+                });
+            }
+        }
+        return items;
     }
 }

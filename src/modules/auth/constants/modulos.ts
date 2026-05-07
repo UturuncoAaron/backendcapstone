@@ -15,6 +15,7 @@ export const MODULOS = {
     MIS_NOTAS: 'mis_notas',
     MI_ASISTENCIA: 'mi_asistencia',
     MIS_LIBRETAS: 'mis_libretas',
+    MIS_CITAS: 'mis_citas',
 
     // ── Docente
     CURSOS_DOCENTE: 'cursos_docente',
@@ -64,7 +65,7 @@ const COMUNES: Modulo[] = [
 export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
     alumno: [
         MODULOS.MIS_CURSOS, MODULOS.MIS_TAREAS, MODULOS.MIS_NOTAS,
-        MODULOS.MI_ASISTENCIA, MODULOS.MIS_LIBRETAS,
+        MODULOS.MI_ASISTENCIA, MODULOS.MIS_LIBRETAS, MODULOS.MIS_CITAS,
         MODULOS.FORO, MODULOS.CLASES_VIVO,
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,

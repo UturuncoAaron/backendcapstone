@@ -13,7 +13,9 @@ export class ScheduleService {
     ) { }
 
     // ── GET schedule for a section ────────────────────────────────
-    async getHorarioBySeccion(seccionId: number, periodoId: number) {
+    // seccionId / periodoId son UUID (no enteros). Antes el controller los
+    // parseaba con ParseIntPipe y reventaba con 400 antes de llegar acá.
+    async getHorarioBySeccion(seccionId: string, periodoId: string) {
         const courses = await this.db.query<{ id: string; nombre: string; color: string }[]>(
             `SELECT id, nombre, color
        FROM cursos

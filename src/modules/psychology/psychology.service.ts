@@ -1,5 +1,5 @@
 import {
-    Injectable, NotFoundException, ForbiddenException, BadRequestException,
+    Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
@@ -18,6 +18,7 @@ const DEFAULT_SLOT_MINUTES = 30;
 
 @Injectable()
 export class PsychologyService {
+    private readonly logger = new Logger(PsychologyService.name);
 
     constructor(
         @InjectRepository(PsychologistStudent)      private readonly assignmentRepo: Repository<PsychologistStudent>,
@@ -161,7 +162,10 @@ export class PsychologyService {
             throw new BadRequestException('El rango no puede ser mayor a 60 días');
         }
 
-        const [availability, blocks, booked] = await Promise.all([
+        // Las consultas se hacen en paralelo, pero envolvemos las que pueden
+        // fallar por desfase de schema con un fallback explícito (mejor mostrar
+        // pantalla vacía que romper toda la solicitud de citas).
+        const [availability, blocks, bookedRaw] = await Promise.all([
             this.availabilityRepo.find({ where: { psychologistId, activo: true } }),
             this.blockRepo.find({
                 where: {
@@ -171,18 +175,19 @@ export class PsychologyService {
                 },
                 select: ['startDate', 'endDate'],
             }),
-            // Citas activas dirigidas a la psicóloga en el rango
-            this.dataSource.query<{ fecha_hora: Date; duracion_min: number }[]>(
-                `SELECT fecha_hora, duracion_min
-                   FROM citas
-                  WHERE convocado_a_id = $1
-                    AND estado IN ('pendiente','confirmada')
-                    AND fecha_hora >= $2 - INTERVAL '3 hours'
-                    AND fecha_hora <= $3
-                  ORDER BY fecha_hora`,
-                [psychologistId, from, to],
-            ),
+            this.queryBookedAppointments(psychologistId, from, to),
         ]);
+
+        // Coerción defensiva: pg puede devolver timestamps como string según
+        // configuración del driver. Normalizamos a Date + number una sola vez.
+        const booked = bookedRaw.map((b) => ({
+            start: toDate(b.fecha_hora),
+            durationMin: Number(b.duracion_min) || DEFAULT_SLOT_MINUTES,
+        }));
+        const blocksNorm = blocks.map((b) => ({
+            start: toDate(b.startDate),
+            end:   toDate(b.endDate),
+        }));
 
         const slots: Date[] = [];
         const now = new Date();
@@ -204,12 +209,12 @@ export class PsychologyService {
                     const slotEnd = new Date(slotStart.getTime() + slotMinutes * 60_000);
 
                     if (slotStart > now && slotStart >= from && slotEnd <= to) {
-                        const isBlocked = blocks.some(b =>
-                            slotStart < b.endDate && slotEnd > b.startDate,
+                        const isBlocked = blocksNorm.some(b =>
+                            slotStart < b.end && slotEnd > b.start,
                         );
                         const isBooked = booked.some(b => {
-                            const bEnd = new Date(b.fecha_hora.getTime() + b.duracion_min * 60_000);
-                            return slotStart < bEnd && slotEnd > b.fecha_hora;
+                            const bEnd = new Date(b.start.getTime() + b.durationMin * 60_000);
+                            return slotStart < bEnd && slotEnd > b.start;
                         });
                         if (!isBlocked && !isBooked) slots.push(new Date(slotStart));
                     }
@@ -219,6 +224,33 @@ export class PsychologyService {
             cursor.setDate(cursor.getDate() + 1);
         }
         return slots;
+    }
+
+    /**
+     * Trae las citas activas dirigidas a la psicóloga en el rango. Si la BD
+     * no tiene aún el schema `convocado_a_id` (o cualquier otro fallo de
+     * consulta), no rompemos la pantalla: registramos y devolvemos vacío.
+     */
+    private async queryBookedAppointments(
+        psychologistId: string, from: Date, to: Date,
+    ): Promise<Array<{ fecha_hora: unknown; duracion_min: unknown }>> {
+        try {
+            return await this.dataSource.query(
+                `SELECT fecha_hora, duracion_min
+                   FROM citas
+                  WHERE convocado_a_id = $1
+                    AND estado IN ('pendiente','confirmada')
+                    AND fecha_hora >= $2 - INTERVAL '3 hours'
+                    AND fecha_hora <= $3
+                  ORDER BY fecha_hora`,
+                [psychologistId, from, to],
+            );
+        } catch (err) {
+            this.logger.error(
+                `getAvailableSlots: no se pudieron leer citas activas (¿schema desactualizado?): ${(err as Error).message}`,
+            );
+            return [];
+        }
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -298,6 +330,40 @@ export class PsychologyService {
         return rows;
     }
 
+    /**
+     * Lista pública de psicólogas activas. La usan padre/alumno para saber
+     * a qué psicóloga pueden agendar una cita. Devuelve sólo datos sanitizados
+     * (sin credenciales). Si pasan `q`, filtra por nombre/apellido.
+     */
+    async listActivePsicologas(q?: string) {
+        const term = (q ?? '').trim();
+        const params: any[] = [];
+        let where = `c.activo = TRUE`;
+        if (term) {
+            params.push(`%${term.toLowerCase()}%`);
+            where += ` AND (
+                LOWER(ps.nombre)            LIKE $1 OR
+                LOWER(ps.apellido_paterno)  LIKE $1 OR
+                LOWER(ps.apellido_materno)  LIKE $1
+            )`;
+        }
+        return this.dataSource.query(
+            `SELECT ps.id,
+                    ps.nombre,
+                    ps.apellido_paterno,
+                    ps.apellido_materno,
+                    ps.especialidad,
+                    ps.email,
+                    ps.telefono,
+                    ps.foto_storage_key
+               FROM psicologas ps
+               JOIN cuentas    c ON c.id = ps.id
+              WHERE ${where}
+              ORDER BY ps.apellido_paterno, ps.nombre`,
+            params,
+        );
+    }
+
     // ════════════════════════════════════════════════════════════════
     // HELPERS
     // ════════════════════════════════════════════════════════════════
@@ -318,4 +384,11 @@ export class PsychologyService {
         const { codigo_acceso, numero_documento, tipo_documento, ...safe } = row;
         return safe as any;
     }
+}
+
+/** Convierte cualquier valor (Date | string | number) en Date válida. */
+function toDate(value: unknown): Date {
+    if (value instanceof Date) return value;
+    if (typeof value === 'string' || typeof value === 'number') return new Date(value);
+    return new Date(NaN);
 }
