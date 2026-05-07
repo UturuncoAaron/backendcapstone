@@ -20,25 +20,21 @@ export class Libreta {
     @JoinColumn({ name: 'cuenta_id' })
     cuenta: Cuenta;
 
-    // Discriminador del rol al que pertenece la libreta.
     @Column({ length: 10 })
     tipo: LibretaTipo;
-
-    @Column({ name: 'periodo_id' })
-    periodo_id: number;
+    @Column({ name: 'periodo_id', type: 'uuid' })
+    periodo_id: string;
 
     @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'periodo_id' })
     periodo: Period;
 
-    // Clave del PDF en Cloudflare R2
     @Column({ name: 'storage_key', type: 'text' })
     storage_key: string;
 
     @Column({ name: 'nombre_archivo', length: 255, nullable: true })
     nombre_archivo: string | null;
 
-    // Quien subió (admin o docente) — referencia cuentas
     @Column({ name: 'subido_por' })
     subido_por: string;
 
