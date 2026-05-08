@@ -3,7 +3,6 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { QueryReportDto } from './dto/query-report.dto.js';
 
-// Interfaz actualizada a v5.0
 export interface GradeRow {
     alumno_id: string;
     numero_documento: string;
@@ -12,14 +11,13 @@ export interface GradeRow {
     apellido_materno: string;
     grado: string;
     seccion: string;
-    curso: string;
+    curso: string | null;
     bimestre: number;
-    nota_tareas: number | null;
-    nota_participacion: number | null;
-    nota_final: number | null;
+    actividad: string | null;  // antes nota_tareas
+    tipo: string | null;       // antes nota_participacion
+    nota: number | null;       // antes nota_final
     escala: string | null;
 }
-
 @Injectable()
 export class ReportsService {
     constructor(
@@ -56,6 +54,7 @@ export class ReportsService {
 
         const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
+        // reports.service.ts — reemplazar el SELECT de getGradesReport
         const sql = `
             SELECT
                 a.id                    AS alumno_id,
@@ -66,11 +65,17 @@ export class ReportsService {
                 g.nombre                AS grado,
                 s.nombre                AS seccion,
                 c.nombre                AS curso,
-                p.bimestre              AS bimestre,
-                n.nota_tareas,
-                n.nota_participacion,
-                n.nota_final,
-                n.escala
+                p.bimestre,
+                n.titulo                AS actividad,
+                n.tipo,
+                n.nota,
+                CASE
+                    WHEN n.nota IS NULL  THEN NULL
+                    WHEN n.nota >= 18   THEN 'AD'
+                    WHEN n.nota >= 14   THEN 'A'
+                    WHEN n.nota >= 11   THEN 'B'
+                    ELSE                     'C'
+                END                     AS escala
             FROM matriculas m
             JOIN alumnos a    ON a.id = m.alumno_id
             JOIN cuentas cu   ON cu.id = a.id
@@ -78,19 +83,14 @@ export class ReportsService {
             JOIN grados g     ON g.id = s.grado_id
             JOIN periodos p   ON p.id = m.periodo_id
             LEFT JOIN cursos c ON c.seccion_id = m.seccion_id
-                               AND c.periodo_id = m.periodo_id
+                            AND c.periodo_id = m.periodo_id
+                            AND c.activo = true
             LEFT JOIN notas n  ON n.alumno_id = m.alumno_id
-                               AND n.curso_id = c.id
-                               AND n.periodo_id = m.periodo_id
+                            AND n.curso_id = c.id
+                            AND n.periodo_id = m.periodo_id
             ${whereClause}
-            ORDER BY
-                g.orden ASC,
-                s.nombre ASC,
-                a.apellido_paterno ASC,
-                a.nombre ASC,
-                c.nombre ASC,
-                p.bimestre ASC
-        `;
+            ORDER BY g.orden, s.nombre, a.apellido_paterno, a.nombre, c.nombre
+                `;
 
         return this.dataSource.query(sql, params);
     }
@@ -106,9 +106,9 @@ export class ReportsService {
             'Sección',
             'Curso',
             'Bimestre',
-            'Nota Tareas',
-            'Nota Participación',
-            'Nota Final',
+            'Actividad',
+            'Tipo',
+            'Nota',
             'Escala',
         ];
 
@@ -130,9 +130,9 @@ export class ReportsService {
             row.seccion,
             row.curso ?? '',
             row.bimestre ?? '',
-            row.nota_tareas ?? '',
-            row.nota_participacion ?? '',
-            row.nota_final ?? '',
+            row.actividad ?? '',
+            row.tipo ?? '',
+            row.nota ?? '',
             row.escala ?? '',
         ].map(escapeCell).join(','));
 
