@@ -90,9 +90,6 @@ export class Appointment {
   @Column({ name: 'recordatorio_enviado', default: false })
   reminderSent: boolean;
 
-  @Column({ name: 'meeting_link', length: 500, nullable: true })
-  meetingLink: string | null;
-
   // ── Auditoría de cancelación ─────────────────────────────────────
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;

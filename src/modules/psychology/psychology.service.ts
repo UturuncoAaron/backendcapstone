@@ -235,19 +235,25 @@ export class PsychologyService {
         psychologistId: string, from: Date, to: Date,
     ): Promise<Array<{ fecha_hora: unknown; duracion_min: unknown }>> {
         try {
+            // Importante: casteamos los bind params a `timestamptz`.
+            // Sin el cast, Postgres infiere el tipo del lado derecho
+            // (`$2 - INTERVAL '3 hours'`) como `interval` y termina
+            // intentando comparar `timestamptz >= interval` (operador que no
+            // existe). Con `$2::timestamptz` la resta queda timestamptz y la
+            // comparación es válida.
             return await this.dataSource.query(
                 `SELECT fecha_hora, duracion_min
                    FROM citas
                   WHERE convocado_a_id = $1
                     AND estado IN ('pendiente','confirmada')
-                    AND fecha_hora >= $2 - INTERVAL '3 hours'
-                    AND fecha_hora <= $3
+                    AND fecha_hora >= $2::timestamptz - INTERVAL '3 hours'
+                    AND fecha_hora <= $3::timestamptz
                   ORDER BY fecha_hora`,
                 [psychologistId, from, to],
             );
         } catch (err) {
             this.logger.error(
-                `getAvailableSlots: no se pudieron leer citas activas (¿schema desactualizado?): ${(err as Error).message}`,
+                `getAvailableSlots: error consultando citas activas: ${(err as Error).message}`,
             );
             return [];
         }

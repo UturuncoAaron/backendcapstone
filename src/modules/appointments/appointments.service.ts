@@ -145,13 +145,12 @@ export class AppointmentsService {
         studentId: dto.studentId ?? null,
         parentId: dto.parentId ?? null,
         tipo: dto.tipo,
-        modalidad: dto.modalidad ?? 'presencial',
+        modalidad: 'presencial',
         motivo: dto.motivo,
         scheduledAt,
         durationMin,
         estado: 'pendiente',
         priorNotes: dto.priorNotes ?? null,
-        meetingLink: dto.meetingLink ?? null,
       });
       const saved = await em.save(appointment);
 
@@ -303,8 +302,6 @@ export class AppointmentsService {
     }
 
     if (dto.durationMin !== undefined) appt.durationMin = dto.durationMin;
-    if (dto.modalidad !== undefined) appt.modalidad = dto.modalidad;
-    if (dto.meetingLink !== undefined) appt.meetingLink = dto.meetingLink;
     if (dto.followUpNotes !== undefined) appt.followUpNotes = dto.followUpNotes;
     if (dto.rescheduledFromId !== undefined) {
       if (dto.rescheduledFromId === appt.id) {
@@ -352,7 +349,7 @@ export class AppointmentsService {
     appt.estado = 'cancelada';
     appt.cancelledAt = new Date();
     appt.cancelledById = caller.id;
-    appt.cancelReason = dto.reason ?? null;
+    appt.cancelReason = dto.motivo ?? null;
     return this.appointmentRepo.save(appt);
   }
 

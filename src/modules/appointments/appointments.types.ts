@@ -8,11 +8,7 @@ export const APPOINTMENT_TYPES = [
 ] as const;
 export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 
-export const APPOINTMENT_MODALITIES = [
-  'presencial',
-  'virtual',
-  'telefonico',
-] as const;
+export const APPOINTMENT_MODALITIES = ['presencial'] as const;
 export type AppointmentModality = (typeof APPOINTMENT_MODALITIES)[number];
 
 export const APPOINTMENT_STATUSES = [

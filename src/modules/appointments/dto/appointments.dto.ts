@@ -10,16 +10,13 @@ import {
   IsString,
   MinLength,
   IsIn,
-  ValidateIf,
 } from 'class-validator';
 import {
   APPOINTMENT_TYPES,
-  APPOINTMENT_MODALITIES,
   APPOINTMENT_STATUSES,
 } from '../appointments.types.js';
 import type {
   AppointmentType,
-  AppointmentModality,
   AppointmentStatus,
 } from '../appointments.types.js';
 export class CreateAppointmentDto {
@@ -37,10 +34,6 @@ export class CreateAppointmentDto {
 
   @IsEnum(APPOINTMENT_TYPES)
   tipo: AppointmentType;
-
-  @IsOptional()
-  @IsEnum(APPOINTMENT_MODALITIES)
-  modalidad?: AppointmentModality;
 
   @IsString()
   @MinLength(5)
@@ -60,12 +53,6 @@ export class CreateAppointmentDto {
   @IsString()
   @MaxLength(2000)
   priorNotes?: string;
-
-  @IsOptional()
-  @ValidateIf((o: CreateAppointmentDto) => o.modalidad === 'virtual')
-  @IsString()
-  @MaxLength(500)
-  meetingLink?: string;
 }
 
 export class UpdateAppointmentDto {
@@ -76,10 +63,6 @@ export class UpdateAppointmentDto {
   @IsOptional()
   @IsDateString()
   scheduledAt?: string;
-
-  @IsOptional()
-  @IsEnum(APPOINTMENT_MODALITIES)
-  modalidad?: AppointmentModality;
 
   @IsOptional()
   @IsInt()
@@ -95,18 +78,13 @@ export class UpdateAppointmentDto {
   @IsOptional()
   @IsUUID()
   rescheduledFromId?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  meetingLink?: string;
 }
 
 export class CancelAppointmentDto {
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  reason?: string;
+  motivo?: string;
 }
 
 export class ListAppointmentsQueryDto {

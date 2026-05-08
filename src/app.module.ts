@@ -54,6 +54,7 @@ const isDev = process.env.NODE_ENV === 'development';
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         synchronize: false,
         logging: isDev,
+        ssl: isDev ? false : { rejectUnauthorized: false },
         extra: { max: 10, idleTimeoutMillis: 30000 },
       }),
     }),
@@ -82,7 +83,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
     // ── Psychology ────────────────────────────────────────────────
     PsychologyModule,
-    AppointmentsModule, 
+    AppointmentsModule,
 
     // ── Parent portal ─────────────────────────────────────────────
     ParentPortalModule,
