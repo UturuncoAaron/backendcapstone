@@ -1,106 +1,116 @@
 import {
-    Entity, PrimaryGeneratedColumn, Column,
-    ManyToOne, JoinColumn,
-    CreateDateColumn, UpdateDateColumn, Index,
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
 } from 'typeorm';
 import { Cuenta } from '../../users/entities/cuenta.entity.js';
 import { Padre } from '../../users/entities/padre.entity.js';
 import { Alumno } from '../../users/entities/alumno.entity.js';
 import type {
-    AppointmentType, AppointmentModality, AppointmentStatus,
+  AppointmentType,
+  AppointmentModality,
+  AppointmentStatus,
 } from '../appointments.types.js';
 
 @Entity('citas')
-@Index('idx_citas_convocado',     ['createdById', 'estado', 'scheduledAt'])
-@Index('idx_citas_convocado_a',   ['convocadoAId', 'estado', 'scheduledAt'])
-@Index('idx_citas_alumno_fecha',  ['studentId', 'scheduledAt'])
+@Index('idx_citas_convocado', ['createdById', 'estado', 'scheduledAt'])
+@Index('idx_citas_convocado_a', ['convocadoAId', 'estado', 'scheduledAt'])
+@Index('idx_citas_alumno_fecha', ['studentId', 'scheduledAt'])
 export class Appointment {
-    @PrimaryGeneratedColumn('uuid')
-    id: string;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-    // ── Partes de la cita ────────────────────────────────────────────
-    @Column({ name: 'convocado_por_id' })
-    createdById: string;
+  // ── Partes de la cita ────────────────────────────────────────────
+  @Column({ name: 'convocado_por_id' })
+  createdById: string;
 
-    @ManyToOne(() => Cuenta, { onDelete: 'RESTRICT' })
-    @JoinColumn({ name: 'convocado_por_id' })
-    createdBy: Cuenta;
+  @ManyToOne(() => Cuenta, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'convocado_por_id' })
+  createdBy: Cuenta;
 
-    @Column({ name: 'convocado_a_id' })
-    convocadoAId: string;
+  @Column({ name: 'convocado_a_id' })
+  convocadoAId: string;
 
-    @ManyToOne(() => Cuenta, { onDelete: 'RESTRICT' })
-    @JoinColumn({ name: 'convocado_a_id' })
-    convocadoA: Cuenta;
+  @ManyToOne(() => Cuenta, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'convocado_a_id' })
+  convocadoA: Cuenta;
 
-    // ── Contexto ─────────────────────────────────────────────────────
-    @Column({ name: 'alumno_id' })
-    studentId: string;
+  // ── Contexto ─────────────────────────────────────────────────────
+  @Column({ name: 'alumno_id', nullable: true })
+  studentId: string | null;
 
-    @ManyToOne(() => Alumno, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'alumno_id' })
-    student: Alumno;
+  @ManyToOne(() => Alumno, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'alumno_id' })
+  student: Alumno | null;
 
-    @Column({ name: 'padre_id', nullable: true })
-    parentId: string | null;
+  @Column({ name: 'padre_id', nullable: true })
+  parentId: string | null;
 
-    @ManyToOne(() => Padre, { onDelete: 'CASCADE', nullable: true })
-    @JoinColumn({ name: 'padre_id' })
-    parent: Padre | null;
+  @ManyToOne(() => Padre, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'padre_id' })
+  parent: Padre | null;
 
-    // ── Datos de la cita ─────────────────────────────────────────────
-    @Column({ length: 20 })
-    tipo: AppointmentType;
+  // ── Datos de la cita ─────────────────────────────────────────────
+  @Column({ length: 20 })
+  tipo: AppointmentType;
 
-    @Column({ length: 20, default: 'presencial' })
-    modalidad: AppointmentModality;
+  @Column({ length: 20, default: 'presencial' })
+  modalidad: AppointmentModality;
 
-    @Column({ type: 'text' })
-    motivo: string;
+  @Column({ type: 'text' })
+  motivo: string;
 
-    @Column({ name: 'fecha_hora', type: 'timestamptz' })
-    scheduledAt: Date;
+  @Column({ name: 'fecha_hora', type: 'timestamptz' })
+  scheduledAt: Date;
 
-    @Column({ name: 'duracion_min', type: 'smallint', default: 30 })
-    durationMin: number;
+  @Column({ name: 'duracion_min', type: 'smallint', default: 30 })
+  durationMin: number;
 
-    @Column({ length: 20, default: 'pendiente' })
-    estado: AppointmentStatus;
+  @Column({ length: 20, default: 'pendiente' })
+  estado: AppointmentStatus;
 
-    @Column({ name: 'notas_previas', type: 'text', nullable: true })
-    priorNotes: string | null;
+  @Column({ name: 'notas_previas', type: 'text', nullable: true })
+  priorNotes: string | null;
 
-    @Column({ name: 'notas_posteriores', type: 'text', nullable: true })
-    followUpNotes: string | null;
+  @Column({ name: 'notas_posteriores', type: 'text', nullable: true })
+  followUpNotes: string | null;
 
-    @Column({ name: 'reagendada_de', nullable: true })
-    rescheduledFromId: string | null;
+  @Column({ name: 'reagendada_de', nullable: true })
+  rescheduledFromId: string | null;
 
-    @ManyToOne(() => Appointment, { nullable: true, onDelete: 'SET NULL' })
-    @JoinColumn({ name: 'reagendada_de' })
-    rescheduledFrom: Appointment | null;
+  @ManyToOne(() => Appointment, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'reagendada_de' })
+  rescheduledFrom: Appointment | null;
 
-    @Column({ name: 'recordatorio_enviado', default: false })
-    reminderSent: boolean;
+  @Column({ name: 'recordatorio_enviado', default: false })
+  reminderSent: boolean;
 
-    // ── Auditoría de cancelación ─────────────────────────────────────
-    @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
-    cancelledAt: Date | null;
+  @Column({ name: 'meeting_link', length: 500, nullable: true })
+  meetingLink: string | null;
 
-    @Column({ name: 'cancelled_by_id', nullable: true })
-    cancelledById: string | null;
+  // ── Auditoría de cancelación ─────────────────────────────────────
+  @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
+  cancelledAt: Date | null;
 
-    @ManyToOne(() => Cuenta, { nullable: true, onDelete: 'SET NULL' })
-    @JoinColumn({ name: 'cancelled_by_id' })
-    cancelledBy: Cuenta | null;
+  @Column({ name: 'cancelled_by_id', nullable: true })
+  cancelledById: string | null;
 
-    @Column({ name: 'cancel_reason', length: 500, nullable: true })
-    cancelReason: string | null;
+  @ManyToOne(() => Cuenta, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'cancelled_by_id' })
+  cancelledBy: Cuenta | null;
 
-    // ── Timestamps ───────────────────────────────────────────────────
-    @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
-    createdAt: Date;
+  @Column({ name: 'cancel_reason', length: 500, nullable: true })
+  cancelReason: string | null;
 
-    @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
-    updatedAt: Date;
+  // ── Timestamps ───────────────────────────────────────────────────
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt: Date;
 }

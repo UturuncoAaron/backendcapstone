@@ -316,6 +316,11 @@ export class PsychologyService {
         return result;
     }
 
+    async searchParents(query: string) {
+        const rows = await this.usersService.searchPadres(query);
+        return rows.map((r: any) => this.stripCredentials(r));
+    }
+
     async getStudentParents(studentId: string) {
         const rows = await this.dataSource.query(
             `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno,
