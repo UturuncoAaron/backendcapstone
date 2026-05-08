@@ -83,7 +83,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
     // ── Psychology ────────────────────────────────────────────────
     PsychologyModule,
-    AppointmentsModule, 
+    AppointmentsModule,
 
     // ── Parent portal ─────────────────────────────────────────────
     ParentPortalModule,

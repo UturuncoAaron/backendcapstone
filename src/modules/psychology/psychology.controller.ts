@@ -156,6 +156,12 @@ export class PsychologyController {
         });
     }
 
+    @Get('directory/parents/search')
+    @Roles('psicologa', 'docente', 'auxiliar')
+    searchParents(@Query('q') q: string) {
+        return this.service.searchParents(q);
+    }
+
     @Get('directory/students/:studentId/parents')
     @Roles('psicologa', 'docente', 'auxiliar')
     getStudentParents(@Param('studentId', ParseUUIDPipe) studentId: string) {
