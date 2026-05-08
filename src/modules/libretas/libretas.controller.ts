@@ -1,7 +1,7 @@
 import {
     Controller, Get, Post, Delete,
-    Param, ParseUUIDPipe, ParseIntPipe,
-    Body, Query, HttpCode, HttpStatus,
+    Param, ParseUUIDPipe,
+    Body, HttpCode, HttpStatus,
     UseGuards, UseInterceptors, UploadedFile, UploadedFiles,
     BadRequestException,
 } from '@nestjs/common';
@@ -43,12 +43,13 @@ export class LibretasController {
         return this.libretasService.findHijoForPadre(user.id, alumnoId);
     }
 
+    // ✅ periodoId es UUID — ParseUUIDPipe en vez de ParseIntPipe
     @Get(':tipo/:cuentaId/periodo/:periodoId')
     @Roles('admin', 'docente')
     findOne(
         @Param('tipo') tipo: string,
         @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
-        @Param('periodoId', ParseIntPipe) periodoId: number,
+        @Param('periodoId', ParseUUIDPipe) periodoId: string,
     ) {
         return this.libretasService.findByCuentaAndPeriodo(
             cuentaId, periodoId, this.parseTipo(tipo),
@@ -69,11 +70,11 @@ export class LibretasController {
     ) {
         if (!file) throw new BadRequestException('Se requiere el archivo (campo: file)');
         return this.libretasService.upsert({
-            cuenta_id: body.cuenta_id,
-            tipo: 'alumno',
-            periodo_id: parseInt(body.periodo_id),
-            subido_por: user.id,
-            rol: user.rol,
+            cuenta_id:     body.cuenta_id,
+            tipo:          'alumno',
+            periodo_id:    body.periodo_id,   // ✅ UUID string, sin parseInt
+            subido_por:    user.id,
+            rol:           user.rol,
             observaciones: body.observaciones,
             file,
         });
@@ -89,11 +90,11 @@ export class LibretasController {
     ) {
         if (!file) throw new BadRequestException('Se requiere el archivo (campo: file)');
         return this.libretasService.upsert({
-            cuenta_id: body.cuenta_id,
-            tipo: 'padre',
-            periodo_id: parseInt(body.periodo_id),
-            subido_por: user.id,
-            rol: user.rol,
+            cuenta_id:     body.cuenta_id,
+            tipo:          'padre',
+            periodo_id:    body.periodo_id,   // ✅ UUID string, sin parseInt
+            subido_por:    user.id,
+            rol:           user.rol,
             observaciones: body.observaciones,
             file,
         });
@@ -102,16 +103,13 @@ export class LibretasController {
     // ══════════════════════════════════════════════════════════════════════════
     // CARGA MASIVA
     // POST /libretas/bulk
-    // FormData: files[] + seccion_id + periodo_id
-    //
-    // El matching se hace server-side por nombre de archivo.
-    // Retorna el detalle de cada archivo: uploaded / skipped / error.
+    // FormData: files[] + seccion_id + periodo_id (ambos UUID string)
     // ══════════════════════════════════════════════════════════════════════════
 
     @Post('bulk')
     @Roles('admin', 'docente')
     @UseInterceptors(
-        FilesInterceptor('files', 50, {   // máx 50 archivos por request
+        FilesInterceptor('files', 50, {
             storage: memoryStorage(),
             fileFilter: (_req, file, cb) => {
                 const allowed = /\.(pdf|jpg|jpeg|png)$/i.test(file.originalname);
@@ -120,7 +118,7 @@ export class LibretasController {
                     allowed,
                 );
             },
-            limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB por archivo
+            limits: { fileSize: 10 * 1024 * 1024 },
         }),
     )
     async bulkUpload(
@@ -140,10 +138,10 @@ export class LibretasController {
 
         return this.libretasService.bulkUpsert({
             files,
-            periodoId: parseInt(body.periodo_id),
+            periodoId: body.periodo_id,
             seccionId: body.seccion_id,
             subidoPor: user.id,
-            rol: user.rol,
+            rol:       user.rol,
         });
     }
 
