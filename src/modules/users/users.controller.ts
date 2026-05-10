@@ -252,4 +252,7 @@ export class UsersController {
     linkPadreAlumno(@Body() dto: LinkPadreAlumnoDto) {
         return this.usersService.linkPadreAlumno(dto);
     }
+
+
+ 
 }

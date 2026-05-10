@@ -42,12 +42,6 @@ export class SectionReportController {
       query.umbral ?? 11,
     );
 
-    // Camino XLSX: stream binario con headers de descarga.
-    // Usamos StreamableFile (idiomático Nest) en vez de res.end() porque
-    // con passthrough:true Nest intenta JSON.stringify del valor de retorno —
-    // y res.end() devuelve el Response object, que tiene refs circulares
-    // (Socket → HTTPParser → Socket) y revienta con "Converting circular
-    // structure to JSON". StreamableFile evita ese path por completo.
     if (query.format === 'xlsx') {
       const buffer = this.xlsxBuilder.buildSeccionResumenXlsx(data);
       const filename = buildXlsxFilename(data, seccionId);

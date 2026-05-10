@@ -10,6 +10,9 @@ import {
   IsString,
   MinLength,
   IsIn,
+  Matches,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
 import {
   APPOINTMENT_TYPES,
@@ -19,8 +22,9 @@ import type {
   AppointmentType,
   AppointmentStatus,
 } from '../appointments.types.js';
+import { Type } from 'class-transformer';
+
 export class CreateAppointmentDto {
-  /** Cuenta destino (psicóloga, docente, padre, etc). El convocador = req.user. */
   @IsUUID()
   convocadoAId: string;
 
@@ -118,4 +122,23 @@ export class ListAppointmentsQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+export class SetAvailabilityDto {
+  @IsIn(['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'])
+  diaSemana: string;
+
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/, { message: 'Formato de hora inválido, usa HH:mm' })
+  horaInicio: string;
+
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/, { message: 'Formato de hora inválido, usa HH:mm' })
+  horaFin: string;
+}
+export class ReplaceAvailabilityDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SetAvailabilityDto)
+  items: SetAvailabilityDto[];
 }

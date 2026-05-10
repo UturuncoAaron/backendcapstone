@@ -6,11 +6,10 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, Brackets } from 'typeorm';
+import { DataSource, Repository, Brackets, EntityManager } from 'typeorm';
 import { Appointment } from './entities/appointment.entity.js';
 import { Cuenta } from '../users/entities/cuenta.entity.js';
-import { PsychologistAvailability } from '../psychology/entities/psychologist-availability.entity.js';
-import { PsychologistBlock } from '../psychology/entities/psychologist-block.entity.js';
+import { AccountAvailability } from './entities/account-availability.entity.js';
 import { PsychologistStudent } from '../psychology/entities/psychologist-student.entity.js';
 import {
   CreateAppointmentDto,
@@ -33,12 +32,20 @@ const WEEK_DAYS = [
   'sabado',
 ] as const;
 
-const MAX_FUTURE_MONTHS = 6; // no se puede agendar a más de 6 meses
-const MIN_LEAD_MINUTES = 15; // no agendar con menos de 15 min de anticipación
+const ROLES_CON_DISPONIBILIDAD = ['psicologa', 'docente'] as const;
+const MAX_FUTURE_MONTHS = 6;
+const MIN_LEAD_MINUTES = 15;
 
 interface CallerContext {
   id: string;
   rol: string;
+}
+
+interface ProfileRow {
+  id: string;
+  nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string | null;
 }
 
 @Injectable()
@@ -46,15 +53,14 @@ export class AppointmentsService {
   constructor(
     @InjectRepository(Appointment)
     private readonly appointmentRepo: Repository<Appointment>,
-    @InjectRepository(Cuenta) private readonly cuentaRepo: Repository<Cuenta>,
-    @InjectRepository(PsychologistAvailability)
-    private readonly availabilityRepo: Repository<PsychologistAvailability>,
-    @InjectRepository(PsychologistBlock)
-    private readonly blockRepo: Repository<PsychologistBlock>,
+    @InjectRepository(Cuenta)
+    private readonly cuentaRepo: Repository<Cuenta>,
+    @InjectRepository(AccountAvailability)
+    private readonly availabilityRepo: Repository<AccountAvailability>,
     @InjectRepository(PsychologistStudent)
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   // ════════════════════════════════════════════════════════════════
   // CREATE
@@ -77,15 +83,15 @@ export class AppointmentsService {
       throw new BadRequestException('No puedes convocarte a ti mismo');
     }
 
-    // ── Cargar y validar la contraparte ──────────────────────────
     const convocadoA = await this.cuentaRepo.findOne({
       where: { id: dto.convocadoAId, activo: true },
       select: ['id', 'rol'],
     });
-    if (!convocadoA)
+    if (!convocadoA) {
       throw new NotFoundException(
         'La cuenta convocada no existe o está inactiva',
       );
+    }
 
     if (
       !APPOINTMENT_RECIPIENT_ROLES.includes(
@@ -97,7 +103,6 @@ export class AppointmentsService {
       );
     }
 
-    // ── Validar rol del convocador puede crear con esa contraparte ──
     if (dto.studentId) {
       await this.assertCanInvolveStudent(caller, dto.studentId);
     }
@@ -105,9 +110,9 @@ export class AppointmentsService {
       await this.assertParentBelongsToStudent(dto.parentId, dto.studentId);
     }
 
-    // ── Validar slot si la contraparte es psicóloga ──────────────
     const durationMin = dto.durationMin ?? 30;
-    if (convocadoA.rol === 'psicologa') {
+
+    if (ROLES_CON_DISPONIBILIDAD.includes(convocadoA.rol as any)) {
       await this.assertSlotFitsAvailability(
         convocadoA.id,
         scheduledAt,
@@ -115,9 +120,7 @@ export class AppointmentsService {
       );
     }
 
-    // ── Persistir con anti-doble-booking (transacción serializable) ─
     return this.dataSource.transaction('SERIALIZABLE', async (em) => {
-      // Re-chequear conflictos dentro de la TX (defensa en profundidad)
       const conflict = await em
         .createQueryBuilder(Appointment, 'a')
         .where('a.convocado_a_id = :rid', { rid: convocadoA.id })
@@ -126,8 +129,8 @@ export class AppointmentsService {
         })
         .andWhere(
           `tstzrange(a.fecha_hora,
-                              a.fecha_hora + (a.duracion_min || ' minutes')::interval,
-                              '[)')
+                               a.fecha_hora + (a.duracion_min || ' minutes')::interval,
+                               '[)')
                      && tstzrange(:start, :end, '[)')`,
           {
             start: scheduledAt,
@@ -135,6 +138,7 @@ export class AppointmentsService {
           },
         )
         .getOne();
+
       if (conflict) {
         throw new ConflictException('Ese horario ya está ocupado');
       }
@@ -156,10 +160,18 @@ export class AppointmentsService {
 
       if (dto.studentId) {
         if (convocadoA.rol === 'psicologa') {
-          await this.upsertAssignment(em, convocadoA.id, dto.studentId);
+          await this.upsertPsychologistAssignment(
+            em,
+            convocadoA.id,
+            dto.studentId,
+          );
         }
         if (caller.rol === 'psicologa') {
-          await this.upsertAssignment(em, caller.id, dto.studentId);
+          await this.upsertPsychologistAssignment(
+            em,
+            caller.id,
+            dto.studentId,
+          );
         }
       }
 
@@ -168,10 +180,9 @@ export class AppointmentsService {
   }
 
   // ════════════════════════════════════════════════════════════════
-  // READ — listados
+  // READ
   // ════════════════════════════════════════════════════════════════
 
-  /** Citas en las que el caller participa (convocador o convocado). */
   async listMine(caller: CallerContext, q: ListAppointmentsQueryDto) {
     const page = q.page ?? 1;
     const limit = q.limit ?? 25;
@@ -185,7 +196,6 @@ export class AppointmentsService {
       }),
     );
 
-    // Si es alumno: además ver las que son sobre él
     if (caller.rol === 'alumno') {
       qb.orWhere('a.alumno_id = :id', { id: caller.id });
     }
@@ -212,7 +222,6 @@ export class AppointmentsService {
     };
   }
 
-  /** Citas relacionadas a un alumno específico (admin/psicóloga/docente/auxiliar). */
   async listByStudent(
     caller: CallerContext,
     studentId: string,
@@ -221,13 +230,15 @@ export class AppointmentsService {
     if (!['admin', 'psicologa', 'docente', 'auxiliar'].includes(caller.rol)) {
       throw new ForbiddenException('Tu rol no puede ver citas por alumno');
     }
+
     const page = q.page ?? 1;
     const limit = q.limit ?? 25;
     const order = q.order ?? 'DESC';
 
-    const qb = this.baseAppointmentQuery().where('a.alumno_id = :studentId', {
-      studentId,
-    });
+    const qb = this.baseAppointmentQuery().where(
+      'a.alumno_id = :studentId',
+      { studentId },
+    );
     if (q.estado) qb.andWhere('a.estado = :estado', { estado: q.estado });
     if (q.from)
       qb.andWhere('a.fecha_hora >= :from', { from: new Date(q.from) });
@@ -270,8 +281,6 @@ export class AppointmentsService {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new NotFoundException('Cita no encontrada');
 
-    // Cualquier parte (convocador o convocado) puede actualizar.
-    // Admin también.
     if (
       caller.rol !== 'admin' &&
       appt.createdById !== caller.id &&
@@ -280,7 +289,6 @@ export class AppointmentsService {
       throw new ForbiddenException('No participas en esta cita');
     }
 
-    // ── Reagendamiento ───────────────────────────────────────────
     if (dto.scheduledAt) {
       const newDate = new Date(dto.scheduledAt);
       this.assertScheduledAtIsValid(newDate);
@@ -290,7 +298,11 @@ export class AppointmentsService {
         where: { id: appt.convocadoAId },
         select: ['id', 'rol'],
       });
-      if (recipient?.rol === 'psicologa') {
+
+      if (
+        recipient &&
+        ROLES_CON_DISPONIBILIDAD.includes(recipient.rol as any)
+      ) {
         await this.assertSlotFitsAvailability(
           recipient.id,
           newDate,
@@ -312,7 +324,6 @@ export class AppointmentsService {
       appt.rescheduledFromId = dto.rescheduledFromId;
     }
 
-    // ── Cambio de estado ─────────────────────────────────────────
     if (dto.estado && dto.estado !== appt.estado) {
       this.assertStateTransition(caller, appt, dto.estado);
       appt.estado = dto.estado;
@@ -354,7 +365,83 @@ export class AppointmentsService {
   }
 
   // ════════════════════════════════════════════════════════════════
-  // HELPERS PRIVADOS
+  // DISPONIBILIDAD
+  // ════════════════════════════════════════════════════════════════
+
+  /** Disponibilidad declarada por el profesional. */
+  async getAvailability(cuentaId: string): Promise<AccountAvailability[]> {
+    return this.availabilityRepo.find({
+      where: { cuentaId, activo: true },
+      order: { diaSemana: 'ASC', horaInicio: 'ASC' },
+    });
+  }
+
+  /** Citas ya agendadas en la semana de la fecha recibida. */
+  async getSlotsTaken(cuentaId: string, date: string) {
+    if (!date) {
+      throw new BadRequestException('El parámetro date es requerido (YYYY-MM-DD)');
+    }
+
+    const ref = new Date(date);
+    if (isNaN(ref.getTime())) {
+      throw new BadRequestException('Formato de fecha inválido, usa YYYY-MM-DD');
+    }
+
+    const day = ref.getDay(); // 0=dom ... 6=sab
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(ref);
+    monday.setDate(ref.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    const citas = await this.appointmentRepo
+      .createQueryBuilder('a')
+      .select(['a.id', 'a.scheduledAt', 'a.durationMin', 'a.estado'])
+      .where('a.convocado_a_id = :cuentaId', { cuentaId })
+      .andWhere('a.estado IN (:...states)', {
+        states: ['pendiente', 'confirmada'],
+      })
+      .andWhere('a.fecha_hora >= :monday', { monday })
+      .andWhere('a.fecha_hora <= :sunday', { sunday })
+      .getMany();
+
+    return citas.map((c) => ({
+      id: c.id,
+      scheduledAt: c.scheduledAt,
+      durationMin: c.durationMin,
+      estado: c.estado,
+    }));
+  }
+
+  /** Reemplaza atómicamente toda la disponibilidad del usuario. */
+  async replaceAvailability(
+    cuentaId: string,
+    items: { diaSemana: string; horaInicio: string; horaFin: string }[],
+  ): Promise<AccountAvailability[]> {
+    return this.dataSource.transaction(async (em) => {
+      await em.delete(AccountAvailability, { cuentaId });
+
+      if (items.length === 0) return [];
+
+      const rows = items.map((it) =>
+        em.create(AccountAvailability, {
+          cuentaId,
+          diaSemana: it.diaSemana as AccountAvailability['diaSemana'],
+          horaInicio: it.horaInicio,
+          horaFin: it.horaFin,
+          activo: true,
+        }),
+      );
+
+      return em.save(rows);
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // PRIVATE HELPERS
   // ════════════════════════════════════════════════════════════════
 
   private baseAppointmentQuery() {
@@ -386,14 +473,8 @@ export class AppointmentsService {
     if (caller.rol === 'admin') return;
     if (appt.createdById === caller.id) return;
     if (appt.convocadoAId === caller.id) return;
-    if (
-      caller.rol === 'alumno' &&
-      appt.studentId &&
-      appt.studentId === caller.id
-    )
-      return;
-    if (caller.rol === 'padre' && appt.parentId && appt.parentId === caller.id)
-      return;
+    if (caller.rol === 'alumno' && appt.studentId === caller.id) return;
+    if (caller.rol === 'padre' && appt.parentId === caller.id) return;
     throw new ForbiddenException('No tienes acceso a esta cita');
   }
 
@@ -402,9 +483,6 @@ export class AppointmentsService {
     appt: Appointment,
     next: Appointment['estado'],
   ): void {
-    // Reglas:
-    // - Cancelada no puede pasar a otro estado
-    // - Realizada / no_asistio solo lo marca el convocado_a o admin (la "psicóloga/docente que recibió")
     if (appt.estado === 'cancelada') {
       throw new BadRequestException(
         'Una cita cancelada no puede cambiar de estado',
@@ -413,7 +491,7 @@ export class AppointmentsService {
     if (next === 'realizada' || next === 'no_asistio') {
       if (caller.rol !== 'admin' && appt.convocadoAId !== caller.id) {
         throw new ForbiddenException(
-          'Solo el convocado puede marcar la cita como realizada/no asistió',
+          'Solo el convocado puede marcar la cita como realizada o no asistió',
         );
       }
     }
@@ -423,16 +501,15 @@ export class AppointmentsService {
     caller: CallerContext,
     studentId: string,
   ): Promise<void> {
-    // Reglas por rol del convocador:
     switch (caller.rol) {
       case 'admin':
       case 'psicologa':
       case 'docente':
       case 'auxiliar':
-        return; // pueden agendar sobre cualquier alumno
+        return;
 
       case 'padre': {
-        const linked = await this.dataSource.query(
+        const linked = await this.dataSource.query<unknown[]>(
           `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
           [caller.id, studentId],
         );
@@ -463,7 +540,7 @@ export class AppointmentsService {
     parentId: string,
     studentId: string,
   ): Promise<void> {
-    const linked = await this.dataSource.query(
+    const linked = await this.dataSource.query<unknown[]>(
       `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
       [parentId, studentId],
     );
@@ -475,70 +552,62 @@ export class AppointmentsService {
   }
 
   private async assertSlotFitsAvailability(
-    psychologistId: string,
+    cuentaId: string,
     start: Date,
     durationMin: number,
     ignoreAppointmentId?: string,
   ): Promise<void> {
     const end = new Date(start.getTime() + durationMin * 60_000);
-
     const dayName = WEEK_DAYS[start.getDay()];
 
-    // Domingo no es atendido (no existe en el enum WeekDay ni en la BD)
     if (dayName === 'domingo') {
-      throw new BadRequestException('La psicóloga no atiende los domingos');
+      throw new BadRequestException('No se atiende los domingos');
     }
 
-    const availability = await this.availabilityRepo.findOne({
-      where: { psychologistId, weekDay: dayName, activo: true },
+    // Soporta múltiples bloques en un mismo día (ej. 08-12 y 14-18).
+    const bloques = await this.availabilityRepo.find({
+      where: { cuentaId, diaSemana: dayName as any, activo: true },
+      order: { horaInicio: 'ASC' },
     });
-    if (!availability) {
-      throw new BadRequestException('La psicóloga no atiende ese día');
-    }
 
-    const [hS, mS] = availability.startTime.split(':').map(Number);
-    const [hE, mE] = availability.endTime.split(':').map(Number);
-
-    const dayStart = new Date(start);
-    dayStart.setHours(hS, mS, 0, 0);
-    const dayEnd = new Date(start);
-    dayEnd.setHours(hE, mE, 0, 0);
-
-    if (start < dayStart || end > dayEnd) {
+    if (bloques.length === 0) {
       throw new BadRequestException(
-        `Horario fuera de la disponibilidad (${availability.startTime}-${availability.endTime})`,
+        'El profesional no tiene disponibilidad ese día',
       );
     }
 
-    // Bloqueos vacacionales
-    const blocked = await this.blockRepo
-      .createQueryBuilder('b')
-      .where('b.psicologa_id = :pid', { pid: psychologistId })
-      .andWhere('b.fecha_inicio <= :end AND b.fecha_fin >= :start', {
-        start,
-        end,
-      })
-      .getCount();
-    if (blocked > 0) {
+    const fits = bloques.some((d) => {
+      const [hS, mS] = d.horaInicio.split(':').map(Number);
+      const [hE, mE] = d.horaFin.split(':').map(Number);
+
+      const dayStart = new Date(start);
+      dayStart.setHours(hS, mS, 0, 0);
+      const dayEnd = new Date(start);
+      dayEnd.setHours(hE, mE, 0, 0);
+
+      return start >= dayStart && end <= dayEnd;
+    });
+
+    if (!fits) {
+      const ranges = bloques
+        .map((d) => `${d.horaInicio} - ${d.horaFin}`)
+        .join(', ');
       throw new BadRequestException(
-        'La psicóloga tiene un bloqueo en ese rango',
+        `Horario fuera de la disponibilidad (${ranges})`,
       );
     }
 
-    // Doble-booking
     const overlapQB = this.appointmentRepo
       .createQueryBuilder('a')
-      .where('a.convocado_a_id = :pid', { pid: psychologistId })
+      .where('a.convocado_a_id = :cuentaId', { cuentaId })
       .andWhere('a.estado IN (:...states)', {
         states: ['pendiente', 'confirmada'],
       })
       .andWhere(
-        `
-                tstzrange(a.fecha_hora,
-                          a.fecha_hora + (a.duracion_min || ' minutes')::interval,
-                          '[)')
-                && tstzrange(:start, :end, '[)')
-            `,
+        `tstzrange(a.fecha_hora,
+                           a.fecha_hora + (a.duracion_min || ' minutes')::interval,
+                           '[)')
+                 && tstzrange(:start, :end, '[)')`,
         { start, end },
       );
 
@@ -547,12 +616,13 @@ export class AppointmentsService {
         ignoreId: ignoreAppointmentId,
       });
     }
+
     const overlap = await overlapQB.getCount();
     if (overlap > 0) throw new ConflictException('Ese horario ya está ocupado');
   }
 
-  private async upsertAssignment(
-    em: any,
+  private async upsertPsychologistAssignment(
+    em: EntityManager,
     psychologistId: string,
     studentId: string,
   ): Promise<void> {
@@ -565,15 +635,6 @@ export class AppointmentsService {
     );
   }
 
-  /**
-   * Enriquece cada cita con el nombre real del `convocadoA`. La tabla
-   * `cuentas` no guarda nombre/apellido (esos viven en `psicologas`,
-   * `alumnos`, `padres`, `docentes`, `auxiliares`, `admins`); por eso
-   * `leftJoinAndSelect('a.convocadoA', ...)` deja esos campos `undefined`.
-   *
-   * Hacemos UNA sola consulta UNION sobre las 6 tablas de roles para
-   * resolver todos los nombres en O(1) ronda de BD, sin tocar el schema.
-   */
   private async enrichWithProfileNames(
     items: Appointment[],
   ): Promise<Appointment[]> {
@@ -584,25 +645,18 @@ export class AppointmentsService {
     );
     if (ids.length === 0) return items;
 
-    const rows = await this.dataSource.query<
-      {
-        id: string;
-        nombre: string;
-        apellido_paterno: string;
-        apellido_materno: string | null;
-      }[]
-    >(
-      `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas WHERE id = ANY($1::uuid[])
-              UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM alumnos    WHERE id = ANY($1::uuid[])
-              UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM padres     WHERE id = ANY($1::uuid[])
-              UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM docentes   WHERE id = ANY($1::uuid[])
-              UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM auxiliares WHERE id = ANY($1::uuid[])
-              UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM admins     WHERE id = ANY($1::uuid[])`,
+    const rows = await this.dataSource.query<ProfileRow[]>(
+      `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas  WHERE id = ANY($1::uuid[])
+             UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM alumnos     WHERE id = ANY($1::uuid[])
+             UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM padres      WHERE id = ANY($1::uuid[])
+             UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM docentes    WHERE id = ANY($1::uuid[])
+             UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM auxiliares  WHERE id = ANY($1::uuid[])
+             UNION ALL
+             SELECT id, nombre, apellido_paterno, apellido_materno FROM admins      WHERE id = ANY($1::uuid[])`,
       [ids],
     );
 
@@ -611,7 +665,6 @@ export class AppointmentsService {
     for (const a of items) {
       const profile = byId.get(a.convocadoAId);
       if (profile && a.convocadoA) {
-        // Mutación segura: sólo agregamos campos que no existen en Cuenta.
         Object.assign(a.convocadoA as unknown as Record<string, unknown>, {
           nombre: profile.nombre,
           apellido_paterno: profile.apellido_paterno,

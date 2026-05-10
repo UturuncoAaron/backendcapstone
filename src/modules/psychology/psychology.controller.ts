@@ -8,9 +8,7 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import {
-    CreateRecordDto, UpdateRecordDto,
-    CreateAvailabilityDto, CreateBlockDto,
-    GetSlotsQueryDto, PageQueryDto,
+    CreateRecordDto, UpdateRecordDto, PageQueryDto,
 } from './dto/psychology.dto.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 
@@ -20,7 +18,7 @@ export class PsychologyController {
 
     constructor(private readonly service: PsychologyService) { }
 
-    // ── Fichas ──────────────────────────────────────────────────────
+    // ── Fichas psicológicas ─────────────────────────────────────────
     @Post('records')
     @Roles('psicologa')
     createRecord(@Body() dto: CreateRecordDto, @CurrentUser() user: AuthUser) {
@@ -56,69 +54,6 @@ export class PsychologyController {
         return this.service.deleteRecord(user.id, id);
     }
 
-    // ── Disponibilidad ──────────────────────────────────────────────
-    @Post('availability')
-    @Roles('psicologa')
-    setAvailability(@Body() dto: CreateAvailabilityDto, @CurrentUser() user: AuthUser) {
-        return this.service.setAvailability(user.id, dto);
-    }
-
-    @Get('availability/:psychologistId')
-    @Roles('psicologa', 'padre', 'alumno', 'docente', 'admin')
-    getAvailability(@Param('psychologistId', ParseUUIDPipe) psychologistId: string) {
-        return this.service.getAvailability(psychologistId);
-    }
-
-    @Delete('availability/:id')
-    @Roles('psicologa')
-    removeAvailability(
-        @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: AuthUser,
-    ) {
-        return this.service.removeAvailability(user.id, id);
-    }
-
-    // ── Bloqueos ────────────────────────────────────────────────────
-    @Post('blocks')
-    @Roles('psicologa')
-    createBlock(@Body() dto: CreateBlockDto, @CurrentUser() user: AuthUser) {
-        return this.service.createBlock(user.id, dto);
-    }
-
-    @Get('blocks')
-    @Roles('psicologa')
-    getBlocks(
-        @CurrentUser() user: AuthUser,
-        @Query('from') from?: string,
-        @Query('to') to?: string,
-    ) {
-        return this.service.getBlocks(user.id, from, to);
-    }
-
-    @Delete('blocks/:id')
-    @Roles('psicologa')
-    removeBlock(
-        @Param('id', ParseUUIDPipe) id: string,
-        @CurrentUser() user: AuthUser,
-    ) {
-        return this.service.removeBlock(user.id, id);
-    }
-
-    // ── Slots disponibles (para que el padre/alumno agende) ─────────
-    @Get('slots/:psychologistId')
-    @Roles('padre', 'alumno', 'psicologa', 'admin', 'docente')
-    getSlots(
-        @Param('psychologistId', ParseUUIDPipe) psychologistId: string,
-        @Query() q: GetSlotsQueryDto,
-    ) {
-        return this.service.getAvailableSlots(
-            psychologistId,
-            new Date(q.from),
-            new Date(q.to),
-            q.durationMin,
-        );
-    }
-
     // ── Mis alumnos (vista psicóloga) ───────────────────────────────
     @Get('my-students')
     @Roles('psicologa')
@@ -135,7 +70,7 @@ export class PsychologyController {
         return this.service.unassignStudent(user.id, studentId);
     }
 
-    // ── Directorio (reusa UsersService — sin credenciales) ──────────
+    // ── Directorio ──────────────────────────────────────────────────
     @Get('directory/students/search')
     @Roles('psicologa', 'docente', 'auxiliar')
     searchStudents(@Query('q') q: string) {
@@ -168,7 +103,7 @@ export class PsychologyController {
         return this.service.getStudentParents(studentId);
     }
 
-    // ── Listado público de psicólogas (para que padre/alumno agenden) ───────
+    // ── Listado público de psicólogas ───────────────────────────────
     @Get('psicologas')
     @Roles('alumno', 'padre', 'psicologa', 'docente', 'auxiliar', 'admin')
     listActivePsicologas(@Query('q') q?: string) {
