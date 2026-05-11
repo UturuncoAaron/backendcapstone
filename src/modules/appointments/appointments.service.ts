@@ -9,7 +9,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, Brackets, EntityManager } from 'typeorm';
 import { Appointment } from './entities/appointment.entity.js';
 import { Cuenta } from '../users/entities/cuenta.entity.js';
-import { AccountAvailability } from './entities/account-availability.entity.js';
+import {
+  AccountAvailability,
+  DiaSemana,
+} from './entities/account-availability.entity.js';
 import { PsychologistStudent } from '../psychology/entities/psychologist-student.entity.js';
 import {
   CreateAppointmentDto,
@@ -20,6 +23,8 @@ import {
 import {
   AppointmentRecipientRole,
   APPOINTMENT_RECIPIENT_ROLES,
+  ROLES_WITH_AVAILABILITY,
+  RoleWithAvailability,
 } from './appointments.types.js';
 
 const WEEK_DAYS = [
@@ -32,7 +37,10 @@ const WEEK_DAYS = [
   'sabado',
 ] as const;
 
-const ROLES_CON_DISPONIBILIDAD = ['psicologa', 'docente'] as const;
+function hasAvailability(rol: string): rol is RoleWithAvailability {
+  return (ROLES_WITH_AVAILABILITY as readonly string[]).includes(rol);
+}
+
 const MAX_FUTURE_MONTHS = 6;
 const MIN_LEAD_MINUTES = 15;
 
@@ -60,7 +68,7 @@ export class AppointmentsService {
     @InjectRepository(PsychologistStudent)
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
-  ) { }
+  ) {}
 
   // ════════════════════════════════════════════════════════════════
   // CREATE
@@ -112,7 +120,9 @@ export class AppointmentsService {
 
     const durationMin = dto.durationMin ?? 30;
 
-    if (ROLES_CON_DISPONIBILIDAD.includes(convocadoA.rol as any)) {
+    // 1) El slot debe caer dentro de la disponibilidad del CONVOCADO
+    //    (psicóloga / docente / admin / auxiliar).
+    if (hasAvailability(convocadoA.rol)) {
       await this.assertSlotFitsAvailability(
         convocadoA.id,
         scheduledAt,
@@ -120,10 +130,27 @@ export class AppointmentsService {
       );
     }
 
+    // 2) También debe caer dentro de la disponibilidad del CONVOCANTE
+    //    cuando este tiene calendario propio (cierra el agujero por el que
+    //    un docente podía citar a un padre fuera de su propio horario).
+    if (hasAvailability(caller.rol) && caller.id !== convocadoA.id) {
+      await this.assertSlotFitsAvailability(
+        caller.id,
+        scheduledAt,
+        durationMin,
+      );
+    }
+
     return this.dataSource.transaction('SERIALIZABLE', async (em) => {
+      // Conflicto: el slot solapa una cita activa donde el convocado O el
+      // convocante ya tienen algo agendado en cualquiera de las dos puntas.
+      const conflictIds = [convocadoA.id, caller.id];
       const conflict = await em
         .createQueryBuilder(Appointment, 'a')
-        .where('a.convocado_a_id = :rid', { rid: convocadoA.id })
+        .where(
+          '(a.convocado_a_id IN (:...ids) OR a.convocado_por_id IN (:...ids))',
+          { ids: conflictIds },
+        )
         .andWhere('a.estado IN (:...states)', {
           states: ['pendiente', 'confirmada'],
         })
@@ -167,11 +194,7 @@ export class AppointmentsService {
           );
         }
         if (caller.rol === 'psicologa') {
-          await this.upsertPsychologistAssignment(
-            em,
-            caller.id,
-            dto.studentId,
-          );
+          await this.upsertPsychologistAssignment(em, caller.id, dto.studentId);
         }
       }
 
@@ -235,10 +258,9 @@ export class AppointmentsService {
     const limit = q.limit ?? 25;
     const order = q.order ?? 'DESC';
 
-    const qb = this.baseAppointmentQuery().where(
-      'a.alumno_id = :studentId',
-      { studentId },
-    );
+    const qb = this.baseAppointmentQuery().where('a.alumno_id = :studentId', {
+      studentId,
+    });
     if (q.estado) qb.andWhere('a.estado = :estado', { estado: q.estado });
     if (q.from)
       qb.andWhere('a.fecha_hora >= :from', { from: new Date(q.from) });
@@ -299,12 +321,17 @@ export class AppointmentsService {
         select: ['id', 'rol'],
       });
 
-      if (
-        recipient &&
-        ROLES_CON_DISPONIBILIDAD.includes(recipient.rol as any)
-      ) {
+      if (recipient && hasAvailability(recipient.rol)) {
         await this.assertSlotFitsAvailability(
           recipient.id,
+          newDate,
+          newDuration,
+          appt.id,
+        );
+      }
+      if (hasAvailability(caller.rol) && caller.id !== appt.convocadoAId) {
+        await this.assertSlotFitsAvailability(
+          caller.id,
           newDate,
           newDuration,
           appt.id,
@@ -351,7 +378,11 @@ export class AppointmentsService {
     ) {
       throw new ForbiddenException('No participas en esta cita');
     }
-    if (appt.estado === 'cancelada' || appt.estado === 'realizada') {
+    if (
+      appt.estado === 'cancelada' ||
+      appt.estado === 'rechazada' ||
+      appt.estado === 'realizada'
+    ) {
       throw new BadRequestException(
         `No se puede cancelar una cita ${appt.estado}`,
       );
@@ -361,6 +392,59 @@ export class AppointmentsService {
     appt.cancelledAt = new Date();
     appt.cancelledById = caller.id;
     appt.cancelReason = dto.motivo ?? null;
+    return this.appointmentRepo.save(appt);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // RESPUESTA DEL CONVOCADO  (padre / alumno aceptan o rechazan)
+  // ════════════════════════════════════════════════════════════════
+
+  async acceptAppointment(
+    caller: CallerContext,
+    id: string,
+  ): Promise<Appointment> {
+    const appt = await this.appointmentRepo.findOne({ where: { id } });
+    if (!appt) throw new NotFoundException('Cita no encontrada');
+
+    if (caller.rol !== 'admin' && appt.convocadoAId !== caller.id) {
+      throw new ForbiddenException('Solo el convocado puede aceptar la cita');
+    }
+    if (appt.estado !== 'pendiente') {
+      throw new BadRequestException(
+        `Solo se pueden aceptar citas pendientes (estado actual: ${appt.estado})`,
+      );
+    }
+
+    appt.estado = 'confirmada';
+    return this.appointmentRepo.save(appt);
+  }
+
+  async rejectAppointment(
+    caller: CallerContext,
+    id: string,
+    motivo: string,
+  ): Promise<Appointment> {
+    const appt = await this.appointmentRepo.findOne({ where: { id } });
+    if (!appt) throw new NotFoundException('Cita no encontrada');
+
+    if (caller.rol !== 'admin' && appt.convocadoAId !== caller.id) {
+      throw new ForbiddenException('Solo el convocado puede rechazar la cita');
+    }
+    if (appt.estado !== 'pendiente') {
+      throw new BadRequestException(
+        `Solo se pueden rechazar citas pendientes (estado actual: ${appt.estado})`,
+      );
+    }
+    if (!motivo || motivo.trim().length < 3) {
+      throw new BadRequestException(
+        'Debe indicar un motivo para rechazar la cita',
+      );
+    }
+
+    appt.estado = 'rechazada';
+    appt.cancelledAt = new Date();
+    appt.cancelledById = caller.id;
+    appt.cancelReason = motivo.trim();
     return this.appointmentRepo.save(appt);
   }
 
@@ -379,12 +463,16 @@ export class AppointmentsService {
   /** Citas ya agendadas en la semana de la fecha recibida. */
   async getSlotsTaken(cuentaId: string, date: string) {
     if (!date) {
-      throw new BadRequestException('El parámetro date es requerido (YYYY-MM-DD)');
+      throw new BadRequestException(
+        'El parámetro date es requerido (YYYY-MM-DD)',
+      );
     }
 
     const ref = new Date(date);
     if (isNaN(ref.getTime())) {
-      throw new BadRequestException('Formato de fecha inválido, usa YYYY-MM-DD');
+      throw new BadRequestException(
+        'Formato de fecha inválido, usa YYYY-MM-DD',
+      );
     }
 
     const day = ref.getDay(); // 0=dom ... 6=sab
@@ -397,10 +485,15 @@ export class AppointmentsService {
     sunday.setDate(monday.getDate() + 6);
     sunday.setHours(23, 59, 59, 999);
 
+    // Bloquean el calendario tanto las citas en las que la cuenta es la
+    // convocada como aquellas que la misma cuenta convoca a otros.
     const citas = await this.appointmentRepo
       .createQueryBuilder('a')
       .select(['a.id', 'a.scheduledAt', 'a.durationMin', 'a.estado'])
-      .where('a.convocado_a_id = :cuentaId', { cuentaId })
+      .where(
+        '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
+        { cuentaId },
+      )
       .andWhere('a.estado IN (:...states)', {
         states: ['pendiente', 'confirmada'],
       })
@@ -429,7 +522,7 @@ export class AppointmentsService {
       const rows = items.map((it) =>
         em.create(AccountAvailability, {
           cuentaId,
-          diaSemana: it.diaSemana as AccountAvailability['diaSemana'],
+          diaSemana: it.diaSemana as DiaSemana,
           horaInicio: it.horaInicio,
           horaFin: it.horaFin,
           activo: true,
@@ -566,7 +659,7 @@ export class AppointmentsService {
 
     // Soporta múltiples bloques en un mismo día (ej. 08-12 y 14-18).
     const bloques = await this.availabilityRepo.find({
-      where: { cuentaId, diaSemana: dayName as any, activo: true },
+      where: { cuentaId, diaSemana: dayName as DiaSemana, activo: true },
       order: { horaInicio: 'ASC' },
     });
 
@@ -599,7 +692,10 @@ export class AppointmentsService {
 
     const overlapQB = this.appointmentRepo
       .createQueryBuilder('a')
-      .where('a.convocado_a_id = :cuentaId', { cuentaId })
+      .where(
+        '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
+        { cuentaId },
+      )
       .andWhere('a.estado IN (:...states)', {
         states: ['pendiente', 'confirmada'],
       })

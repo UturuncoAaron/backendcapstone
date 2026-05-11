@@ -22,7 +22,6 @@ import type {
 @Index('idx_citas_convocado_a', ['convocadoAId', 'estado', 'scheduledAt'])
 @Index('idx_citas_alumno_fecha', ['studentId', 'scheduledAt'])
 export class Appointment {
-
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
