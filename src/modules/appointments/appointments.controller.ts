@@ -36,10 +36,19 @@ export class AppointmentsController {
   // ══════════════════════════════════════════════════════════════
 
   // ── Crear cita ──────────────────────────────────────────────────
+  // Regla #3: los alumnos NO pueden agendar (se quita 'alumno' del decorador).
   @Post()
-  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre')
   create(@Body() dto: CreateAppointmentDto, @CurrentUser() user: AuthUser) {
     return this.service.createAppointment({ id: user.id, rol: user.rol }, dto);
+  }
+
+  // Reglas por rol (lo consume el FE para configurar el dialog). Devuelve
+  // `null` si el target no participa del flujo de citas.
+  @Get('rules/:targetId')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre')
+  getRules(@Param('targetId', ParseUUIDPipe) targetId: string) {
+    return this.service.getRulesForTarget(targetId);
   }
 
   // ── Mis citas (listado del usuario logueado) ────────────────────
@@ -148,7 +157,7 @@ export class AppointmentsController {
   // ══════════════════════════════════════════════════════════════
 
   @Post(':id/accept')
-  @Roles('padre', 'alumno', 'admin')
+  @Roles('padre', 'admin')
   accept(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,
@@ -157,7 +166,7 @@ export class AppointmentsController {
   }
 
   @Post(':id/reject')
-  @Roles('padre', 'alumno', 'admin')
+  @Roles('padre', 'admin')
   reject(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectAppointmentDto,
