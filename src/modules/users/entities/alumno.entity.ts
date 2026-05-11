@@ -38,6 +38,14 @@ export class Alumno {
     @Column({ nullable: true, length: 20 })
     telefono: string | null;
 
+    /**
+     * Marca al alumno como caso de inclusión educativa (NEE, adaptación
+     * curricular, etc.). Default FALSE. La columna real es asegurada por
+     * `UsersSchemaSync` al boot para mantener la sincronización idempotente.
+     */
+    @Column({ type: 'boolean', default: false })
+    inclusivo: boolean;
+
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;
 

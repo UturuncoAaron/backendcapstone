@@ -72,13 +72,13 @@ export class PsychologyController {
 
     // ── Directorio ──────────────────────────────────────────────────
     @Get('directory/students/search')
-    @Roles('psicologa', 'docente', 'auxiliar')
+    @Roles('psicologa', 'docente', 'auxiliar', 'admin')
     searchStudents(@Query('q') q: string) {
         return this.service.searchStudents(q);
     }
 
     @Get('directory/students')
-    @Roles('psicologa', 'docente', 'auxiliar')
+    @Roles('psicologa', 'docente', 'auxiliar', 'admin')
     listStudents(
         @Query('q') q?: string,
         @Query('page') page?: string,
@@ -92,13 +92,13 @@ export class PsychologyController {
     }
 
     @Get('directory/parents/search')
-    @Roles('psicologa', 'docente', 'auxiliar')
+    @Roles('psicologa', 'docente', 'auxiliar', 'admin')
     searchParents(@Query('q') q: string) {
         return this.service.searchParents(q);
     }
 
     @Get('directory/students/:studentId/parents')
-    @Roles('psicologa', 'docente', 'auxiliar')
+    @Roles('psicologa', 'docente', 'auxiliar', 'admin')
     getStudentParents(@Param('studentId', ParseUUIDPipe) studentId: string) {
         return this.service.getStudentParents(studentId);
     }
