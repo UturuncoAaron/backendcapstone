@@ -91,6 +91,13 @@ export class CancelAppointmentDto {
   motivo?: string;
 }
 
+export class RejectAppointmentDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  motivo: string;
+}
+
 export class ListAppointmentsQueryDto {
   @IsOptional()
   @IsEnum(APPOINTMENT_STATUSES)

@@ -8,16 +8,16 @@ import { AppointmentsService } from './appointments.service.js';
 import { AppointmentsController } from './appointments.controller.js';
 
 @Module({
-    imports: [
-        TypeOrmModule.forFeature([
-            Appointment,
-            Cuenta,
-            AccountAvailability,
-            PsychologistStudent,
-        ]),
-    ],
-    controllers: [AppointmentsController],
-    providers: [AppointmentsService],
-    exports: [AppointmentsService],
+  imports: [
+    TypeOrmModule.forFeature([
+      Appointment,
+      Cuenta,
+      AccountAvailability,
+      PsychologistStudent,
+    ]),
+  ],
+  controllers: [AppointmentsController],
+  providers: [AppointmentsService],
+  exports: [AppointmentsService],
 })
-export class AppointmentsModule { }
+export class AppointmentsModule {}

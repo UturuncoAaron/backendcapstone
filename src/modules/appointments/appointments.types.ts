@@ -16,9 +16,20 @@ export const APPOINTMENT_STATUSES = [
   'confirmada',
   'realizada',
   'cancelada',
+  'rechazada',
   'no_asistio',
 ] as const;
 export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
+
+// Roles que pueden marcar su propia disponibilidad y, por lo tanto, agendar
+// citas únicamente dentro de su calendario.
+export const ROLES_WITH_AVAILABILITY = [
+  'psicologa',
+  'docente',
+  'admin',
+  'auxiliar',
+] as const;
+export type RoleWithAvailability = (typeof ROLES_WITH_AVAILABILITY)[number];
 
 // Roles a los que un convocador puede dirigir una cita
 export const APPOINTMENT_RECIPIENT_ROLES = [
