@@ -2,6 +2,7 @@
 import {
     IsString, IsNotEmpty, IsOptional, IsEmail,
     IsDateString, IsIn, MinLength, MaxLength, Matches,
+    IsBoolean,
 } from 'class-validator';
 
 // ── CreateAlumnoDto ──────────────────────────────────────────────
@@ -35,6 +36,10 @@ export class CreateAlumnoDto {
 
     @IsOptional() @IsString() @MaxLength(20)
     telefono?: string;
+
+    // Marca al alumno como caso de inclusión educativa (NEE).
+    @IsOptional() @IsBoolean()
+    inclusivo?: boolean;
 }
 
 // ── CreateDocenteDto ─────────────────────────────────────────────

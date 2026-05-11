@@ -11,6 +11,7 @@ import { Admin } from './entities/admin.entity.js';
 import { Psicologa } from './entities/psicologa.entity.js';
 import { Auxiliar } from './entities/auxiliar.entity.js';
 import { StorageModule } from '../storage/storage.module.js';
+import { UsersSchemaSync } from './users.schema-sync.js';
 
 @Module({
     imports: [
@@ -18,7 +19,7 @@ import { StorageModule } from '../storage/storage.module.js';
         StorageModule,
     ],
     controllers: [UsersController, ProfileController],
-    providers: [UsersService],
+    providers: [UsersService, UsersSchemaSync],
     exports: [UsersService],
 })
 export class UsersModule { }

@@ -43,6 +43,53 @@ export interface DocenteSelectItem {
     seccion_label: string;
   } | null;
 }
+
+// Fila cruda devuelta por `searchAlumnos` (después de getRawMany).
+// Los alias salen de la query — los mantenemos tipados para evitar
+// `any` aguas abajo.
+interface AlumnoSearchRow {
+  id: string;
+  nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string | null;
+  codigo_estudiante: string;
+  foto_storage_key: string | null;
+  numero_documento: string;
+  codigo_acceso: string | null;
+  inclusivo: boolean | null;
+  grado: string | null;
+  grado_id: string | null;
+  seccion: string | null;
+  seccion_id: string | null;
+  padre_id: string | null;
+  padre_nombre: string | null;
+  padre_apellido_paterno: string | null;
+  padre_apellido_materno: string | null;
+  padre_relacion: string | null;
+}
+
+export interface AlumnoSearchResult {
+  id: string;
+  nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string | null;
+  codigo_estudiante: string;
+  foto_storage_key: string | null;
+  numero_documento: string;
+  codigo_acceso: string | null;
+  inclusivo: boolean;
+  grado: string | null;
+  grado_id: string | null;
+  seccion: string | null;
+  seccion_id: string | null;
+  padre: {
+    id: string;
+    nombre: string;
+    apellido_paterno: string;
+    apellido_materno: string | null;
+    relacion: string | null;
+  } | null;
+}
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const ROLE_PREFIX: Record<string, string> = {
@@ -179,6 +226,7 @@ export class UsersService {
           fecha_nacimiento: new Date(dto.fecha_nacimiento),
           email: dto.email ?? null,
           telefono: dto.telefono ?? null,
+          inclusivo: dto.inclusivo === true,
         }),
       );
     });
@@ -408,6 +456,7 @@ export class UsersService {
         'a.telefono          AS telefono',
         'a.email             AS email',
         'a.foto_storage_key  AS foto_storage_key',
+        'a.inclusivo         AS inclusivo',
         'c.numero_documento  AS numero_documento',
         'c.tipo_documento    AS tipo_documento',
         'c.activo            AS activo',
@@ -744,19 +793,59 @@ export class UsersService {
   // BÚSQUEDAS (autocomplete)
   // ══════════════════════════════════════════════════════════════════════════
 
-  async searchAlumnos(query: string) {
+  async searchAlumnos(query: string): Promise<AlumnoSearchResult[]> {
     if (!query || query.trim().length < 2) return [];
-    return this.alumnoRepo
+    // Devolvemos también grado/seccion (matrícula activa) y un padre/tutor
+    // vinculado para que los consumidores (autocomplete del docente, admin,
+    // psicóloga, etc.) puedan mostrar info útil sin tener que hacer un
+    // segundo viaje al servidor.
+    const rows: AlumnoSearchRow[] = await this.alumnoRepo
       .createQueryBuilder('a')
       .innerJoin('cuentas', 'c', 'c.id = a.id')
+      .leftJoin('matriculas', 'm', 'm.alumno_id = a.id AND m.activo = TRUE')
+      .leftJoin('secciones', 's', 's.id = m.seccion_id')
+      .leftJoin('grados', 'g', 'g.id = s.grado_id')
+      .leftJoin(
+        (qb) =>
+          qb
+            .select('pa.alumno_id', 'alumno_id')
+            .addSelect('p.id', 'padre_id')
+            .addSelect('p.nombre', 'padre_nombre')
+            .addSelect('p.apellido_paterno', 'padre_apellido_paterno')
+            .addSelect('p.apellido_materno', 'padre_apellido_materno')
+            .addSelect('p.relacion', 'padre_relacion')
+            .addSelect(
+              `ROW_NUMBER() OVER (
+                  PARTITION BY pa.alumno_id
+                  ORDER BY p.apellido_paterno NULLS LAST, p.nombre
+              )`,
+              'rn',
+            )
+            .from('padre_alumno', 'pa')
+            .innerJoin('padres', 'p', 'p.id = pa.padre_id')
+            .innerJoin('cuentas', 'pc', 'pc.id = p.id AND pc.activo = TRUE'),
+        'padre',
+        'padre.alumno_id = a.id AND padre.rn = 1',
+      )
       .select([
         'a.id                AS id',
         'a.nombre            AS nombre',
         'a.apellido_paterno  AS apellido_paterno',
         'a.apellido_materno  AS apellido_materno',
         'a.codigo_estudiante AS codigo_estudiante',
+        'a.foto_storage_key  AS foto_storage_key',
+        'a.inclusivo         AS inclusivo',
         'c.numero_documento  AS numero_documento',
         'c.codigo_acceso     AS codigo_acceso',
+        'g.nombre            AS grado',
+        'g.id                AS grado_id',
+        's.nombre            AS seccion',
+        's.id                AS seccion_id',
+        'padre.padre_id              AS padre_id',
+        'padre.padre_nombre          AS padre_nombre',
+        'padre.padre_apellido_paterno AS padre_apellido_paterno',
+        'padre.padre_apellido_materno AS padre_apellido_materno',
+        'padre.padre_relacion        AS padre_relacion',
       ])
       .where(
         `a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
@@ -764,8 +853,38 @@ export class UsersService {
                  OR c.codigo_acceso ILIKE :q`,
         { q: `%${query.trim()}%` },
       )
+      .orderBy('a.apellido_paterno', 'ASC')
+      .addOrderBy('a.nombre', 'ASC')
       .limit(10)
       .getRawMany();
+
+    return rows.map(
+      (r): AlumnoSearchResult => ({
+        id: r.id,
+        nombre: r.nombre,
+        apellido_paterno: r.apellido_paterno,
+        apellido_materno: r.apellido_materno,
+        codigo_estudiante: r.codigo_estudiante,
+        foto_storage_key: r.foto_storage_key,
+        numero_documento: r.numero_documento,
+        codigo_acceso: r.codigo_acceso,
+        inclusivo: r.inclusivo === true,
+        grado: r.grado,
+        grado_id: r.grado_id,
+        seccion: r.seccion,
+        seccion_id: r.seccion_id,
+        padre:
+          r.padre_id && r.padre_nombre && r.padre_apellido_paterno
+            ? {
+                id: r.padre_id,
+                nombre: r.padre_nombre,
+                apellido_paterno: r.padre_apellido_paterno,
+                apellido_materno: r.padre_apellido_materno,
+                relacion: r.padre_relacion,
+              }
+            : null,
+      }),
+    );
   }
 
   async searchDocentes(query: string) {
@@ -854,6 +973,7 @@ export class UsersService {
         'a.email             AS email',
         'a.telefono          AS telefono',
         'a.foto_storage_key  AS foto_storage_key',
+        'a.inclusivo         AS inclusivo',
         'c.numero_documento  AS numero_documento',
         'c.tipo_documento    AS tipo_documento',
         'c.codigo_acceso     AS codigo_acceso',
@@ -1204,6 +1324,11 @@ export class UsersService {
       const profileData: Record<string, any> = {};
       for (const k of PROFILE_FIELDS) {
         if (dto[k] !== undefined) profileData[k] = dto[k] || null;
+      }
+      // Solo alumnos tienen `inclusivo`; aceptamos el flag en el DTO común
+      // y lo aplicamos exclusivamente cuando el target es un alumno.
+      if (rol === 'alumno' && typeof dto.inclusivo === 'boolean') {
+        profileData['inclusivo'] = dto.inclusivo;
       }
       if (Object.keys(profileData).length) {
         const repo = this.repoByRol(rol);

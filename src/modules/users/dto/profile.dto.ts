@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MinLength, IsIn } from 'class-validator';
+import { IsOptional, IsString, MinLength, IsIn, IsBoolean } from 'class-validator';
 
 export class UpdateFullDto {
     // ── Documento (solo admin editando otro usuario) ───────────────────────
@@ -22,6 +22,11 @@ export class UpdateFullDto {
     @IsString()
     @IsIn(['padre', 'madre', 'tutor', 'apoderado'])
     relacion?: string;
+
+    // ── Específico de alumno ──────────────────────────────────────────────
+    // Marca al alumno como caso de inclusión educativa (NEE).
+    @IsOptional() @IsBoolean()
+    inclusivo?: boolean;
 
     // ── Contraseña (opcional) ─────────────────────────────────────────────
     // current_password requerido solo cuando isSelf = true
