@@ -22,10 +22,11 @@ import type {
 @Index('idx_citas_convocado_a', ['convocadoAId', 'estado', 'scheduledAt'])
 @Index('idx_citas_alumno_fecha', ['studentId', 'scheduledAt'])
 export class Appointment {
+
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  // ── Partes de la cita ────────────────────────────────────────────
+  // ── Quién convoca ────────────────────────────────────────────────
   @Column({ name: 'convocado_por_id' })
   createdById: string;
 
@@ -33,21 +34,23 @@ export class Appointment {
   @JoinColumn({ name: 'convocado_por_id' })
   createdBy: Cuenta;
 
-  @Column({ name: 'convocado_a_id' })
-  convocadoAId: string;
+  // ── A quién convoca (nullable — legacy en BD) ────────────────────
+  @Column({ name: 'convocado_a_id', nullable: true })
+  convocadoAId: string | null;
 
-  @ManyToOne(() => Cuenta, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => Cuenta, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'convocado_a_id' })
-  convocadoA: Cuenta;
+  convocadoA: Cuenta | null;
 
-  // ── Contexto ─────────────────────────────────────────────────────
-  @Column({ name: 'alumno_id', nullable: true })
-  studentId: string | null;
+  // ── Alumno (NOT NULL en BD) ──────────────────────────────────────
+  @Column({ name: 'alumno_id' })
+  studentId: string;
 
-  @ManyToOne(() => Alumno, { onDelete: 'CASCADE', nullable: true })
+  @ManyToOne(() => Alumno, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'alumno_id' })
-  student: Alumno | null;
+  student: Alumno;
 
+  // ── Padre (nullable — no siempre es el convocado) ────────────────
   @Column({ name: 'padre_id', nullable: true })
   parentId: string | null;
 
@@ -80,6 +83,7 @@ export class Appointment {
   @Column({ name: 'notas_posteriores', type: 'text', nullable: true })
   followUpNotes: string | null;
 
+  // ── Reagendamiento ───────────────────────────────────────────────
   @Column({ name: 'reagendada_de', nullable: true })
   rescheduledFromId: string | null;
 

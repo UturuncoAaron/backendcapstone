@@ -1,6 +1,3 @@
-// Ubicación en tu proyecto: src/modules/auth/constants/modulos.ts
-// Catálogo MAESTRO de módulos. Frontend y backend deben usar EXACTAMENTE estos strings.
-
 export const MODULOS = {
     // ── Comunes a varios roles
     DASHBOARD: 'dashboard',
@@ -23,6 +20,8 @@ export const MODULOS = {
     ASIST_CURSO: 'asist_curso',
     TAREAS_GESTIONAR: 'tareas_gestionar',
     MATERIALES: 'materiales',
+    CITAS_DOCENTE: 'citas_docente',           // ← NUEVO
+    DISPONIBILIDAD_DOCENTE: 'disponibilidad_docente',  // ← NUEVO
 
     // ── Compartido alumno + docente
     FORO: 'foro',
@@ -36,6 +35,7 @@ export const MODULOS = {
     HIJOS: 'hijos',
     LIBRETAS_HIJOS: 'libretas_hijos',
     CITAS_AGENDADAS: 'citas_agendadas',
+    CITAS_PADRE: 'citas_padre',             // ← NUEVO
 
     // ── Psicóloga
     CASOS: 'casos',
@@ -73,6 +73,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
     docente: [
         MODULOS.CURSOS_DOCENTE, MODULOS.NOTAS_CURSO, MODULOS.ASIST_CURSO,
         MODULOS.TAREAS_GESTIONAR, MODULOS.MATERIALES,
+        MODULOS.CITAS_DOCENTE, MODULOS.DISPONIBILIDAD_DOCENTE,  // ← NUEVO
         MODULOS.FORO, MODULOS.CLASES_VIVO,
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,
@@ -88,7 +89,8 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         ...COMUNES,
     ],
     padre: [
-        MODULOS.HIJOS, MODULOS.LIBRETAS_HIJOS, MODULOS.CITAS_AGENDADAS,
+        MODULOS.HIJOS, MODULOS.LIBRETAS_HIJOS,
+        MODULOS.CITAS_AGENDADAS, MODULOS.CITAS_PADRE,  // ← NUEVO
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,
     ],
