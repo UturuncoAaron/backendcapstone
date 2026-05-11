@@ -56,6 +56,17 @@ interface ProfileRow {
   apellido_materno: string | null;
 }
 
+// Forma que la FE consume para describir a una "persona" dentro de la cita.
+// Coincide 1:1 con los campos `convocadoA` / `convocadoPor` del modelo
+// Appointment en eduaula.
+interface AppointmentPersonView {
+  id: string;
+  nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string | null;
+  rol: string;
+}
+
 @Injectable()
 export class AppointmentsService {
   constructor(
@@ -731,41 +742,69 @@ export class AppointmentsService {
     );
   }
 
+  /**
+   * Carga `nombre / apellido_paterno / apellido_materno` desde las tablas
+   * específicas de cada rol (psicologas, alumnos, padres, docentes,
+   * auxiliares, admins) y los inyecta en `convocadoA` y en una propiedad
+   * `convocadoPor` derivada de `createdBy` para que la FE pueda renderizar
+   * la "otra parte" de la cita sin importar quién la convocó.
+   */
   private async enrichWithProfileNames(
     items: Appointment[],
   ): Promise<Appointment[]> {
     if (items.length === 0) return items;
 
-    const ids = Array.from(
-      new Set(items.map((a) => a.convocadoAId).filter(Boolean)),
-    );
-    if (ids.length === 0) return items;
+    const ids = new Set<string>();
+    for (const a of items) {
+      if (a.convocadoAId) ids.add(a.convocadoAId);
+      if (a.createdById) ids.add(a.createdById);
+    }
+    if (ids.size === 0) return items;
 
     const rows = await this.dataSource.query<ProfileRow[]>(
-      `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas  WHERE id = ANY($1::uuid[])
-             UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM alumnos     WHERE id = ANY($1::uuid[])
-             UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM padres      WHERE id = ANY($1::uuid[])
-             UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM docentes    WHERE id = ANY($1::uuid[])
-             UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM auxiliares  WHERE id = ANY($1::uuid[])
-             UNION ALL
-             SELECT id, nombre, apellido_paterno, apellido_materno FROM admins      WHERE id = ANY($1::uuid[])`,
-      [ids],
+      `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas WHERE id = ANY($1::uuid[])
+       UNION ALL
+       SELECT id, nombre, apellido_paterno, apellido_materno FROM alumnos    WHERE id = ANY($1::uuid[])
+       UNION ALL
+       SELECT id, nombre, apellido_paterno, apellido_materno FROM padres     WHERE id = ANY($1::uuid[])
+       UNION ALL
+       SELECT id, nombre, apellido_paterno, apellido_materno FROM docentes   WHERE id = ANY($1::uuid[])
+       UNION ALL
+       SELECT id, nombre, apellido_paterno, apellido_materno FROM auxiliares WHERE id = ANY($1::uuid[])
+       UNION ALL
+       SELECT id, nombre, apellido_paterno, apellido_materno FROM admins     WHERE id = ANY($1::uuid[])`,
+      [Array.from(ids)],
     );
 
     const byId = new Map(rows.map((r) => [r.id, r]));
 
     for (const a of items) {
-      const profile = byId.get(a.convocadoAId);
-      if (profile && a.convocadoA) {
-        Object.assign(a.convocadoA as unknown as Record<string, unknown>, {
-          nombre: profile.nombre,
-          apellido_paterno: profile.apellido_paterno,
-          apellido_materno: profile.apellido_materno,
-        });
+      const target = a as unknown as Record<string, AppointmentPersonView | null>;
+
+      // Convocado (puede ser null si es legacy)
+      if (a.convocadoAId && a.convocadoA) {
+        const profile = byId.get(a.convocadoAId);
+        if (profile) {
+          Object.assign(a.convocadoA as unknown as Record<string, unknown>, {
+            nombre: profile.nombre,
+            apellido_paterno: profile.apellido_paterno,
+            apellido_materno: profile.apellido_materno,
+          });
+        }
+      }
+
+      // Convocador — la FE lo lee como `convocadoPor`, no como `createdBy`.
+      if (a.createdById && a.createdBy) {
+        const profile = byId.get(a.createdById);
+        target['convocadoPor'] = {
+          id: a.createdBy.id,
+          rol: a.createdBy.rol,
+          nombre: profile?.nombre ?? '',
+          apellido_paterno: profile?.apellido_paterno ?? '',
+          apellido_materno: profile?.apellido_materno ?? null,
+        };
+      } else {
+        target['convocadoPor'] = null;
       }
     }
     return items;

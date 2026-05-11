@@ -43,6 +43,9 @@ export const MODULOS = {
     FICHAS: 'fichas',
     DISPONIBILIDAD: 'disponibilidad',
 
+    // ── Agenda propia (roles con disponibilidad: docente, psicologa, admin, auxiliar)
+    AGENDA_PROPIA: 'agenda_propia',
+
     // ── Admin
     USUARIOS: 'usuarios',
     PERIODOS: 'periodos',
@@ -80,6 +83,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
     ],
     auxiliar: [
         MODULOS.ASIST_GENERAL,
+        MODULOS.AGENDA_PROPIA,
         MODULOS.COMUNICADOS,
         ...COMUNES,
     ],
@@ -99,6 +103,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         MODULOS.CURSOS_ADMIN, MODULOS.MATRICULAS, MODULOS.PADRE_HIJO_ADMIN,
         MODULOS.REPORTES_GLOBALES, MODULOS.COMUNICADOS_ADMIN,
         MODULOS.IMPORTAR, MODULOS.AJUSTES,
+        MODULOS.AGENDA_PROPIA,
         MODULOS.MENSAJES,
         ...COMUNES,
     ],
