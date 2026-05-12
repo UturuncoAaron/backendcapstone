@@ -56,6 +56,7 @@ export const MODULOS = {
     COMUNICADOS_ADMIN: 'comunicados_admin',
     IMPORTAR: 'importar',
     AJUSTES: 'ajustes',
+    HISTORICO_ALUMNOS: 'historico_alumnos',
 } as const;
 
 export type Modulo = (typeof MODULOS)[keyof typeof MODULOS];
@@ -102,6 +103,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         MODULOS.CURSOS_ADMIN, MODULOS.MATRICULAS, MODULOS.PADRE_HIJO_ADMIN,
         MODULOS.REPORTES_GLOBALES, MODULOS.COMUNICADOS_ADMIN,
         MODULOS.IMPORTAR, MODULOS.AJUSTES,
+        MODULOS.HISTORICO_ALUMNOS,
         MODULOS.AGENDA_PROPIA,
         MODULOS.MENSAJES,
         ...COMUNES,

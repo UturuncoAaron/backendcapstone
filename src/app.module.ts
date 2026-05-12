@@ -33,6 +33,7 @@ import { MessagingModule } from './modules/messaging/messaging.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { AssistsModule } from './modules/assists/assists.module.js';
 import { AppointmentsModule } from './modules/appointments/appointments.module.js';
+import { HistoricoModule } from './modules/historico/historico.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -108,6 +109,7 @@ const isDev = process.env.NODE_ENV === 'development';
     // ── Admin ─────────────────────────────────────────────────────
     ImportModule,
     ReportsModule,
+    HistoricoModule,
 
     // ── Permissions & Notifications ───────────────────────────────
     PermissionsModule,
@@ -124,4 +126,4 @@ const isDev = process.env.NODE_ENV === 'development';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
