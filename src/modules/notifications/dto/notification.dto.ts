@@ -5,17 +5,8 @@ import {
   Length,
   IsArray,
   ArrayMinSize,
+  IsIn,
 } from 'class-validator';
-
-/**
- * Lista cerrada de tipos. Mantener sincronizada con
- * `eduaula/src/app/core/models/notifications.ts`.
- *
- * Cuando agregues un tipo nuevo:
- *  1. Agregalo acá.
- *  2. Agregalo en el FE.
- *  3. Si tiene icono/color propio, agregalo en el componente Notificaciones.
- */
 export const NOTIFICATION_TYPES = [
   'cita_agendada',
   'cita_confirmada',
@@ -28,6 +19,8 @@ export const NOTIFICATION_TYPES = [
   'tarea_calificada',
   'comunicado_nuevo',
   'contrato_por_vencer',
+  'asistencia_registrada',
+  'inasistencia_alumno',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
@@ -36,6 +29,7 @@ export class CreateNotificationDto {
   accountId: string;
 
   @IsString()
+  @IsIn(NOTIFICATION_TYPES)
   @Length(1, 40)
   tipo: NotificationType;
 
@@ -63,6 +57,7 @@ export class CreateBulkNotificationDto {
   accountIds: string[];
 
   @IsString()
+  @IsIn(NOTIFICATION_TYPES)
   @Length(1, 40)
   tipo: NotificationType;
 

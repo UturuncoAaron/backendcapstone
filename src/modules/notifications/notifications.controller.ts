@@ -5,6 +5,7 @@ import {
   Sse,
   Param,
   Query,
+  Header,
   ParseUUIDPipe,
   UseGuards,
   MessageEvent,
@@ -28,7 +29,6 @@ const ALL_ROLES = [
   'auxiliar',
 ] as const;
 
-/** Heartbeat para mantener viva la conexión SSE detrás de proxies/load balancers. */
 const SSE_HEARTBEAT_MS = 25_000;
 
 @Controller('notifications')
@@ -38,21 +38,12 @@ export class NotificationsController {
   constructor(
     private readonly service: NotificationsService,
     private readonly gateway: NotificationsGateway,
-  ) {}
+  ) { }
 
-  // ──────────────────────────────────────────────────────────────
-  // SSE — stream real-time (NO usa polling)
-  // ──────────────────────────────────────────────────────────────
-
-  /**
-   * Conexión SSE persistente. El cliente abre `EventSource` y recibe:
-   *   - 'connected' (1x al abrir).
-   *   - 'notification' (cada vez que algún módulo emite un evento).
-   *   - 'ping' (cada 25s, para evitar que proxies cierren la conexión).
-   *
-   * El navegador reconecta automáticamente si la conexión se corta.
-   */
   @Sse('stream')
+  @Header('Cache-Control', 'no-cache')
+  @Header('Connection', 'keep-alive')
+  @Header('X-Accel-Buffering', 'no')
   stream(@CurrentUser() user: AuthUser): Observable<MessageEvent> {
     const subject = this.gateway.register(user.id);
 
@@ -72,10 +63,6 @@ export class NotificationsController {
       finalize(() => this.gateway.unregister(user.id)),
     );
   }
-
-  // ──────────────────────────────────────────────────────────────
-  // REST — listado / contadores / marcar leída
-  // ──────────────────────────────────────────────────────────────
 
   @Get()
   getMyNotifications(
@@ -107,5 +94,13 @@ export class NotificationsController {
   @Patch('read-all')
   markAllAsRead(@CurrentUser() user: AuthUser) {
     return this.service.markAllAsRead(user.id);
+  }
+  @Get('health')
+  @Roles('admin')
+  health() {
+    return {
+      sseConnectedAccounts: this.gateway.getConnectedAccounts(),
+      timestamp: new Date().toISOString(),
+    };
   }
 }

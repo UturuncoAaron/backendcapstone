@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { DataSource } from 'typeorm';
 import { NotificationsService } from './notifications.service.js';
 import { NotificationsGateway } from './notifications.gateway.js';
 import { NOTIFICATION_EVENT_NAMES } from './events/notification-events.js';
@@ -9,20 +10,8 @@ import type {
   AppointmentCancelledEvent,
   AnnouncementCreatedEvent,
   TaskCreatedEvent,
+  StudentAbsentEvent,
 } from './events/notification-events.js';
-import { DataSource } from 'typeorm';
-
-/**
- * Listener único que materializa los eventos de dominio en notificaciones
- * persistidas y los empuja por SSE.
- *
- * Diseño:
- *  - Cada `@OnEvent` es chico, expresivo y maneja UN tipo de evento.
- *  - Si la creación de la notificación falla (DB caída, etc.) se loguea
- *    pero no rompe el flujo del emisor (event-emitter es async).
- *  - El gateway hace push best-effort: si el usuario no está conectado,
- *    leerá la notificación la próxima vez que abra la app.
- */
 @Injectable()
 export class NotificationsListener {
   private readonly logger = new Logger(NotificationsListener.name);
@@ -31,7 +20,7 @@ export class NotificationsListener {
     private readonly service: NotificationsService,
     private readonly gateway: NotificationsGateway,
     private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   // ── Citas ───────────────────────────────────────────────────────
 
@@ -66,21 +55,20 @@ export class NotificationsListener {
       this.logger.error('Error al notificar appointment.created', err as Error);
     }
   }
-
   @OnEvent(NOTIFICATION_EVENT_NAMES.APPOINTMENT_STATUS_CHANGED, { async: true })
   async onAppointmentStatusChanged(
     ev: AppointmentStatusChangedEvent,
   ): Promise<void> {
     try {
-      const tipo =
-        ev.nextStatus === 'confirmada' ? 'cita_confirmada' : 'cita_agendada';
+      if (ev.nextStatus !== 'confirmada') return;
+
       for (const accountId of ev.notifyAccountIds) {
-        if (accountId === ev.actorId) continue; // no notificar al que hizo el cambio
+        if (accountId === ev.actorId) continue;
         const notif = await this.service.notify({
           accountId,
-          tipo,
-          titulo: `Cita ${ev.nextStatus}`,
-          cuerpo: `El estado de tu cita cambió a "${ev.nextStatus}"`,
+          tipo: 'cita_confirmada',
+          titulo: 'Cita confirmada',
+          cuerpo: 'La otra parte aceptó tu cita',
           referenceId: ev.appointmentId,
           referenceType: 'cita',
         });
@@ -148,11 +136,6 @@ export class NotificationsListener {
       );
     }
   }
-
-  /**
-   * Traduce los roles destino (`'todos' | 'alumnos' | 'docentes' | ...`)
-   * a UUIDs de cuentas activas.
-   */
   private async resolveAnnouncementTargets(
     destinatarios: string[],
   ): Promise<string[]> {
@@ -203,6 +186,35 @@ export class NotificationsListener {
       }
     } catch (err) {
       this.logger.error('Error al notificar task.created', err as Error);
+    }
+  }
+  @OnEvent(NOTIFICATION_EVENT_NAMES.STUDENT_ABSENT, { async: true })
+  async onStudentAbsent(ev: StudentAbsentEvent): Promise<void> {
+    try {
+      if (ev.parentAccountIds.length === 0) return;
+
+      const fechaStr = ev.fecha.toLocaleDateString('es-PE', {
+        dateStyle: 'long',
+      });
+      const titulo = `${ev.alumnoNombre} no asistió hoy`;
+      const cuerpo = ev.motivo
+        ? `Fecha: ${fechaStr} — Justificación: ${ev.motivo}`
+        : `Fecha: ${fechaStr} — Sin justificación`;
+
+      const created = await this.service.notifyBulk({
+        accountIds: ev.parentAccountIds,
+        tipo: 'inasistencia_alumno',
+        titulo,
+        cuerpo,
+        referenceId: ev.alumnoId,
+        referenceType: 'alumno',
+      });
+
+      for (const notif of created) {
+        this.gateway.pushNotification(notif.accountId, notif);
+      }
+    } catch (err) {
+      this.logger.error('Error al notificar student.absent', err as Error);
     }
   }
 }
