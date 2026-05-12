@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, Brackets, EntityManager } from 'typeorm';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Appointment } from './entities/appointment.entity.js';
 import { Cuenta } from '../users/entities/cuenta.entity.js';
 import {
@@ -26,6 +27,19 @@ import {
   ROLES_WITH_AVAILABILITY,
   RoleWithAvailability,
 } from './appointments.types.js';
+import {
+  AppointmentRole,
+  getAppointmentRule,
+  isDayAllowed,
+  formatAllowedDays,
+  resolveAppointmentRole,
+} from './appointments.rules.js';
+import {
+  NOTIFICATION_EVENT_NAMES,
+  AppointmentCreatedEvent,
+  AppointmentStatusChangedEvent,
+  AppointmentCancelledEvent,
+} from '../notifications/events/notification-events.js';
 
 const WEEK_DAYS = [
   'domingo',
@@ -47,6 +61,12 @@ const MIN_LEAD_MINUTES = 15;
 interface CallerContext {
   id: string;
   rol: string;
+}
+
+interface AccountSummary {
+  id: string;
+  rol: string;
+  cargo: string | null;
 }
 
 interface ProfileRow {
@@ -79,6 +99,7 @@ export class AppointmentsService {
     @InjectRepository(PsychologistStudent)
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
+    private readonly events: EventEmitter2,
   ) {}
 
   // ════════════════════════════════════════════════════════════════
@@ -92,6 +113,13 @@ export class AppointmentsService {
     const scheduledAt = new Date(dto.scheduledAt);
     this.assertScheduledAtIsValid(scheduledAt);
 
+    // ── Regla #3 — los alumnos NO pueden agendar citas.
+    if (caller.rol === 'alumno') {
+      throw new ForbiddenException(
+        'Los alumnos no pueden agendar citas. Pide a tu padre/tutor que lo haga.',
+      );
+    }
+
     if (!dto.studentId && !dto.parentId) {
       throw new BadRequestException(
         'Debe indicar al menos un alumno o un padre/tutor',
@@ -102,13 +130,19 @@ export class AppointmentsService {
       throw new BadRequestException('No puedes convocarte a ti mismo');
     }
 
-    const convocadoA = await this.cuentaRepo.findOne({
-      where: { id: dto.convocadoAId, activo: true },
-      select: ['id', 'rol'],
-    });
+    const convocadoA = await this.loadAccountSummary(dto.convocadoAId);
     if (!convocadoA) {
       throw new NotFoundException(
         'La cuenta convocada no existe o está inactiva',
+      );
+    }
+
+    // ── Regla #3 — no se puede convocar a un alumno; las citas son entre
+    //              padres y staff. Si alguien necesita hablar SOBRE un
+    //              alumno, se referencia con `studentId`.
+    if (convocadoA.rol === 'alumno') {
+      throw new BadRequestException(
+        'No se puede convocar a un alumno. Las citas son entre padres/tutores y personal del colegio.',
       );
     }
 
@@ -129,15 +163,27 @@ export class AppointmentsService {
       await this.assertParentBelongsToStudent(dto.parentId, dto.studentId);
     }
 
-    const durationMin = dto.durationMin ?? 30;
+    // ── Reglas por rol — duración fija + días permitidos ─────────
+    const role = this.toAppointmentRole(convocadoA);
+    const rule = getAppointmentRule(role);
+    const durationMin = this.resolveDuration(role, rule, dto.durationMin);
+
+    if (!isDayAllowed(rule, scheduledAt)) {
+      throw new BadRequestException(
+        `${rule.label} atiende sólo ${formatAllowedDays(rule)}`,
+      );
+    }
 
     // 1) El slot debe caer dentro de la disponibilidad del CONVOCADO
-    //    (psicóloga / docente / admin / auxiliar).
+    //    (psicóloga / docente / admin / auxiliar). Si todavía no configuró
+    //    su agenda, caemos al horario por defecto que define la regla del rol.
     if (hasAvailability(convocadoA.rol)) {
       await this.assertSlotFitsAvailability(
         convocadoA.id,
         scheduledAt,
         durationMin,
+        undefined,
+        rule.defaultHours,
       );
     }
 
@@ -145,6 +191,8 @@ export class AppointmentsService {
     //    cuando este tiene calendario propio (cierra el agujero por el que
     //    un docente podía citar a un padre fuera de su propio horario).
     if (hasAvailability(caller.rol) && caller.id !== convocadoA.id) {
+      // Para el convocante usamos sus propios bloques sin fallback —
+      // si está creando una cita, ya sabe en qué horario atiende.
       await this.assertSlotFitsAvailability(
         caller.id,
         scheduledAt,
@@ -181,6 +229,9 @@ export class AppointmentsService {
         throw new ConflictException('Ese horario ya está ocupado');
       }
 
+      // Psicología es "cita directa" → arranca confirmada.
+      const initialEstado = rule.directBooking ? 'confirmada' : 'pendiente';
+
       const appointment = em.create(Appointment, {
         createdById: caller.id,
         convocadoAId: convocadoA.id,
@@ -191,7 +242,7 @@ export class AppointmentsService {
         motivo: dto.motivo,
         scheduledAt,
         durationMin,
-        estado: 'pendiente',
+        estado: initialEstado,
         priorNotes: dto.priorNotes ?? null,
       });
       const saved = await em.save(appointment);
@@ -209,8 +260,94 @@ export class AppointmentsService {
         }
       }
 
+      this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CREATED, {
+        appointmentId: saved.id,
+        createdById: caller.id,
+        convocadoAId: convocadoA.id,
+        parentId: dto.parentId ?? null,
+        studentId: dto.studentId ?? null,
+        scheduledAt,
+        motivo: dto.motivo,
+        convocadoARole: convocadoA.rol,
+      } satisfies AppointmentCreatedEvent);
+
       return saved;
     });
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Helpers — reglas por rol
+  // ════════════════════════════════════════════════════════════════
+
+  private async loadAccountSummary(id: string): Promise<AccountSummary | null> {
+    const row = await this.dataSource.query<
+      { id: string; rol: string; cargo: string | null }[]
+    >(
+      `SELECT c.id, c.rol::text AS rol, a.cargo
+         FROM cuentas c
+         LEFT JOIN admins a ON a.id = c.id
+        WHERE c.id = $1 AND c.activo = TRUE
+        LIMIT 1`,
+      [id],
+    );
+    return row[0] ?? null;
+  }
+
+  private toAppointmentRole(account: AccountSummary): AppointmentRole {
+    return resolveAppointmentRole(account.rol as never, account.cargo);
+  }
+
+  private resolveDuration(
+    role: AppointmentRole,
+    rule: ReturnType<typeof getAppointmentRule>,
+    requested: number | undefined,
+  ): number {
+    if (rule.fixedDurationMin !== null) {
+      // Si el cliente mandó otra cosa, lo silenciamos y respetamos la regla.
+      return rule.fixedDurationMin;
+    }
+    const value = requested ?? 30;
+    if (value < 15) {
+      throw new BadRequestException(
+        'La duración mínima de una cita es 15 minutos',
+      );
+    }
+    if (value > rule.maxDurationMin) {
+      throw new BadRequestException(
+        `Una cita con ${rule.label} no puede durar más de ${rule.maxDurationMin} minutos`,
+      );
+    }
+    return value;
+  }
+
+  /**
+   * Devuelve las reglas que aplican para un convocado dado (o para todos los
+   * roles, si no se pasa `targetId`). Lo usa el FE para configurar el dialog.
+   */
+  async getRulesForTarget(targetId?: string): Promise<{
+    role: AppointmentRole;
+    fixedDurationMin: number | null;
+    maxDurationMin: number;
+    allowedDays: string[];
+    defaultHours: { start: string; end: string };
+    directBooking: boolean;
+    label: string;
+  } | null> {
+    if (!targetId) return null;
+    const acc = await this.loadAccountSummary(targetId);
+    if (!acc) return null;
+    if (acc.rol === 'alumno' || acc.rol === 'padre') return null;
+    const role = this.toAppointmentRole(acc);
+    const rule = getAppointmentRule(role);
+    return {
+      role,
+      fixedDurationMin: rule.fixedDurationMin,
+      maxDurationMin: rule.maxDurationMin,
+      allowedDays: [...rule.allowedDays],
+      defaultHours: { ...rule.defaultHours },
+      directBooking: rule.directBooking,
+      label: rule.label,
+    };
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -362,8 +499,10 @@ export class AppointmentsService {
       appt.rescheduledFromId = dto.rescheduledFromId;
     }
 
+    let previousStatus: string | null = null;
     if (dto.estado && dto.estado !== appt.estado) {
       this.assertStateTransition(caller, appt, dto.estado);
+      previousStatus = appt.estado;
       appt.estado = dto.estado;
       if (dto.estado === 'cancelada') {
         appt.cancelledAt = new Date();
@@ -371,7 +510,20 @@ export class AppointmentsService {
       }
     }
 
-    return this.appointmentRepo.save(appt);
+    const saved = await this.appointmentRepo.save(appt);
+
+    if (previousStatus) {
+      const notifyAccountIds = this.recipientsOf(saved);
+      this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_STATUS_CHANGED, {
+        appointmentId: saved.id,
+        actorId: caller.id,
+        previousStatus,
+        nextStatus: saved.estado,
+        notifyAccountIds,
+      } satisfies AppointmentStatusChangedEvent);
+    }
+
+    return saved;
   }
 
   async cancelAppointment(
@@ -403,7 +555,25 @@ export class AppointmentsService {
     appt.cancelledAt = new Date();
     appt.cancelledById = caller.id;
     appt.cancelReason = dto.motivo ?? null;
-    return this.appointmentRepo.save(appt);
+    const saved = await this.appointmentRepo.save(appt);
+
+    this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CANCELLED, {
+      appointmentId: saved.id,
+      actorId: caller.id,
+      reason: dto.motivo ?? null,
+      notifyAccountIds: this.recipientsOf(saved),
+    } satisfies AppointmentCancelledEvent);
+
+    return saved;
+  }
+
+  /** Cuentas que deben enterarse de un cambio en la cita. */
+  private recipientsOf(appt: Appointment): string[] {
+    const ids = new Set<string>();
+    ids.add(appt.createdById);
+    ids.add(appt.convocadoAId);
+    if (appt.parentId) ids.add(appt.parentId);
+    return Array.from(ids);
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -427,7 +597,17 @@ export class AppointmentsService {
     }
 
     appt.estado = 'confirmada';
-    return this.appointmentRepo.save(appt);
+    const saved = await this.appointmentRepo.save(appt);
+
+    this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_STATUS_CHANGED, {
+      appointmentId: saved.id,
+      actorId: caller.id,
+      previousStatus: 'pendiente',
+      nextStatus: 'confirmada',
+      notifyAccountIds: this.recipientsOf(saved),
+    } satisfies AppointmentStatusChangedEvent);
+
+    return saved;
   }
 
   async rejectAppointment(
@@ -456,7 +636,16 @@ export class AppointmentsService {
     appt.cancelledAt = new Date();
     appt.cancelledById = caller.id;
     appt.cancelReason = motivo.trim();
-    return this.appointmentRepo.save(appt);
+    const saved = await this.appointmentRepo.save(appt);
+
+    this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CANCELLED, {
+      appointmentId: saved.id,
+      actorId: caller.id,
+      reason: motivo.trim(),
+      notifyAccountIds: this.recipientsOf(saved),
+    } satisfies AppointmentCancelledEvent);
+
+    return saved;
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -660,6 +849,7 @@ export class AppointmentsService {
     start: Date,
     durationMin: number,
     ignoreAppointmentId?: string,
+    fallback?: { start: string; end: string },
   ): Promise<void> {
     const end = new Date(start.getTime() + durationMin * 60_000);
     const dayName = WEEK_DAYS[start.getDay()];
@@ -670,17 +860,28 @@ export class AppointmentsService {
 
     // Soporta múltiples bloques en un mismo día (ej. 08-12 y 14-18).
     const bloques = await this.availabilityRepo.find({
-      where: { cuentaId, diaSemana: dayName as DiaSemana, activo: true },
+      where: { cuentaId, diaSemana: dayName, activo: true },
       order: { horaInicio: 'ASC' },
     });
 
-    if (bloques.length === 0) {
+    // Si el profesional aún no declaró su disponibilidad propia y el caller
+    // nos dio un horario por defecto del rol (psicología/docente/director),
+    // lo usamos como bloque virtual. Así el sistema funciona out-of-the-box
+    // hasta que el profesional configure su agenda real.
+    const virtualBlocks =
+      bloques.length > 0
+        ? bloques.map((d) => ({ horaInicio: d.horaInicio, horaFin: d.horaFin }))
+        : fallback
+          ? [{ horaInicio: fallback.start, horaFin: fallback.end }]
+          : [];
+
+    if (virtualBlocks.length === 0) {
       throw new BadRequestException(
         'El profesional no tiene disponibilidad ese día',
       );
     }
 
-    const fits = bloques.some((d) => {
+    const fits = virtualBlocks.some((d) => {
       const [hS, mS] = d.horaInicio.split(':').map(Number);
       const [hE, mE] = d.horaFin.split(':').map(Number);
 
@@ -693,7 +894,7 @@ export class AppointmentsService {
     });
 
     if (!fits) {
-      const ranges = bloques
+      const ranges = virtualBlocks
         .map((d) => `${d.horaInicio} - ${d.horaFin}`)
         .join(', ');
       throw new BadRequestException(
@@ -779,7 +980,10 @@ export class AppointmentsService {
     const byId = new Map(rows.map((r) => [r.id, r]));
 
     for (const a of items) {
-      const target = a as unknown as Record<string, AppointmentPersonView | null>;
+      const target = a as unknown as Record<
+        string,
+        AppointmentPersonView | null
+      >;
 
       // Convocado (puede ser null si es legacy)
       if (a.convocadoAId && a.convocadoA) {

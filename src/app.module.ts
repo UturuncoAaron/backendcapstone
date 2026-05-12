@@ -3,7 +3,9 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
-import { Injectable, CanActivate } from '@nestjs/common';
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule as NestScheduleModule } from '@nestjs/schedule';
 
 import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
@@ -35,7 +37,7 @@ import { HistoricoModule } from './modules/historico/historico.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
-  canActivate(): boolean {
+  canActivate(_ctx: ExecutionContext): boolean {
     return true;
   }
 }
@@ -45,6 +47,19 @@ const isDev = process.env.NODE_ENV === 'development';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+
+    // ── Infraestructura interna ───────────────────────────────────
+    // EventEmitter desacopla productores (citas/comunicados/tareas) de
+    // consumidores (NotificationsListener). ScheduleModule habilita los
+    // @Cron decorators usados para la limpieza de notificaciones.
+    EventEmitterModule.forRoot({
+      wildcard: true,
+      delimiter: '.',
+      maxListeners: 20,
+      verboseMemoryLeak: true,
+    }),
+    NestScheduleModule.forRoot(),
+
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (cfg: ConfigService) => ({
