@@ -37,6 +37,24 @@ export class ParentPortalController {
         return this.service.getChildAttendance(user.id, alumnoId);
     }
 
+    // GET /api/parent/children/:id/attendance-general
+    @Get('children/:id/attendance-general')
+    getChildAttendanceGeneral(
+        @Param('id', ParseUUIDPipe) alumnoId: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.getChildAttendanceGeneral(user.id, alumnoId);
+    }
+
+    // GET /api/parent/children/:id/schedule
+    @Get('children/:id/schedule')
+    getChildSchedule(
+        @Param('id', ParseUUIDPipe) alumnoId: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.getChildSchedule(user.id, alumnoId);
+    }
+
     // GET /api/parent/children/:id/libretas
     @Get('children/:id/libretas')
     getChildLibretas(
