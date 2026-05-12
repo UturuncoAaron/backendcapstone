@@ -21,23 +21,28 @@ export class GradesController {
     // GET /api/grades/my?anio=2025
     @Get('my')
     @Roles('alumno')
-    getMyGrades(@CurrentUser() user: AuthUser, @Query('anio') anio?: string) {
-        return this.grades.getGradesByAlumno(
+    async getMyGrades(
+        @CurrentUser() user: AuthUser,
+        @Query('anio') anio?: string,
+    ) {
+        const data = await this.grades.getGradesByAlumno(
             user.id, anio ? parseInt(anio, 10) : undefined,
         );
+        return { success: true, data };
     }
 
     // GET /api/grades/alumno/:alumnoId?anio=2025
     @Get('alumno/:alumnoId')
     @Roles('docente', 'admin', 'padre')
-    getGradesByAlumno(
+    async getGradesByAlumno(
         @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: AuthUser,
         @Query('anio') anio?: string,
     ) {
-        return this.grades.getGradesByAlumnoForUser(
+        const data = await this.grades.getGradesByAlumnoForUser(
             alumnoId, user, anio ? parseInt(anio, 10) : undefined,
         );
+        return { success: true, data };
     }
 
     // GET /api/grades/course/:cursoId?periodoId=<int>
@@ -65,11 +70,14 @@ export class GradesController {
     // GET /api/grades/:id
     @Get(':id')
     @Roles('docente', 'admin', 'padre', 'alumno')
-    getOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    getOne(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) {
         return this.grades.getOneFor(id, user);
     }
 
-    // POST /api/grades   (409 si ya existe)
+    // POST /api/grades
     @Post()
     @Roles('docente', 'admin')
     create(@Body() dto: CreateGradeDto, @CurrentUser() user: AuthUser) {
@@ -102,7 +110,10 @@ export class GradesController {
     @Delete(':id')
     @HttpCode(204)
     @Roles('docente', 'admin')
-    remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    remove(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) {
         return this.grades.remove(id, user);
     }
 
