@@ -100,7 +100,7 @@ export class AppointmentsService {
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
     private readonly events: EventEmitter2,
-  ) {}
+  ) { }
 
   // ════════════════════════════════════════════════════════════════
   // CREATE

@@ -20,14 +20,13 @@ export const MODULOS = {
     ASIST_CURSO: 'asist_curso',
     TAREAS_GESTIONAR: 'tareas_gestionar',
     MATERIALES: 'materiales',
-    CITAS_DOCENTE: 'citas_docente',           // ← NUEVO
-    DISPONIBILIDAD_DOCENTE: 'disponibilidad_docente',  // ← NUEVO
+    CITAS_DOCENTE: 'citas_docente',
+    DISPONIBILIDAD_DOCENTE: 'disponibilidad_docente',
 
-    // ── Compartido alumno + docente
+
     FORO: 'foro',
     CLASES_VIVO: 'clases_vivo',
 
-    // ── Tutor (docente con secciones.tutor_id) — extras automáticos
     TUTORIA: 'tutoria',
     ASIST_GENERAL: 'asist_general',
 
@@ -35,7 +34,7 @@ export const MODULOS = {
     HIJOS: 'hijos',
     LIBRETAS_HIJOS: 'libretas_hijos',
     CITAS_AGENDADAS: 'citas_agendadas',
-    CITAS_PADRE: 'citas_padre',             // ← NUEVO
+    CITAS_PADRE: 'citas_padre',
 
     // ── Psicóloga
     CASOS: 'casos',
@@ -76,7 +75,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
     docente: [
         MODULOS.CURSOS_DOCENTE, MODULOS.NOTAS_CURSO, MODULOS.ASIST_CURSO,
         MODULOS.TAREAS_GESTIONAR, MODULOS.MATERIALES,
-        MODULOS.CITAS_DOCENTE, MODULOS.DISPONIBILIDAD_DOCENTE,  // ← NUEVO
+        MODULOS.CITAS_DOCENTE, MODULOS.DISPONIBILIDAD_DOCENTE,
         MODULOS.FORO, MODULOS.CLASES_VIVO,
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,
