@@ -4,8 +4,17 @@ export interface HijoItem {
     alumnoId: string;
     nombre: string;
     apellidoPaterno: string;
+    apellidoMaterno: string | null;
     grado: string;
     seccion: string;
+    seccionId: string;
+    codigoEstudiante: string;
+    fotoStorageKey: string | null;
+    // Métricas rápidas
+    promedioGeneral: number | null;
+    porcentajeAsistencia: number | null;
+    citasPendientes: number;
+    asistioHoy: boolean | null;
 }
 
 export interface CitaItem {
@@ -23,6 +32,7 @@ export interface LibretaItem {
     periodoNombre: string;
     storageKey: string;
     creadaEn: Date;
+    alumnoNombre: string;
 }
 
 export interface PadreDashboardDto {
