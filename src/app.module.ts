@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Injectable, CanActivate } from '@nestjs/common';
 
 import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
@@ -31,10 +31,13 @@ import { MessagingModule } from './modules/messaging/messaging.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { AssistsModule } from './modules/assists/assists.module.js';
 import { AppointmentsModule } from './modules/appointments/appointments.module.js';
+import { HistoricoModule } from './modules/historico/historico.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
-  canActivate(_ctx: ExecutionContext): boolean { return true; }
+  canActivate(): boolean {
+    return true;
+  }
 }
 
 const isDev = process.env.NODE_ENV === 'development';
@@ -91,6 +94,7 @@ const isDev = process.env.NODE_ENV === 'development';
     // ── Admin ─────────────────────────────────────────────────────
     ImportModule,
     ReportsModule,
+    HistoricoModule,
 
     // ── Permissions & Notifications ───────────────────────────────
     PermissionsModule,
