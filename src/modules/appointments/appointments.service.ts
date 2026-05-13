@@ -15,6 +15,13 @@ import {
   DiaSemana,
 } from './entities/account-availability.entity.js';
 import { PsychologistStudent } from '../psychology/entities/psychologist-student.entity.js';
+
+/**
+ * Mapeo `Date.getDay()` (0=domingo … 6=sábado) → nombre de día usado en
+ * `disponibilidad_cuenta.dia_semana`. El domingo no es laboral; se
+ * representa como `null` para que `fitsInAvailability` devuelva false
+ * sin tener que reservar un alias falso.
+ */
 import {
   CreateAppointmentDto,
   UpdateAppointmentDto,
@@ -86,6 +93,22 @@ interface AppointmentPersonView {
   apellido_materno: string | null;
   rol: string;
 }
+
+/**
+ * Mapeo `Date.getDay()` (0=domingo … 6=sábado) → nombre de día usado en
+ * `disponibilidad_cuenta.dia_semana`. El domingo no es laboral; se
+ * representa como `null` para que `fitsInAvailability` devuelva false
+ * sin tener que reservar un alias falso.
+ */
+const DIAS_SEMANA_INDEXED: readonly (DiaSemana | null)[] = [
+  null, // domingo
+  'lunes',
+  'martes',
+  'miercoles',
+  'jueves',
+  'viernes',
+  'sabado',
+] as const;
 
 @Injectable()
 export class AppointmentsService {
@@ -719,7 +742,16 @@ export class AppointmentsService {
     }));
   }
 
-  /** Reemplaza atómicamente toda la disponibilidad del usuario. */
+  /**
+   * Reemplaza atómicamente toda la disponibilidad del usuario.
+   *
+   * Además **cancela en cascada** todas las citas futuras (pendiente o
+   * confirmada) en las que `cuentaId` es el convocado y que ya no caen
+   * dentro de un bloque de disponibilidad activo. Si `items=[]`, todas
+   * las citas futuras del usuario se cancelan.
+   *
+   * Las citas pasadas no se tocan (historial intacto).
+   */
   async replaceAvailability(
     cuentaId: string,
     items: { diaSemana: string; horaInicio: string; horaFin: string }[],
@@ -727,19 +759,81 @@ export class AppointmentsService {
     return this.dataSource.transaction(async (em) => {
       await em.delete(AccountAvailability, { cuentaId });
 
-      if (items.length === 0) return [];
+      let saved: AccountAvailability[] = [];
 
-      const rows = items.map((it) =>
-        em.create(AccountAvailability, {
-          cuentaId,
-          diaSemana: it.diaSemana as DiaSemana,
-          horaInicio: it.horaInicio,
-          horaFin: it.horaFin,
-          activo: true,
-        }),
-      );
+      if (items.length > 0) {
+        const rows = items.map((it) =>
+          em.create(AccountAvailability, {
+            cuentaId,
+            diaSemana: it.diaSemana as DiaSemana,
+            horaInicio: it.horaInicio,
+            horaFin: it.horaFin,
+            activo: true,
+          }),
+        );
+        saved = await em.save(rows);
+      }
 
-      return em.save(rows);
+      // ── Cascada: cancelar citas que ya no encajan ─────────────────
+      const futureAppts = await em
+        .getRepository(Appointment)
+        .createQueryBuilder('a')
+        .where('a.convocado_a_id = :cuentaId', { cuentaId })
+        .andWhere('a.fecha_hora > NOW()')
+        .andWhere('a.estado IN (:...states)', {
+          states: ['pendiente', 'confirmada'],
+        })
+        .getMany();
+
+      const cancelled: Appointment[] = [];
+      for (const appt of futureAppts) {
+        if (this.fitsInAvailability(appt, saved)) continue;
+        appt.estado = 'cancelada';
+        appt.cancelledAt = new Date();
+        appt.cancelledById = cuentaId;
+        appt.cancelReason =
+          'Cancelada automáticamente al vaciar/actualizar la disponibilidad del profesional';
+        cancelled.push(appt);
+      }
+      if (cancelled.length) {
+        await em.getRepository(Appointment).save(cancelled);
+      }
+
+      // Emitir eventos para que el usuario afectado vea la cancelación.
+      for (const c of cancelled) {
+        this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CANCELLED, {
+          appointmentId: c.id,
+          actorId: cuentaId,
+          reason: c.cancelReason,
+          notifyAccountIds: this.recipientsOf(c),
+        } satisfies AppointmentCancelledEvent);
+      }
+
+      return saved;
+    });
+  }
+
+  /**
+   * ¿Una cita encaja dentro de algún bloque de disponibilidad activo?
+   * Compara el día de la semana del slot y la franja horaria.
+   */
+  private fitsInAvailability(
+    appt: Appointment,
+    availability: AccountAvailability[],
+  ): boolean {
+    if (availability.length === 0) return false;
+    const dt = new Date(appt.scheduledAt);
+    const dia = DIAS_SEMANA_INDEXED[dt.getDay()];
+    if (!dia) return false;
+    const startMin = dt.getHours() * 60 + dt.getMinutes();
+    const endMin = startMin + (appt.durationMin ?? 30);
+    return availability.some((a) => {
+      if (a.diaSemana !== dia) return false;
+      const [hI, mI] = a.horaInicio.split(':').map(Number);
+      const [hF, mF] = a.horaFin.split(':').map(Number);
+      const aStart = hI * 60 + mI;
+      const aEnd = hF * 60 + mF;
+      return startMin >= aStart && endMin <= aEnd;
     });
   }
 
