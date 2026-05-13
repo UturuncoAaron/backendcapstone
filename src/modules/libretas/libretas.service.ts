@@ -4,8 +4,14 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Libreta, LibretaTipo } from './entities/libreta.entity.js';
+import { LibretaLectura } from './entities/libreta-lectura.entity.js';
 import { StorageService } from '../storage/storage.service.js';
 import { bestMatch, type AlumnoCandidate } from './matching.util.js';
+import { PermissionsService } from '../permissions/permissions.service.js';
+
+// Permission grant: admin entrega esta key a un docente/auxiliar para que
+// pueda subir libretas de PADRE (las del alumno las sube el docente por defecto).
+export const PERMISO_LIBRETAS_SUBIR_PADRE = { modulo: 'libretas', accion: 'subir_padre' } as const;
 
 interface UpsertLibretaDto {
     cuenta_id: string;
@@ -51,19 +57,83 @@ export class LibretasService {
     constructor(
         @InjectRepository(Libreta)
         private readonly libretaRepo: Repository<Libreta>,
+        @InjectRepository(LibretaLectura)
+        private readonly lecturaRepo: Repository<LibretaLectura>,
         private readonly storageService: StorageService,
         private readonly dataSource: DataSource,
+        private readonly permissions: PermissionsService,
     ) { }
 
-    async findByCuenta(cuentaId: string, tipo: LibretaTipo) {
+    // ──────────────────────────────────────────────────────────────────────
+    // LECTURAS: tracking de "padre/alumno vio la libreta"
+    // ──────────────────────────────────────────────────────────────────────
+
+    /** Marca una libreta como leída por el usuario actual (idempotente). */
+    async marcarVista(libretaId: string, lectorId: string): Promise<{ vista_en: Date }> {
+        const libreta = await this.libretaRepo.findOne({ where: { id: libretaId } });
+        if (!libreta) throw new NotFoundException('Libreta no encontrada');
+
+        const existing = await this.lecturaRepo.findOne({
+            where: { libreta_id: libretaId, lector_id: lectorId },
+        });
+        if (existing) return { vista_en: existing.vista_en };
+
+        const row = await this.lecturaRepo.save(this.lecturaRepo.create({
+            libreta_id: libretaId, lector_id: lectorId,
+        }));
+        return { vista_en: row.vista_en };
+    }
+
+    /** Para admin/docente: lista de lectores con la fecha en que vieron la libreta. */
+    async listLecturas(libretaId: string) {
+        return this.dataSource.query<{
+            lector_id: string;
+            nombre: string | null;
+            apellidos: string | null;
+            rol: string;
+            vista_en: Date;
+        }[]>(
+            `SELECT
+                ll.lector_id,
+                COALESCE(p.nombre, a.nombre)                                   AS nombre,
+                CONCAT_WS(' ',
+                    COALESCE(p.apellido_paterno, a.apellido_paterno),
+                    COALESCE(p.apellido_materno, a.apellido_materno))          AS apellidos,
+                c.rol,
+                ll.vista_en
+             FROM libretas_lecturas ll
+             JOIN cuentas c ON c.id = ll.lector_id
+             LEFT JOIN padres  p ON p.id = c.id
+             LEFT JOIN alumnos a ON a.id = c.id
+             WHERE ll.libreta_id = $1
+             ORDER BY ll.vista_en DESC`,
+            [libretaId],
+        );
+    }
+
+    /** Bulk: dado un set de libretas, devuelve set de ids ya leídas por lectorId. */
+    async getLeidasSet(libretaIds: string[], lectorId: string): Promise<Set<string>> {
+        if (!libretaIds.length) return new Set();
+        const rows = await this.lecturaRepo.find({
+            where: libretaIds.map(id => ({ libreta_id: id, lector_id: lectorId })),
+            select: ['libreta_id'],
+        });
+        return new Set(rows.map(r => r.libreta_id));
+    }
+
+    async findByCuenta(cuentaId: string, tipo: LibretaTipo, lectorId?: string) {
         const libretas = await this.libretaRepo.find({
             where: { cuenta_id: cuentaId, tipo },
             relations: ['periodo'],
             order: { periodo: { anio: 'DESC', bimestre: 'DESC' } },
         });
+        const leidas = lectorId
+            ? await this.getLeidasSet(libretas.map(l => l.id), lectorId)
+            : new Set<string>();
         return Promise.all(libretas.map(async (l) => ({
             ...l,
             url: await this.storageService.getSignedUrl(l.storage_key),
+            leida: leidas.has(l.id),
         })));
     }
 
@@ -75,7 +145,7 @@ export class LibretasService {
         if (!vinculo.length) {
             throw new ForbiddenException('No tienes acceso a las libretas de este alumno');
         }
-        return this.findByCuenta(alumnoId, 'alumno');
+        return this.findByCuenta(alumnoId, 'alumno', padreId);
     }
 
     async findByCuentaAndPeriodo(cuentaId: string, periodoId: string, tipo: LibretaTipo) {
@@ -202,10 +272,31 @@ export class LibretasService {
         return { message: 'Libreta eliminada correctamente' };
     }
 
+    /**
+     * Reglas de autoría:
+     *   • Libreta del ALUMNO: la sube el tutor docente de la sección o admin.
+     *   • Libreta del PADRE : la sube admin, o cualquier cuenta a quien admin
+     *     le haya otorgado el permiso explícito `libretas:subir_padre`
+     *     (típicamente un docente designado por dirección/secretaría).
+     */
     private async assertCanManage(userId: string, rol: string, cuentaId: string, tipo: LibretaTipo): Promise<void> {
         if (rol === 'admin') return;
+
+        if (tipo === 'padre') {
+            const tienePermiso = await this.permissions.hasPermiso(
+                userId,
+                PERMISO_LIBRETAS_SUBIR_PADRE.modulo,
+                PERMISO_LIBRETAS_SUBIR_PADRE.accion,
+            );
+            if (!tienePermiso) {
+                throw new ForbiddenException(
+                    'Para subir la libreta del padre necesitas permiso explícito otorgado por dirección',
+                );
+            }
+            return;
+        }
+
         if (rol !== 'docente') throw new ForbiddenException('No tienes permiso para gestionar libretas');
-        if (tipo === 'padre') throw new ForbiddenException('Solo dirección puede gestionar la libreta del padre');
         const ok = await this.dataSource.query(
             `SELECT 1 FROM matriculas m
              JOIN secciones s ON s.id = m.seccion_id

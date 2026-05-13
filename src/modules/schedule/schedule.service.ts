@@ -76,6 +76,33 @@ export class ScheduleService {
         return { course: course.nombre, slots_saved: slots.length };
     }
 
+    // ── Horario para un alumno (secciones donde está matriculado en el periodo activo) ──
+    async getHorarioForAlumno(alumnoId: string) {
+        const periodoActivo = await this.db.query<{ id: string }[]>(
+            `SELECT id FROM periodos WHERE activo = TRUE LIMIT 1`,
+        );
+        if (!periodoActivo.length) return [];
+
+        const enrollment = await this.db.query<{ seccion_id: string }[]>(
+            `SELECT seccion_id FROM matriculas
+             WHERE alumno_id = $1 AND periodo_id = $2 AND activo = TRUE
+             LIMIT 1`,
+            [alumnoId, periodoActivo[0].id],
+        );
+        if (!enrollment.length) return [];
+
+        return this.getHorarioBySeccion(enrollment[0].seccion_id, periodoActivo[0].id);
+    }
+
+    // ── Verificación de vínculo padre-alumno ──────────────────────
+    async isPadreDeAlumno(padreId: string, alumnoId: string): Promise<boolean> {
+        const rows = await this.db.query(
+            `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
+            [padreId, alumnoId],
+        );
+        return rows.length > 0;
+    }
+
     // ── DELETE single slot ────────────────────────────────────────
     async deleteFranja(slotId: number) {
         const slot = await this.scheduleRepo.findOne({ where: { id: slotId } });

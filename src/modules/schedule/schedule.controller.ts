@@ -1,7 +1,7 @@
 import {
     Controller, Get, Put, Delete,
     Param, Body, ParseIntPipe, ParseUUIDPipe,
-    UseGuards,
+    UseGuards, ForbiddenException,
 } from '@nestjs/common';
 // NOTE: seccion_id y periodo_id en BD son UUID (ver entidades section.entity.ts y
 // period.entity.ts). Antes se usaba ParseIntPipe acá y reventaba con 400.
@@ -10,11 +10,41 @@ import { UpsertFranjaDto } from './dto/schedule.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller('schedule')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ScheduleController {
     constructor(private readonly scheduleService: ScheduleService) { }
+
+    /**
+     * GET /api/schedule/me
+     * Horario del usuario autenticado (alumno: sección matriculada
+     * en el periodo activo).
+     */
+    @Get('me')
+    @Roles('alumno')
+    getMyHorario(@CurrentUser() user: AuthUser) {
+        return this.scheduleService.getHorarioForAlumno(user.id);
+    }
+
+    /**
+     * GET /api/schedule/alumno/:alumnoId
+     * Padre/admin consultan el horario del alumno por ID (con verificación de vínculo).
+     */
+    @Get('alumno/:alumnoId')
+    @Roles('padre', 'admin')
+    async getHorarioAlumno(
+        @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        if (user.rol === 'padre') {
+            const ok = await this.scheduleService.isPadreDeAlumno(user.id, alumnoId);
+            if (!ok) throw new ForbiddenException('No tienes acceso al horario de este alumno');
+        }
+        return this.scheduleService.getHorarioForAlumno(alumnoId);
+    }
 
     /**
      * GET /api/schedule/section/:seccionId/period/:periodoId

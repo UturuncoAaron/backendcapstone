@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { In } from 'typeorm';
 import { Forum } from './entities/forum.entity.js';
 import { ForumPost } from './entities/forum-post.entity.js';
 import { SemanasService } from '../semanas/semanas.service.js';
+import { AttachmentsService } from '../attachments/attachments.service.js';
 
 export interface CreateForumDto {
     titulo: string;
@@ -20,7 +22,50 @@ export class ForumService {
         @InjectRepository(ForumPost)
         private readonly postRepo: Repository<ForumPost>,
         private readonly semanasService: SemanasService,
+        private readonly attachments: AttachmentsService,
     ) { }
+
+    /**
+     * Lista TODOS los foros visibles para el usuario en una sola consulta.
+     * Reemplaza el patrón N+1 que hacía el frontend (1 fetch por curso).
+     *
+     * Para un alumno: foros de los cursos donde está matriculado en el periodo activo.
+     * Para un docente: foros de los cursos que enseña.
+     * Para admin: todos los foros activos.
+     */
+    async getMyForums(userId: string, rol: string): Promise<(Forum & { curso_nombre: string })[]> {
+        let courseFilter = '';
+        let params: unknown[] = [];
+
+        if (rol === 'alumno') {
+            courseFilter = `c.seccion_id IN (
+                SELECT m.seccion_id FROM matriculas m
+                JOIN periodos p ON p.id = m.periodo_id
+                WHERE m.alumno_id = $1 AND m.activo = TRUE AND p.activo = TRUE
+            ) AND c.periodo_id IN (SELECT id FROM periodos WHERE activo = TRUE)`;
+            params = [userId];
+        } else if (rol === 'docente') {
+            courseFilter = `c.docente_id = $1 AND c.activo = TRUE`;
+            params = [userId];
+        } else {
+            courseFilter = `c.activo = TRUE`;
+        }
+
+        const cursos = await this.forumRepo.manager.query<{ id: string; nombre: string }[]>(
+            `SELECT id, nombre FROM cursos c WHERE ${courseFilter}`,
+            params,
+        );
+        if (!cursos.length) return [];
+
+        const cursoIds = cursos.map(c => c.id);
+        const forums = await this.forumRepo.find({
+            where: { curso_id: In(cursoIds), activo: true },
+            order: { bimestre: 'ASC', semana: 'ASC', created_at: 'DESC' },
+        });
+
+        const byCurso = new Map(cursos.map(c => [c.id, c.nombre]));
+        return forums.map(f => ({ ...f, curso_nombre: byCurso.get(f.curso_id) ?? '' }));
+    }
 
     async getForumsByCourse(cursoId: string, soloVisibles = false) {
         const foros = await this.forumRepo.find({
@@ -65,17 +110,29 @@ export class ForumService {
             order: { created_at: 'ASC' },
         });
 
-        // Cargar respuestas de cada post
-        const postsConRespuestas = await Promise.all(
-            posts.map(async (post) => {
-                const respuestas = await this.postRepo.find({
-                    where: { parent_post_id: post.id, activo: true },
-                    relations: ['cuenta'],
-                    order: { created_at: 'ASC' },
-                });
-                return { ...post, respuestas };
-            }),
-        );
+        // Cargar respuestas de TODOS los posts en una sola consulta (evita N+1).
+        const respuestasFlat = posts.length
+            ? await this.postRepo.find({
+                where: { parent_post_id: In(posts.map(p => p.id)), activo: true },
+                relations: ['cuenta'],
+                order: { created_at: 'ASC' },
+            })
+            : [];
+
+        // Adjuntos: bulk loader para todos los posts y respuestas.
+        const allPostIds = [
+            ...posts.map(p => p.id),
+            ...respuestasFlat.map(r => r.id),
+        ];
+        const attachmentsMap = await this.attachments.listByOwnersBulk('forum_post', allPostIds);
+
+        const postsConRespuestas = posts.map(post => ({
+            ...post,
+            attachments: attachmentsMap.get(post.id) ?? [],
+            respuestas: respuestasFlat
+                .filter(r => r.parent_post_id === post.id)
+                .map(r => ({ ...r, attachments: attachmentsMap.get(r.id) ?? [] })),
+        }));
 
         return { forum, posts: postsConRespuestas };
     }
