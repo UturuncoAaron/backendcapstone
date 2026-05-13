@@ -5,6 +5,7 @@ import { ConversationParticipant } from './entities/conversation-participant.ent
 import { Message } from './entities/message.entity.js';
 import { MessagingService } from './messaging.service.js';
 import { MessagingController } from './messaging.controller.js';
+import { AttachmentsModule } from '../attachments/attachments.module.js';
 
 @Module({
     imports: [
@@ -13,6 +14,7 @@ import { MessagingController } from './messaging.controller.js';
             ConversationParticipant,
             Message,
         ]),
+        AttachmentsModule,
     ],
     controllers: [MessagingController],
     providers: [MessagingService],

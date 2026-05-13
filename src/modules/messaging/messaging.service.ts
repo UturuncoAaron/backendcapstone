@@ -1,3 +1,4 @@
+import { AttachmentsService } from '../attachments/attachments.service.js';
 import {
     Injectable, NotFoundException, ForbiddenException,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ export class MessagingService {
         @InjectRepository(ConversationParticipant) private participantRepo: Repository<ConversationParticipant>,
         @InjectRepository(Message) private messageRepo: Repository<Message>,
         private readonly dataSource: DataSource,
+        private readonly attachments: AttachmentsService,
     ) { }
 
     // ════════════════════════════════════════════════════════════
@@ -151,7 +153,7 @@ export class MessagingService {
         accountId: string,
         limit = 30,
         before?: string,
-    ): Promise<Message[]> {
+    ): Promise<(Message & { attachments: import('../attachments/attachments.service.js').AttachmentDto[] })[]> {
         await this.assertParticipant(conversationId, accountId);
 
         const qb = this.messageRepo
@@ -166,8 +168,14 @@ export class MessagingService {
         }
 
         const messages = await qb.getMany();
+        // Bulk loader de adjuntos para evitar N+1.
+        const map = await this.attachments.listByOwnersBulk('message', messages.map(m => m.id));
+        const enriched = messages.map(m => ({
+            ...m,
+            attachments: map.get(m.id) ?? [],
+        }));
         // Retornar en orden cronológico (más antiguo primero)
-        return messages.reverse();
+        return enriched.reverse();
     }
 
     async updateMessage(messageId: string, senderId: string, dto: UpdateMessageDto): Promise<Message> {
@@ -184,6 +192,8 @@ export class MessagingService {
         const message = await this.messageRepo.findOne({ where: { id: messageId } });
         if (!message) throw new NotFoundException('Message not found');
         if (message.senderId !== senderId) throw new ForbiddenException('You can only delete your own messages');
+        // Borrar adjuntos del mensaje primero (limpia R2 + filas)
+        await this.attachments.removeByOwner('message', message.id);
         await this.messageRepo.remove(message);
     }
 
