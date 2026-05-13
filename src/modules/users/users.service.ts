@@ -1265,6 +1265,59 @@ export class UsersService {
     };
   }
 
+  /**
+   * Últimos vínculos padre-alumno creados (panel "Vínculos recientes" del
+   * admin). Persistente — antes vivía solo en el state del componente y se
+   * perdía al recargar.
+   */
+  async getRecentParentLinks(limit = 10) {
+    const rows = await this.dataSource.query<
+      Array<{
+        padre_id: string;
+        alumno_id: string;
+        created_at: Date;
+        padre_nombre: string;
+        padre_apellido: string;
+        alumno_nombre: string;
+        alumno_apellido: string;
+      }>
+    >(
+      `SELECT pa.padre_id, pa.alumno_id, pa.created_at,
+              p.nombre  AS padre_nombre,  p.apellido_paterno AS padre_apellido,
+              a.nombre  AS alumno_nombre, a.apellido_paterno AS alumno_apellido
+         FROM padre_alumno pa
+         JOIN padres  p ON p.id = pa.padre_id
+         JOIN alumnos a ON a.id = pa.alumno_id
+        ORDER BY pa.created_at DESC
+        LIMIT $1`,
+      [limit],
+    );
+    return rows.map((r) => ({
+      id: `${r.padre_id}_${r.alumno_id}`,
+      padre: `${r.padre_nombre} ${r.padre_apellido}`,
+      alumno: `${r.alumno_nombre} ${r.alumno_apellido}`,
+      created_at: r.created_at,
+    }));
+  }
+
+  /**
+   * Padres vinculados a un alumno (mostrar en el perfil del alumno).
+   * Devuelve datos básicos sin email para no exponer PII innecesaria al
+   * docente o al propio alumno.
+   */
+  async getPadresOfAlumno(alumnoId: string) {
+    return this.dataSource.query(
+      `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno,
+              c.telefono, c.numero_documento
+         FROM padre_alumno pa
+         JOIN padres  p ON p.id = pa.padre_id
+         JOIN cuentas c ON c.id = p.id AND c.activo = TRUE
+        WHERE pa.alumno_id = $1
+        ORDER BY p.apellido_paterno, p.nombre`,
+      [alumnoId],
+    );
+  }
+
   // ══════════════════════════════════════════════════════════════════════════
   // MÉTODOS PARA AUTH SERVICE
   // ══════════════════════════════════════════════════════════════════════════

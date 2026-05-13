@@ -253,6 +253,22 @@ export class UsersController {
         return this.usersService.linkPadreAlumno(dto);
     }
 
+    /**
+     * GET /api/admin/users/parent-child/recent
+     * Últimos vínculos creados (panel "Vínculos recientes"). Solo admin.
+     */
+    @Get('parent-child/recent')
+    getRecentParentLinks(@Query('limit') limit = '10') {
+        const n = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
+        return this.usersService.getRecentParentLinks(n);
+    }
 
- 
+    /**
+     * GET /api/admin/users/alumnos/:id/padres
+     * Padres vinculados a un alumno. Usado en el perfil del alumno.
+     */
+    @Get('alumnos/:id/padres')
+    getPadresOfAlumno(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.getPadresOfAlumno(id);
+    }
 }
