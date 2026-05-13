@@ -36,15 +36,24 @@ export class NotificationsListener {
       const targets = new Set<string>([ev.convocadoAId]);
       // El convocador también recibe acuse para tener el ítem en su campana.
       if (ev.createdById !== ev.convocadoAId) targets.add(ev.createdById);
+      // El alumno **siempre** se entera si es distinto del convocado (caso
+      // típico: docente cita al padre por un asunto del hijo — el alumno
+      // también debe verlo en su campana).
+      if (ev.studentId && ev.studentId !== ev.convocadoAId && ev.studentId !== ev.createdById) {
+        targets.add(ev.studentId);
+      }
 
       for (const accountId of targets) {
         const isRecipient = accountId === ev.convocadoAId;
+        const isStudent = accountId === ev.studentId;
         const notif = await this.service.notify({
           accountId,
           tipo: 'cita_agendada',
           titulo: isRecipient
             ? 'Nueva cita agendada'
-            : 'Cita agendada correctamente',
+            : isStudent
+              ? 'Se agendó una cita relacionada contigo'
+              : 'Cita agendada correctamente',
           cuerpo: `${when} — ${ev.motivo.slice(0, 140)}`,
           referenceId: ev.appointmentId,
           referenceType: 'cita',
