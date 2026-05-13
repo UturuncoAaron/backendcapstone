@@ -440,10 +440,26 @@ export class UsersService {
     const limit = filters.limit ?? 20;
     const offset = (page - 1) * limit;
 
+    // Subconsulta: tomamos UNA sola matrícula activa por alumno (la más
+    // reciente). Antes había un LEFT JOIN directo contra `matriculas` que,
+    // si por algún motivo el alumno tenía 2+ matrículas activas (bug
+    // histórico que ya tapamos en enrollStudent), duplicaba el alumno en
+    // el listado — de ahí que "el nombre apareciera triplicado".
     const qb = this.alumnoRepo
       .createQueryBuilder('a')
       .innerJoin('cuentas', 'c', 'c.id = a.id')
-      .leftJoin('matriculas', 'm', 'm.alumno_id = a.id AND m.activo = true')
+      .leftJoin(
+        (sub) =>
+          sub
+            .from('matriculas', 'mm')
+            .select('DISTINCT ON (mm.alumno_id) mm.alumno_id', 'alumno_id')
+            .addSelect('mm.seccion_id', 'seccion_id')
+            .where('mm.activo = true')
+            .orderBy('mm.alumno_id')
+            .addOrderBy('mm.created_at', 'DESC'),
+        'm',
+        'm.alumno_id = a.id',
+      )
       .leftJoin('secciones', 's', 's.id = m.seccion_id')
       .leftJoin('grados', 'g', 'g.id = s.grado_id')
       .select([
@@ -1125,16 +1141,36 @@ export class UsersService {
   // ACTIVAR / DESACTIVAR
   // ══════════════════════════════════════════════════════════════════════════
 
+  /**
+   * Desactiva la cuenta. Si es **docente**, además limpia el `docente_id` de
+   * todos los cursos donde estaba asignado (no borra los cursos: quedan
+   * "sin docente asignado" para que un admin pueda reasignarlos). Esto evita
+   * que un docente desactivado siga apareciendo como titular en grados/cursos.
+   */
   async deactivate(id: string): Promise<{ message: string }> {
-    const result = await this.cuentaRepo
-      .createQueryBuilder()
-      .update()
-      .set({ activo: false })
-      .where('id = :id AND activo = true', { id })
-      .execute();
-    if (!result.affected)
-      throw new NotFoundException(`Cuenta ${id} no encontrada o ya inactiva`);
-    return { message: 'Usuario desactivado correctamente' };
+    return this.dataSource.transaction(async (em) => {
+      const cuenta = await em
+        .getRepository(Cuenta)
+        .findOne({ where: { id }, select: ['id', 'rol', 'activo'] });
+      if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
+      if (!cuenta.activo)
+        throw new NotFoundException(`Cuenta ${id} ya inactiva`);
+
+      await em
+        .getRepository(Cuenta)
+        .update({ id }, { activo: false });
+
+      if (cuenta.rol === 'docente') {
+        // Cursos asignados → docente_id = NULL. El curso sigue vivo pero
+        // "sin docente"; el admin podrá reasignar.
+        await em.query(
+          `UPDATE cursos SET docente_id = NULL WHERE docente_id = $1`,
+          [id],
+        );
+      }
+
+      return { message: 'Usuario desactivado correctamente' };
+    });
   }
 
   async reactivate(id: string): Promise<{ message: string }> {

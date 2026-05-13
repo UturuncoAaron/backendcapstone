@@ -154,6 +154,7 @@ export class AcademicService {
             `SELECT DISTINCT
                 a.id, a.codigo_estudiante,
                 a.nombre, a.apellido_paterno, a.apellido_materno,
+                a.inclusivo,
                 NULL::text AS foto_url
              FROM matriculas m
              JOIN alumnos a ON a.id = m.alumno_id

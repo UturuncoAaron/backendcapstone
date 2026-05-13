@@ -173,24 +173,48 @@ export class CoursesService {
 
     // ── Matrículas ────────────────────────────────────────────
 
+    /**
+     * Matrícula a un alumno en una sección para un período dado y, en la
+     * misma transacción, **desactiva cualquier otra matrícula activa** del
+     * mismo alumno en el mismo período. Garantiza la regla de negocio:
+     * "1 alumno = 1 sección activa por período" (cubre también grado, porque
+     * cada sección vive en un solo grado).
+     */
     async enrollStudent(alumnoId: string, seccionId: string, periodoId: number) {
-        const existing = await this.enrollmentRepo.findOne({
-            where: { alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId },
-        });
+        return this.dataSource.transaction(async (manager) => {
+            const repo = manager.getRepository(Enrollment);
 
-        if (existing) {
-            if (!existing.activo) {
-                existing.activo = true;
-                return this.enrollmentRepo.save(existing);
+            // 1) Bajar todas las matrículas activas del alumno en este período
+            //    que NO sean la sección destino. Si el alumno ya estaba en otra
+            //    sección (incluso de otro grado), aquí lo damos de baja.
+            await repo.createQueryBuilder()
+                .update(Enrollment)
+                .set({ activo: false })
+                .where('alumno_id = :alumnoId', { alumnoId })
+                .andWhere('periodo_id = :periodoId', { periodoId })
+                .andWhere('seccion_id <> :seccionId', { seccionId })
+                .andWhere('activo = true')
+                .execute();
+
+            // 2) Reactivar / crear la matrícula en la sección destino.
+            const existing = await repo.findOne({
+                where: { alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId },
+            });
+
+            if (existing) {
+                if (!existing.activo) {
+                    existing.activo = true;
+                    return repo.save(existing);
+                }
+                return existing;
             }
-            return existing;
-        }
 
-        return this.enrollmentRepo.save(
-            this.enrollmentRepo.create({
-                alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId,
-            }),
-        );
+            return repo.save(
+                repo.create({
+                    alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId,
+                }),
+            );
+        });
     }
 
     async unenrollStudent(enrollmentId: string) {
