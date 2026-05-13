@@ -103,38 +103,72 @@ export class ForumService {
         const forum = await this.forumRepo.findOne({ where: { id: foroId } });
         if (!forum) throw new NotFoundException('Foro no encontrado');
 
-        // Posts raíz (sin parent)
-        const posts = await this.postRepo.find({
-            where: { foro_id: foroId, activo: true, parent_post_id: null as any },
-            relations: ['cuenta'],
-            order: { created_at: 'ASC' },
+        // Trae posts (raíz + respuestas) en un solo round-trip con el autor
+        // enriquecido (nombre/apellidos/rol) usando LEFT JOINs sobre todas
+        // las tablas de rol (alumnos/docentes/padres/psicologas/admins/auxiliares).
+        const rows = await this.postRepo.manager.query<{
+            id: string; foro_id: string; cuenta_id: string;
+            contenido: string; parent_post_id: string | null;
+            activo: boolean; created_at: Date; updated_at: Date;
+            autor_rol: string;
+            autor_nombre: string | null;
+            autor_apellido_paterno: string | null;
+            autor_apellido_materno: string | null;
+        }[]>(
+            `SELECT
+                fp.id, fp.foro_id, fp.cuenta_id, fp.contenido,
+                fp.parent_post_id, fp.activo, fp.created_at, fp.updated_at,
+                c.rol AS autor_rol,
+                COALESCE(a.nombre, d.nombre, p.nombre, ps.nombre, ad.nombre, ax.nombre)                       AS autor_nombre,
+                COALESCE(a.apellido_paterno, d.apellido_paterno, p.apellido_paterno, ps.apellido_paterno, ad.apellido_paterno, ax.apellido_paterno) AS autor_apellido_paterno,
+                COALESCE(a.apellido_materno, d.apellido_materno, p.apellido_materno, ps.apellido_materno, ad.apellido_materno, ax.apellido_materno) AS autor_apellido_materno
+             FROM foro_posts fp
+             JOIN cuentas c       ON c.id = fp.cuenta_id
+             LEFT JOIN alumnos    a  ON a.id  = c.id
+             LEFT JOIN docentes   d  ON d.id  = c.id
+             LEFT JOIN padres     p  ON p.id  = c.id
+             LEFT JOIN psicologas ps ON ps.id = c.id
+             LEFT JOIN admins     ad ON ad.id = c.id
+             LEFT JOIN auxiliares ax ON ax.id = c.id
+             WHERE fp.foro_id = $1 AND fp.activo = TRUE
+             ORDER BY fp.created_at ASC`,
+            [foroId],
+        );
+
+        const mapRow = (r: typeof rows[number]) => ({
+            id: r.id,
+            foro_id: r.foro_id,
+            cuenta_id: r.cuenta_id,
+            contenido: r.contenido,
+            parent_post_id: r.parent_post_id,
+            activo: r.activo,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            usuario: {
+                id: r.cuenta_id,
+                nombre: r.autor_nombre ?? '',
+                apellido_paterno: r.autor_apellido_paterno ?? '',
+                apellido_materno: r.autor_apellido_materno ?? '',
+                rol: r.autor_rol,
+            },
         });
 
-        // Cargar respuestas de TODOS los posts en una sola consulta (evita N+1).
-        const respuestasFlat = posts.length
-            ? await this.postRepo.find({
-                where: { parent_post_id: In(posts.map(p => p.id)), activo: true },
-                relations: ['cuenta'],
-                order: { created_at: 'ASC' },
-            })
-            : [];
+        const rootRows = rows.filter(r => r.parent_post_id === null);
+        const childRows = rows.filter(r => r.parent_post_id !== null);
 
-        // Adjuntos: bulk loader para todos los posts y respuestas.
-        const allPostIds = [
-            ...posts.map(p => p.id),
-            ...respuestasFlat.map(r => r.id),
-        ];
-        const attachmentsMap = await this.attachments.listByOwnersBulk('forum_post', allPostIds);
+        const attachmentsMap = await this.attachments.listByOwnersBulk(
+            'forum_post', rows.map(r => r.id),
+        );
 
-        const postsConRespuestas = posts.map(post => ({
-            ...post,
-            attachments: attachmentsMap.get(post.id) ?? [],
-            respuestas: respuestasFlat
-                .filter(r => r.parent_post_id === post.id)
-                .map(r => ({ ...r, attachments: attachmentsMap.get(r.id) ?? [] })),
+        const posts = rootRows.map(r => ({
+            ...mapRow(r),
+            attachments: attachmentsMap.get(r.id) ?? [],
+            respuestas: childRows
+                .filter(c => c.parent_post_id === r.id)
+                .map(c => ({ ...mapRow(c), attachments: attachmentsMap.get(c.id) ?? [] })),
         }));
 
-        return { forum, posts: postsConRespuestas };
+        return { forum, posts };
     }
 
     async createPost(foroId: string, cuentaId: string, dto: {

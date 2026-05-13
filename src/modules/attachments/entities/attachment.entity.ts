@@ -4,10 +4,10 @@ import {
 } from 'typeorm';
 import { Cuenta } from '../../users/entities/cuenta.entity.js';
 
-export type AttachmentOwnerType = 'forum_post' | 'message' | 'announcement';
+export type AttachmentOwnerType = 'forum_post' | 'announcement';
 
 export const ATTACHMENT_OWNER_TYPES: ReadonlyArray<AttachmentOwnerType> = [
-    'forum_post', 'message', 'announcement',
+    'forum_post', 'announcement',
 ] as const;
 
 /** Adjunto polimórfico reusado por foros, mensajes y comunicados. */
