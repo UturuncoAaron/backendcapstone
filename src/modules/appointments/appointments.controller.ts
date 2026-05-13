@@ -36,9 +36,9 @@ export class AppointmentsController {
   // ══════════════════════════════════════════════════════════════
 
   // ── Crear cita ──────────────────────────────────────────────────
-  // Regla #3: los alumnos NO pueden agendar (se quita 'alumno' del decorador).
+  // El alumno sólo puede crear cita con psicología (validado en el service).
   @Post()
-  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
   create(@Body() dto: CreateAppointmentDto, @CurrentUser() user: AuthUser) {
     return this.service.createAppointment({ id: user.id, rol: user.rol }, dto);
   }
@@ -46,7 +46,7 @@ export class AppointmentsController {
   // Reglas por rol (lo consume el FE para configurar el dialog). Devuelve
   // `null` si el target no participa del flujo de citas.
   @Get('rules/:targetId')
-  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
   getRules(@Param('targetId', ParseUUIDPipe) targetId: string) {
     return this.service.getRulesForTarget(targetId);
   }

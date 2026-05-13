@@ -113,11 +113,14 @@ export class AppointmentsService {
     const scheduledAt = new Date(dto.scheduledAt);
     this.assertScheduledAtIsValid(scheduledAt);
 
-    // ── Regla #3 — los alumnos NO pueden agendar citas.
+    // ── Regla — los alumnos sólo pueden pedir cita con la psicóloga
+    //          (sobre sí mismos como `studentId`). Para el resto del
+    //          staff (docente / director / auxiliar / admin) la cita la
+    //          tiene que iniciar el padre / tutor.
     if (caller.rol === 'alumno') {
-      throw new ForbiddenException(
-        'Los alumnos no pueden agendar citas. Pide a tu padre/tutor que lo haga.',
-      );
+      // El studentId queda forzado al propio alumno; ignoramos lo que
+      // venga en el DTO para evitar suplantación.
+      dto = { ...dto, studentId: caller.id, parentId: undefined };
     }
 
     if (!dto.studentId && !dto.parentId) {
@@ -153,6 +156,13 @@ export class AppointmentsService {
     ) {
       throw new BadRequestException(
         `No se puede convocar a un usuario con rol ${convocadoA.rol}`,
+      );
+    }
+
+    // ── Alumno sólo puede pedir cita con psicología (directa, 30 min).
+    if (caller.rol === 'alumno' && convocadoA.rol !== 'psicologa') {
+      throw new ForbiddenException(
+        'Los alumnos sólo pueden agendar citas con la psicóloga. Para citas con docentes/dirección, pídelo a tu padre o tutor.',
       );
     }
 
