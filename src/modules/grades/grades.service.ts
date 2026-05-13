@@ -206,7 +206,7 @@ export class GradesService {
     }
 
     async getActividadesByCourse(
-        cursoId: string, user: AuthUser, periodoId?: number,
+        cursoId: string, user: AuthUser, periodoId?: string,
     ) {
         const [curso] = await this.dataSource.query(
             `SELECT id, periodo_id, docente_id FROM cursos WHERE id = $1`,
@@ -234,7 +234,7 @@ export class GradesService {
     }
 
     /** Planilla del docente: alumnos × actividades del periodo. */
-    async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: number) {
+    async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: string) {
         const [curso] = await this.dataSource.query(
             `SELECT id, seccion_id, periodo_id, docente_id
                FROM cursos WHERE id = $1`,

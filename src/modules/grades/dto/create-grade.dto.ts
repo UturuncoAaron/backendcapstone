@@ -1,8 +1,7 @@
 import {
-    IsUUID, IsNumber, IsInt, IsOptional, IsString,
+    IsUUID, IsNumber, IsOptional, IsString,
     Min, Max, MaxLength, IsIn, IsDateString,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 import { TIPOS_NOTA, type TipoNota } from '../entities/grade.entity.js';
 
 export class CreateGradeDto {
@@ -12,9 +11,10 @@ export class CreateGradeDto {
     @IsUUID()
     curso_id: string;
 
-    @IsInt()
-    @Type(() => Number)
-    periodo_id: number;
+    // periodo_id es UUID, no entero (ver schema). La validación previa
+    // con `@IsInt` rebotaba el body con 400 desde el frontend.
+    @IsUUID()
+    periodo_id: string;
 
     @IsString()
     @MaxLength(200)

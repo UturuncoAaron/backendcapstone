@@ -82,7 +82,7 @@ export class CoursesService {
         descripcion?: string;
         docente_id?: string;
         seccion_id: string;
-        periodo_id: number;
+        periodo_id: string;
         color?: string;
     }) {
         const course = this.courseRepo.create({
@@ -134,7 +134,7 @@ export class CoursesService {
 
     // ── Generador desde plantilla CNEB ────────────────────────
 
-    async generateCoursesFromTemplate(seccionId: string, periodoId: number) {
+    async generateCoursesFromTemplate(seccionId: string, periodoId: string) {
         const [seccion] = await this.dataSource.query(
             `SELECT s.id, s.nombre, g.nombre AS grado, g.orden
                FROM secciones s
@@ -179,8 +179,10 @@ export class CoursesService {
      * mismo alumno en el mismo período. Garantiza la regla de negocio:
      * "1 alumno = 1 sección activa por período" (cubre también grado, porque
      * cada sección vive en un solo grado).
+     *
+     * periodoId es UUID (ver schema).
      */
-    async enrollStudent(alumnoId: string, seccionId: string, periodoId: number) {
+    async enrollStudent(alumnoId: string, seccionId: string, periodoId: string) {
         return this.dataSource.transaction(async (manager) => {
             const repo = manager.getRepository(Enrollment);
 
