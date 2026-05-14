@@ -5,8 +5,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { PsychologistStudent } from './entities/psychologist-student.entity.js';
 import { PsychologyRecord } from './entities/psychology-record.entity.js';
+import { InformePsicologico } from './entities/informe-psicologico.entity.js';
 import {
     CreateRecordDto, UpdateRecordDto, PageQueryDto,
+    CreateInformeDto, UpdateInformeDto,
 } from './dto/psychology.dto.js';
 import { UsersService } from '../users/users.service.js';
 
@@ -19,6 +21,8 @@ export class PsychologyService {
         private readonly assignmentRepo: Repository<PsychologistStudent>,
         @InjectRepository(PsychologyRecord)
         private readonly recordRepo: Repository<PsychologyRecord>,
+        @InjectRepository(InformePsicologico)
+        private readonly informeRepo: Repository<InformePsicologico>,
         private readonly dataSource: DataSource,
         private readonly usersService: UsersService,
     ) { }
@@ -207,5 +211,126 @@ export class PsychologyService {
     ): Omit<T, 'codigo_acceso' | 'numero_documento' | 'tipo_documento'> {
         const { codigo_acceso, numero_documento, tipo_documento, ...safe } = row;
         return safe as any;
+    }
+
+    // ═════════════════════════════════════════════════════════════════
+    // INFORMES PSICOLÓGICOS (evaluaciones / seguimiento / derivaciones)
+    // ═════════════════════════════════════════════════════════════════
+
+    async createInforme(
+        psychologistId: string,
+        dto: CreateInformeDto,
+    ): Promise<InformePsicologico> {
+        return this.dataSource.transaction(async (em) => {
+            // Asegurar asignación para no perder rastro de quién tiene el caso.
+            await em.query(
+                `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde)
+                 VALUES ($1, $2, TRUE, CURRENT_DATE)
+                 ON CONFLICT (psicologa_id, alumno_id)
+                 DO UPDATE SET activo = TRUE, hasta = NULL`,
+                [psychologistId, dto.studentId],
+            );
+            const informe = em.create(InformePsicologico, {
+                psychologistId,
+                studentId: dto.studentId,
+                tipo: dto.tipo,
+                titulo: dto.titulo,
+                motivo: dto.motivo,
+                antecedentes: dto.antecedentes ?? null,
+                observaciones: dto.observaciones,
+                recomendaciones: dto.recomendaciones ?? null,
+                derivadoA: dto.derivadoA ?? null,
+                confidencial: dto.confidencial ?? true,
+                estado: 'borrador',
+            });
+            return em.save(informe);
+        });
+    }
+
+    async updateInforme(
+        psychologistId: string,
+        id: string,
+        dto: UpdateInformeDto,
+    ): Promise<InformePsicologico> {
+        const informe = await this.assertInformeOwned(psychologistId, id);
+        if (informe.estado === 'finalizado') {
+            throw new ForbiddenException(
+                'El informe ya está finalizado y no puede editarse',
+            );
+        }
+        Object.assign(informe, {
+            ...(dto.tipo !== undefined && { tipo: dto.tipo }),
+            ...(dto.titulo !== undefined && { titulo: dto.titulo }),
+            ...(dto.motivo !== undefined && { motivo: dto.motivo }),
+            ...(dto.antecedentes !== undefined && { antecedentes: dto.antecedentes }),
+            ...(dto.observaciones !== undefined && { observaciones: dto.observaciones }),
+            ...(dto.recomendaciones !== undefined && { recomendaciones: dto.recomendaciones }),
+            ...(dto.derivadoA !== undefined && { derivadoA: dto.derivadoA }),
+            ...(dto.confidencial !== undefined && { confidencial: dto.confidencial }),
+        });
+        return this.informeRepo.save(informe);
+    }
+
+    async finalizeInforme(
+        psychologistId: string,
+        id: string,
+    ): Promise<InformePsicologico> {
+        const informe = await this.assertInformeOwned(psychologistId, id);
+        if (informe.estado === 'finalizado') return informe;
+        informe.estado = 'finalizado';
+        informe.finalizadoAt = new Date();
+        return this.informeRepo.save(informe);
+    }
+
+    async deleteInforme(psychologistId: string, id: string): Promise<void> {
+        const informe = await this.assertInformeOwned(psychologistId, id);
+        if (informe.estado === 'finalizado') {
+            throw new ForbiddenException(
+                'No se puede eliminar un informe finalizado (auditoría)',
+            );
+        }
+        await this.informeRepo.remove(informe);
+    }
+
+    async findInformeById(
+        psychologistId: string,
+        id: string,
+    ): Promise<InformePsicologico> {
+        return this.assertInformeOwned(psychologistId, id);
+    }
+
+    async listInformesByStudent(
+        psychologistId: string,
+        studentId: string,
+        q: PageQueryDto,
+    ) {
+        await this.assertAssigned(psychologistId, studentId);
+        const page = q.page ?? 1;
+        const limit = q.limit ?? 25;
+        const [items, total] = await this.informeRepo.findAndCount({
+            where: { studentId },
+            order: { createdAt: 'DESC' },
+            skip: (page - 1) * limit,
+            take: limit,
+        });
+        return {
+            data: items,
+            total, page, limit,
+            totalPages: Math.ceil(total / limit) || 1,
+        };
+    }
+
+    private async assertInformeOwned(
+        psychologistId: string,
+        id: string,
+    ): Promise<InformePsicologico> {
+        const informe = await this.informeRepo.findOne({ where: { id } });
+        if (!informe) throw new NotFoundException('Informe no encontrado');
+        if (informe.psychologistId !== psychologistId) {
+            throw new ForbiddenException(
+                'Este informe pertenece a otra psicóloga',
+            );
+        }
+        return informe;
     }
 }
