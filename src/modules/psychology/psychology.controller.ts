@@ -104,6 +104,19 @@ export class PsychologyController {
         return this.service.getStudentParents(studentId);
     }
 
+    /**
+     * Detalle público de un alumno por id, accesible desde el directorio.
+     * Permite a la psicóloga / docente / auxiliar / admin abrir la ficha
+     * (`/psicologa/student/:id`) sin requerir rol admin.
+     *
+     * No expone credenciales (codigo_acceso, numero_documento, tipo_documento).
+     */
+    @Get('directory/students/:studentId')
+    @Roles('psicologa', 'docente', 'auxiliar', 'admin')
+    getStudentDetail(@Param('studentId', ParseUUIDPipe) studentId: string) {
+        return this.service.getStudentDetail(studentId);
+    }
+
     // ── Listado público de psicólogas ───────────────────────────────
     @Get('psicologas')
     @Roles('alumno', 'padre', 'psicologa', 'docente', 'auxiliar', 'admin')
