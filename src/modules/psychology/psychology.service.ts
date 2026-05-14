@@ -150,6 +150,22 @@ export class PsychologyService {
         return rows.map((r: any) => this.stripCredentials(r));
     }
 
+    /**
+     * Devuelve el detalle de un alumno (nombre, código, grado, sección, etc.)
+     * para roles con acceso al directorio: psicóloga, docente, auxiliar, admin.
+     *
+     * Internamente delega en `usersService.findAlumnoById` para reutilizar el
+     * mismo shape que usa el panel admin; pero strippea credenciales antes
+     * de devolver. NotFound si el id no existe o la cuenta está inactiva.
+     */
+    async getStudentDetail(studentId: string) {
+        const row = await this.usersService.findAlumnoById(studentId);
+        if (!row) {
+            throw new NotFoundException('Alumno no encontrado');
+        }
+        return this.stripCredentials(row);
+    }
+
     async getStudentParents(studentId: string) {
         return this.dataSource.query(
             `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno,
