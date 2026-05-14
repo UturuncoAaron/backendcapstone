@@ -16,6 +16,7 @@ export interface HorarioHoyItem {
     cursoNombre: string;
     color: string;
     seccionNombre: string;
+    gradoNombre: string | null;
 }
 
 /** Variante de HorarioHoyItem con el día explícito — usado para la
@@ -53,10 +54,12 @@ export class SharedDashboardQueries {
               h.aula,
               c.nombre                           AS "cursoNombre",
               c.color,
-              s.nombre                           AS "seccionNombre"
+              s.nombre                           AS "seccionNombre",
+              g.nombre                           AS "gradoNombre"
        FROM   horarios h
        JOIN   cursos   c ON c.id         = h.curso_id
        JOIN   secciones s ON s.id        = c.seccion_id
+       LEFT  JOIN grados g ON g.id       = s.grado_id
        WHERE  h.curso_id  = ANY($1)
          AND  h.dia_semana = $2
          AND  c.activo    = TRUE
@@ -81,10 +84,12 @@ export class SharedDashboardQueries {
               h.aula,
               c.nombre                           AS "cursoNombre",
               c.color,
-              s.nombre                           AS "seccionNombre"
+              s.nombre                           AS "seccionNombre",
+              g.nombre                           AS "gradoNombre"
        FROM   horarios h
        JOIN   cursos   c ON c.id         = h.curso_id
        JOIN   secciones s ON s.id        = c.seccion_id
+       LEFT  JOIN grados g ON g.id       = s.grado_id
        WHERE  h.curso_id  = ANY($1)
          AND  c.activo    = TRUE
        ORDER  BY CASE h.dia_semana
