@@ -28,13 +28,14 @@ export class DocenteDashboardProvider {
         );
         const cursoIds = cursos.map(c => c.id);
 
-        const [horarioHoy, entregasSinCalificar, comunicados] = await Promise.all([
+        const [horarioHoy, horario, entregasSinCalificar, comunicados] = await Promise.all([
             this.shared.getHorarioHoy(cursoIds),
+            this.shared.getHorarioSemana(cursoIds),
             this.getEntregasSinCalificar(cursoIds),
             this.shared.getComunicados(['docentes', 'todos']),
         ]);
 
-        return { horarioHoy, entregasSinCalificar, comunicados };
+        return { horarioHoy, horario, entregasSinCalificar, comunicados };
     }
 
     private getEntregasSinCalificar(cursoIds: string[]): Promise<EntregaPendienteItem[]> {

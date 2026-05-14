@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { Repository, DataSource, EntityManager, SelectQueryBuilder } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import sharp from 'sharp';
 
@@ -440,28 +440,70 @@ export class UsersService {
     const limit = filters.limit ?? 20;
     const offset = (page - 1) * limit;
 
-    // Subconsulta: tomamos UNA sola matrícula activa por alumno (la más
-    // reciente). Antes había un LEFT JOIN directo contra `matriculas` que,
-    // si por algún motivo el alumno tenía 2+ matrículas activas (bug
-    // histórico que ya tapamos en enrollStudent), duplicaba el alumno en
-    // el listado — de ahí que "el nombre apareciera triplicado".
-    const qb = this.alumnoRepo
-      .createQueryBuilder('a')
-      .innerJoin('cuentas', 'c', 'c.id = a.id')
-      .leftJoin(
-        (sub) =>
-          sub
-            .from('matriculas', 'mm')
-            .select('DISTINCT ON (mm.alumno_id) mm.alumno_id', 'alumno_id')
-            .addSelect('mm.seccion_id', 'seccion_id')
-            .where('mm.activo = true')
-            .orderBy('mm.alumno_id')
-            .addOrderBy('mm.created_at', 'DESC'),
-        'm',
-        'm.alumno_id = a.id',
-      )
-      .leftJoin('secciones', 's', 's.id = m.seccion_id')
-      .leftJoin('grados', 'g', 'g.id = s.grado_id')
+    // Aplica los joins canónicos para enriquecer al alumno con:
+    //   - cuenta (numero_documento, activo)
+    //   - última matrícula activa (DISTINCT ON dedupe por alumno_id)
+    //   - sección y grado de esa matrícula
+    //
+    // El sub-join se pasa como SQL crudo a propósito: cuando usábamos la
+    // API callback de TypeORM, `getCount()` envolvía la query como
+    // `SELECT COUNT(*) FROM (...)` y rompía con `syntax error at or
+    // near "DISTINCT"`. Como string crudo, TypeORM lo trata como derived
+    // table opaca.
+    const SUB_MATRICULA = `(SELECT DISTINCT ON (mm.alumno_id)
+                                   mm.alumno_id, mm.seccion_id
+                              FROM matriculas mm
+                             WHERE mm.activo = true
+                             ORDER BY mm.alumno_id, mm.created_at DESC)`;
+
+    const applyJoinsAndFilters = <T>(
+      qb: SelectQueryBuilder<T>,
+    ): SelectQueryBuilder<T> => {
+      qb.innerJoin('cuentas', 'c', 'c.id = a.id')
+        .leftJoin(SUB_MATRICULA, 'm', 'm.alumno_id = a.id')
+        .leftJoin('secciones', 's', 's.id = m.seccion_id')
+        .leftJoin('grados', 'g', 'g.id = s.grado_id');
+
+      if (filters.seccionId) {
+        qb.andWhere('s.id = :seccionId', { seccionId: filters.seccionId });
+      } else if (filters.gradoId) {
+        // g.id es UUID — no convertir a Number, rompía con
+        // "invalid input syntax for type uuid: NaN".
+        qb.andWhere('g.id = :gradoId', { gradoId: filters.gradoId });
+      }
+
+      if (filters.activo !== undefined) {
+        qb.andWhere('c.activo = :activo', { activo: filters.activo });
+      }
+
+      if (filters.q && filters.q.trim().length >= 2) {
+        const q = `%${filters.q.trim()}%`;
+        qb.andWhere(
+          `(a.nombre           ILIKE :q
+                OR a.apellido_paterno ILIKE :q
+                OR a.apellido_materno ILIKE :q
+                OR c.numero_documento ILIKE :q
+                OR a.codigo_estudiante ILIKE :q)`,
+          { q },
+        );
+      }
+
+      return qb;
+    };
+
+    // Count: usamos COUNT(DISTINCT a.id) con un SELECT explícito y
+    // getRawOne() para evitar el wrapping inestable de .getCount().
+    const countRow = await applyJoinsAndFilters(
+      this.alumnoRepo.createQueryBuilder('a'),
+    )
+      .select('COUNT(DISTINCT a.id)', 'total')
+      .getRawOne<{ total: string }>();
+    const total = Number.parseInt(countRow?.total ?? '0', 10);
+
+    // Data: misma forma de query con SELECT de campos planos.
+    const rows = await applyJoinsAndFilters(
+      this.alumnoRepo.createQueryBuilder('a'),
+    )
       .select([
         'a.id                AS id',
         'a.codigo_estudiante AS codigo_estudiante',
@@ -480,33 +522,7 @@ export class UsersService {
         'g.id                AS grado_id',
         's.nombre            AS seccion',
         's.id                AS seccion_id',
-      ]);
-
-    if (filters.seccionId) {
-      qb.andWhere('s.id = :seccionId', { seccionId: filters.seccionId });
-    } else if (filters.gradoId) {
-      // g.id es UUID — NO usar Number(): rompía con "invalid input syntax for type uuid: NaN".
-      qb.andWhere('g.id = :gradoId', { gradoId: filters.gradoId });
-    }
-
-    if (filters.activo !== undefined) {
-      qb.andWhere('c.activo = :activo', { activo: filters.activo });
-    }
-
-    if (filters.q && filters.q.trim().length >= 2) {
-      const q = `%${filters.q.trim()}%`;
-      qb.andWhere(
-        `(a.nombre           ILIKE :q
-              OR a.apellido_paterno ILIKE :q
-              OR a.apellido_materno ILIKE :q
-              OR c.numero_documento ILIKE :q
-              OR a.codigo_estudiante ILIKE :q)`,
-        { q },
-      );
-    }
-
-    const total = await qb.getCount();
-    const rows = await qb
+      ])
       .orderBy('a.apellido_paterno', 'ASC')
       .addOrderBy('a.nombre', 'ASC')
       .limit(limit)
@@ -519,7 +535,7 @@ export class UsersService {
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: total === 0 ? 0 : Math.ceil(total / limit),
     };
   }
 
