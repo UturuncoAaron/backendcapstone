@@ -440,16 +440,6 @@ export class UsersService {
     const limit = filters.limit ?? 20;
     const offset = (page - 1) * limit;
 
-    // Aplica los joins canónicos para enriquecer al alumno con:
-    //   - cuenta (numero_documento, activo)
-    //   - última matrícula activa (DISTINCT ON dedupe por alumno_id)
-    //   - sección y grado de esa matrícula
-    //
-    // El sub-join se pasa como SQL crudo a propósito: cuando usábamos la
-    // API callback de TypeORM, `getCount()` envolvía la query como
-    // `SELECT COUNT(*) FROM (...)` y rompía con `syntax error at or
-    // near "DISTINCT"`. Como string crudo, TypeORM lo trata como derived
-    // table opaca.
     const SUB_MATRICULA = `(SELECT DISTINCT ON (mm.alumno_id)
                                    mm.alumno_id, mm.seccion_id
                               FROM matriculas mm
@@ -522,6 +512,7 @@ export class UsersService {
         'g.id                AS grado_id',
         's.nombre            AS seccion',
         's.id                AS seccion_id',
+        
       ])
       .orderBy('a.apellido_paterno', 'ASC')
       .addOrderBy('a.nombre', 'ASC')

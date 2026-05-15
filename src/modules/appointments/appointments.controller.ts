@@ -29,7 +29,7 @@ import type { AuthUser } from '../auth/types/auth-user.js';
 @Controller('appointments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AppointmentsController {
-  constructor(private readonly service: AppointmentsService) {}
+  constructor(private readonly service: AppointmentsService) { }
 
   // ══════════════════════════════════════════════════════════════
   // CRUD DE CITAS
@@ -106,11 +106,18 @@ export class AppointmentsController {
   ) {
     return this.service.replaceAvailability(user.id, dto.items);
   }
+  @Get('count-future')
+  @Roles('psicologa', 'docente', 'admin')
+  async countFuture(@CurrentUser() user: AuthUser) {
+    const count = await this.service.countFutureAppointments(user.id);
+    return { count };
+  }
 
   // ══════════════════════════════════════════════════════════════
   // OPERACIONES POR ID DE CITA  (van AL FINAL para no chocar con
   // las rutas estáticas anteriores)
   // ══════════════════════════════════════════════════════════════
+
 
   // ── Detalle ─────────────────────────────────────────────────────
   @Get(':id')
