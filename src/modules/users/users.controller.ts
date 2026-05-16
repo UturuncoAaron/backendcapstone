@@ -1,6 +1,3 @@
-// Ubicación en tu proyecto: src/modules/users/users.controller.ts
-// Versión COMPLETA con endpoints de auxiliar.
-
 import {
     Controller, Get, Post, Put, Patch, Delete,
     Body, Param, Query, ParseUUIDPipe,
@@ -46,6 +43,7 @@ export class UsersController {
     }
 
     @Get('alumnos')
+    @Roles('admin', 'auxiliar')   // ← auxiliar necesita este endpoint
     findAlumnos(
         @Query('q') q?: string,
         @Query('grado_id') gradoId?: string,
@@ -101,7 +99,6 @@ export class UsersController {
         });
     }
 
-    // 🆕 ─────────────────────────────────────────────────────────
     @Get('auxiliares')
     findAuxiliares(
         @Query('q') q?: string,
@@ -121,6 +118,7 @@ export class UsersController {
     // ══════════════════════════════════════════════════════════════
 
     @Get('alumnos/search')
+    @Roles('admin', 'auxiliar')   // ← auxiliar puede buscar alumnos
     searchAlumnos(@Query('q') q: string) {
         return this.usersService.searchAlumnos(q);
     }
@@ -135,7 +133,6 @@ export class UsersController {
         return this.usersService.searchDocentes(q);
     }
 
-    // ↓ AQUÍ junto a search, antes de /:id
     @Get('docentes/select')
     findDocentesForSelect(@Query('include') include?: string) {
         return this.usersService.findDocentesForSelect(include === 'tutoria');
@@ -145,6 +142,7 @@ export class UsersController {
     searchAuxiliares(@Query('q') q: string) {
         return this.usersService.searchAuxiliares(q);
     }
+
     // ══════════════════════════════════════════════════════════════
     // OBTENER UNO POR ID
     // ══════════════════════════════════════════════════════════════
@@ -174,7 +172,6 @@ export class UsersController {
         return this.usersService.findPsicologaById(id);
     }
 
-    // ─────────────────────────────────────────────────────────
     @Get('auxiliares/:id')
     findAuxiliar(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findAuxiliarById(id);
@@ -209,11 +206,11 @@ export class UsersController {
         return this.usersService.createPsicologa(dto);
     }
 
-    // 🆕 ─────────────────────────────────────────────────────────
     @Post('auxiliares')
     createAuxiliar(@Body() dto: CreateAuxiliarDto) {
         return this.usersService.createAuxiliar(dto);
     }
+
     // ══════════════════════════════════════════════════════════════
     // ACTUALIZAR
     // ══════════════════════════════════════════════════════════════
@@ -253,20 +250,12 @@ export class UsersController {
         return this.usersService.linkPadreAlumno(dto);
     }
 
-    /**
-     * GET /api/admin/users/parent-child/recent
-     * Últimos vínculos creados (panel "Vínculos recientes"). Solo admin.
-     */
     @Get('parent-child/recent')
     getRecentParentLinks(@Query('limit') limit = '10') {
         const n = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
         return this.usersService.getRecentParentLinks(n);
     }
 
-    /**
-     * GET /api/admin/users/alumnos/:id/padres
-     * Padres vinculados a un alumno. Usado en el perfil del alumno.
-     */
     @Get('alumnos/:id/padres')
     getPadresOfAlumno(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.getPadresOfAlumno(id);

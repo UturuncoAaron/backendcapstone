@@ -12,6 +12,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import {
     RegisterAsistenciaDto, BulkAsistenciaDto, UpdateAsistenciaDto,
     ListAsistenciasQueryDto, ReporteAsistenciaQueryDto, ScanQrDto,
+    BulkDocenteAsistenciaDto,
 } from './dto/asistencia.dto.js';
 
 /**
@@ -147,6 +148,15 @@ export class AssistsController {
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: AuthUser,
     ) { return this.svc.classRemove(id, user); }
+
+    // ── DOCENTE (auxiliar / admin) ──
+
+    /** Registra la asistencia de docentes en bloque para el día. */
+    @Post('docente/bulk')
+    @Roles('auxiliar', 'admin')
+    bulkDocente(@Body() dto: BulkDocenteAsistenciaDto) {
+        return this.svc.bulkDocenteAsistencia(dto);
+    }
 
     // ── REPORTE ──
 

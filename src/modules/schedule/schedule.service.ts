@@ -13,14 +13,12 @@ export class ScheduleService {
     ) { }
 
     // ── GET schedule for a section ────────────────────────────────
-    // seccionId / periodoId son UUID (no enteros). Antes el controller los
-    // parseaba con ParseIntPipe y reventaba con 400 antes de llegar acá.
     async getHorarioBySeccion(seccionId: string, periodoId: string) {
         const courses = await this.db.query<{ id: string; nombre: string; color: string }[]>(
             `SELECT id, nombre, color
-       FROM cursos
-       WHERE seccion_id = $1 AND periodo_id = $2 AND activo = TRUE
-       ORDER BY nombre`,
+             FROM cursos
+             WHERE seccion_id = $1 AND periodo_id = $2 AND activo = TRUE
+             ORDER BY nombre`,
             [seccionId, periodoId],
         );
         if (!courses.length) return [];
@@ -76,7 +74,7 @@ export class ScheduleService {
         return { course: course.nombre, slots_saved: slots.length };
     }
 
-    // ── Horario para un alumno (secciones donde está matriculado en el periodo activo) ──
+    // ── Horario para un alumno ────────────────────────────────────
     async getHorarioForAlumno(alumnoId: string) {
         const periodoActivo = await this.db.query<{ id: string }[]>(
             `SELECT id FROM periodos WHERE activo = TRUE LIMIT 1`,
@@ -109,6 +107,59 @@ export class ScheduleService {
         if (!slot) throw new NotFoundException(`Slot ${slotId} no encontrado`);
         await this.scheduleRepo.remove(slot);
         return { deleted: slotId };
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // HORARIOS DEL DÍA (para asistencia de docentes)
+    // ════════════════════════════════════════════════════════════
+
+    /**
+     * Devuelve todos los horarios programados para un día de la semana,
+     * junto con la información del docente y el curso.
+     * Usado por el auxiliar para registrar asistencia de docentes.
+     */
+    async getHorariosByDia(dia: string) {
+        const horarios = await this.db.query<{
+            id: string;
+            hora_inicio: string;
+            hora_fin: string;
+            aula: string | null;
+            docente_id: string;
+            docente_nombre: string;
+            docente_apellido_paterno: string;
+            especialidad: string | null;
+            curso_nombre: string;
+        }[]>(
+            `SELECT
+                h.id,
+                h.hora_inicio,
+                h.hora_fin,
+                h.aula,
+                d.id               AS docente_id,
+                d.nombre           AS docente_nombre,
+                d.apellido_paterno AS docente_apellido_paterno,
+                d.especialidad,
+                c.nombre           AS curso_nombre
+             FROM horarios h
+             JOIN cursos c   ON c.id = h.curso_id AND c.activo = TRUE
+             JOIN docentes d ON d.id = c.docente_id
+             WHERE LOWER(h.dia_semana) = LOWER($1)
+             ORDER BY h.hora_inicio ASC`,
+            [dia],
+        );
+
+        return horarios.map(h => ({
+            id: h.id,
+            horario_id: h.id,
+            docente_id: h.docente_id,
+            docente_nombre: h.docente_nombre,
+            docente_apellido_paterno: h.docente_apellido_paterno,
+            especialidad: h.especialidad ?? '',
+            curso_nombre: h.curso_nombre,
+            hora_inicio: h.hora_inicio.slice(0, 5),
+            hora_fin: h.hora_fin.slice(0, 5),
+            aula: h.aula ?? '',
+        }));
     }
 
     // ── Overlap validation ────────────────────────────────────────

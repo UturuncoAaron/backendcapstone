@@ -6,10 +6,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, Between } from 'typeorm';
 import { AttendanceGeneral } from './entities/attendance-general.entity.js';
 import { AttendanceClass } from './entities/attendance-class.entity.js';
+import { AttendanceDocente } from './entities/attendance-docente.entity.js';
 import type { EstadoAsistencia } from './entities/attendance-general.entity.js';
 import {
     RegisterAsistenciaDto, BulkAsistenciaDto, UpdateAsistenciaDto,
     ListAsistenciasQueryDto, ReporteAsistenciaQueryDto, ScanQrDto,
+    BulkDocenteAsistenciaDto,
 } from './dto/asistencia.dto.js';
 import { QrService } from '../qr/qr.service.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
@@ -26,6 +28,8 @@ export class AssistsService {
         private readonly generalRepo: Repository<AttendanceGeneral>,
         @InjectRepository(AttendanceClass)
         private readonly classRepo: Repository<AttendanceClass>,
+        @InjectRepository(AttendanceDocente)
+        private readonly docenteRepo: Repository<AttendanceDocente>,
         private readonly dataSource: DataSource,
         private readonly qrService: QrService,
     ) { }
@@ -537,6 +541,37 @@ export class AssistsService {
         await this.assertDocenteDelCurso(a.curso_id, user);
         await this.classRepo.remove(a);
         return { ok: true };
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // ASISTENCIA DOCENTE
+    // ════════════════════════════════════════════════════════════
+
+    /** Registra asistencia de docentes en bloque (upsert por horario_id + fecha). */
+    async bulkDocenteAsistencia(dto: BulkDocenteAsistenciaDto) {
+        if (!dto.registros.length) throw new BadRequestException('Lista vacía');
+
+        const records = dto.registros.map(r =>
+            this.docenteRepo.create({
+                horario_id: r.horario_id,
+                docente_id: r.docente_id,
+                fecha: dto.fecha,
+                estado: r.estado as any,
+            }),
+        );
+
+        await this.docenteRepo
+            .createQueryBuilder()
+            .insert()
+            .into(AttendanceDocente)
+            .values(records)
+            .orUpdate(['estado'], ['horario_id', 'fecha'])
+            .execute();
+
+        this.logger.log(
+            `Asist. docente bulk: ${records.length} registros | ${dto.fecha}`,
+        );
+        return { registrados: records.length };
     }
 
     // ════════════════════════════════════════════════════════════

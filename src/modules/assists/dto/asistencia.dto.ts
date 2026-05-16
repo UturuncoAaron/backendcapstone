@@ -48,3 +48,24 @@ export class ScanQrDto {
     @IsString() @IsNotEmpty() qr_token: string;
     @IsOptional() @IsDateString() fecha?: string;
 }
+
+export class RegistroDocenteDto {
+    @IsUUID()
+    horario_id: string;
+
+    @IsUUID()
+    docente_id: string;
+
+    @IsIn(['presente', 'tardanza', 'ausente', 'permiso', 'licencia'])
+    estado: string;
+}
+
+export class BulkDocenteAsistenciaDto {
+    @IsDateString()
+    fecha: string;
+
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => RegistroDocenteDto)
+    registros: RegistroDocenteDto[];
+}

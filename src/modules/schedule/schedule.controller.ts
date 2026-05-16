@@ -1,10 +1,8 @@
 import {
     Controller, Get, Put, Delete,
-    Param, Body, ParseIntPipe, ParseUUIDPipe,
+    Param, Body, Query, ParseIntPipe, ParseUUIDPipe,
     UseGuards, ForbiddenException,
 } from '@nestjs/common';
-// NOTE: seccion_id y periodo_id en BD son UUID (ver entidades section.entity.ts y
-// period.entity.ts). Antes se usaba ParseIntPipe acá y reventaba con 400.
 import { ScheduleService } from './schedule.service.js';
 import { UpsertFranjaDto } from './dto/schedule.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -57,6 +55,20 @@ export class ScheduleController {
         @Param('periodoId', ParseUUIDPipe) periodoId: string,
     ) {
         return this.scheduleService.getHorarioBySeccion(seccionId, periodoId);
+    }
+
+    /**
+     * GET /api/schedule/hoy?dia=lunes
+     * Devuelve los horarios del día con info de docente y curso.
+     * Usado por el auxiliar para registrar asistencia de docentes.
+     * Si no se envía ?dia=, se infiere automáticamente el día actual del servidor.
+     */
+    @Get('hoy')
+    @Roles('auxiliar', 'admin')
+    getHorarioHoy(@Query('dia') dia?: string) {
+        const DIAS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+        const diaFinal = dia ?? DIAS[new Date().getDay()];
+        return this.scheduleService.getHorariosByDia(diaFinal);
     }
 
     /**
