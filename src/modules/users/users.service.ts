@@ -137,7 +137,7 @@ export class UsersService {
     private readonly auxiliarRepo: Repository<Auxiliar>,
     private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
-  ) {}
+  ) { }
 
   // ══════════════════════════════════════════════════════════════════════════
   // HELPERS PRIVADOS
@@ -512,7 +512,7 @@ export class UsersService {
         'g.id                AS grado_id',
         's.nombre            AS seccion',
         's.id                AS seccion_id',
-        
+
       ])
       .orderBy('a.apellido_paterno', 'ASC')
       .addOrderBy('a.nombre', 'ASC')
@@ -818,14 +818,20 @@ export class UsersService {
 
   async searchAlumnos(query: string): Promise<AlumnoSearchResult[]> {
     if (!query || query.trim().length < 2) return [];
-    // Devolvemos también grado/seccion (matrícula activa) y un padre/tutor
-    // vinculado para que los consumidores (autocomplete del docente, admin,
-    // psicóloga, etc.) puedan mostrar info útil sin tener que hacer un
-    // segundo viaje al servidor.
+
+    const SUB_MATRICULA = `(
+    SELECT DISTINCT ON (mm.alumno_id)
+           mm.alumno_id,
+           mm.seccion_id
+      FROM matriculas mm
+     WHERE mm.activo = true
+     ORDER BY mm.alumno_id, mm.created_at DESC
+  )`;
+
     const rows: AlumnoSearchRow[] = await this.alumnoRepo
       .createQueryBuilder('a')
       .innerJoin('cuentas', 'c', 'c.id = a.id')
-      .leftJoin('matriculas', 'm', 'm.alumno_id = a.id AND m.activo = TRUE')
+      .leftJoin(SUB_MATRICULA, 'm', 'm.alumno_id = a.id')
       .leftJoin('secciones', 's', 's.id = m.seccion_id')
       .leftJoin('grados', 'g', 'g.id = s.grado_id')
       .leftJoin(
@@ -839,9 +845,9 @@ export class UsersService {
             .addSelect('p.relacion', 'padre_relacion')
             .addSelect(
               `ROW_NUMBER() OVER (
-                  PARTITION BY pa.alumno_id
-                  ORDER BY p.apellido_paterno NULLS LAST, p.nombre
-              )`,
+              PARTITION BY pa.alumno_id
+              ORDER BY p.apellido_paterno NULLS LAST, p.nombre
+            )`,
               'rn',
             )
             .from('padre_alumno', 'pa')
@@ -864,16 +870,18 @@ export class UsersService {
         'g.id                AS grado_id',
         's.nombre            AS seccion',
         's.id                AS seccion_id',
-        'padre.padre_id              AS padre_id',
-        'padre.padre_nombre          AS padre_nombre',
+        'padre.padre_id               AS padre_id',
+        'padre.padre_nombre           AS padre_nombre',
         'padre.padre_apellido_paterno AS padre_apellido_paterno',
         'padre.padre_apellido_materno AS padre_apellido_materno',
-        'padre.padre_relacion        AS padre_relacion',
+        'padre.padre_relacion         AS padre_relacion',
       ])
       .where(
-        `a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
-                 OR c.numero_documento ILIKE :q OR a.codigo_estudiante ILIKE :q
-                 OR c.codigo_acceso ILIKE :q`,
+        `a.nombre ILIKE :q
+        OR a.apellido_paterno ILIKE :q
+        OR c.numero_documento ILIKE :q
+        OR a.codigo_estudiante ILIKE :q
+        OR c.codigo_acceso ILIKE :q`,
         { q: `%${query.trim()}%` },
       )
       .orderBy('a.apellido_paterno', 'ASC')
@@ -899,12 +907,12 @@ export class UsersService {
         padre:
           r.padre_id && r.padre_nombre && r.padre_apellido_paterno
             ? {
-                id: r.padre_id,
-                nombre: r.padre_nombre,
-                apellido_paterno: r.padre_apellido_paterno,
-                apellido_materno: r.padre_apellido_materno,
-                relacion: r.padre_relacion,
-              }
+              id: r.padre_id,
+              nombre: r.padre_nombre,
+              apellido_paterno: r.padre_apellido_paterno,
+              apellido_materno: r.padre_apellido_materno,
+              relacion: r.padre_relacion,
+            }
             : null,
       }),
     );
@@ -1377,7 +1385,7 @@ export class UsersService {
   }
 
   async updateUltimoAcceso(id: string): Promise<void> {
-    this.cuentaRepo.update(id, { ultimo_acceso: new Date() }).catch(() => {});
+    this.cuentaRepo.update(id, { ultimo_acceso: new Date() }).catch(() => { });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1521,7 +1529,7 @@ export class UsersService {
 
     const oldKey = await oldKeyPromise;
     if (oldKey && oldKey !== newKey) {
-      this.storageService.deleteFile(oldKey).catch(() => {});
+      this.storageService.deleteFile(oldKey).catch(() => { });
     }
 
     return {
