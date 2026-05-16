@@ -459,6 +459,119 @@ export class AppointmentsService {
   }
 
   /**
+   * Devuelve los slots LIBRES de un profesional para una fecha concreta.
+   *
+   * Combina:
+   *  1. Disponibilidad declarada (o fallback a defaultHours de la regla del rol)
+   *  2. Citas activas (pendiente/confirmada) que ocupan parte del horario
+   *  3. Filtrado de slots que ya pasaron (hora < ahora + MIN_LEAD_MINUTES)
+   *
+   * El frontend puede consumir directamente este endpoint para pintar solo los
+   * slots seleccionables, sin tener que calcular cruces localmente.
+   */
+  async getFreeSlots(
+    cuentaId: string,
+    date: string,
+    slotMinutes?: number,
+  ): Promise<{ start: string; end: string; available: boolean }[]> {
+    if (!date) throw new BadRequestException('El parámetro date es requerido (YYYY-MM-DD)');
+    const ref = new Date(date + 'T00:00:00');
+    if (isNaN(ref.getTime())) throw new BadRequestException('Formato de fecha inválido, usa YYYY-MM-DD');
+
+    const dayIdx = ref.getDay();
+    if (dayIdx === 0) return []; // domingo → sin disponibilidad
+
+    const dayName = WEEK_DAYS[dayIdx] as DiaSemana;
+
+    // 1) Resolver tamaño de slot desde regla del rol
+    const account = await this.loadAccountSummary(cuentaId);
+    if (!account) throw new NotFoundException('Cuenta no encontrada');
+    const role = hasAvailability(account.rol) ? this.toAppointmentRole(account) : null;
+    const rule = role ? getAppointmentRule(role) : null;
+    const effectiveSlot = slotMinutes ?? rule?.slotMinutes ?? 30;
+
+    // 2) Obtener bloques de disponibilidad para ese día
+    const bloques = await this.availabilityRepo.find({
+      where: { cuentaId, diaSemana: dayName, activo: true },
+      order: { horaInicio: 'ASC' },
+    });
+
+    let ranges: { s: number; e: number }[];
+    if (bloques.length > 0) {
+      ranges = bloques.map(b => {
+        const [hS, mS] = b.horaInicio.split(':').map(Number);
+        const [hE, mE] = b.horaFin.split(':').map(Number);
+        return { s: hS * 60 + mS, e: hE * 60 + mE };
+      });
+    } else if (rule) {
+      const [hS, mS] = rule.defaultHours.start.split(':').map(Number);
+      const [hE, mE] = rule.defaultHours.end.split(':').map(Number);
+      ranges = [{ s: hS * 60 + mS, e: hE * 60 + mE }];
+    } else {
+      return [];
+    }
+
+    // Merge overlapping ranges
+    ranges.sort((a, b) => a.s - b.s);
+    const merged: { s: number; e: number }[] = [];
+    for (const r of ranges) {
+      const last = merged[merged.length - 1];
+      if (last && r.s <= last.e) { last.e = Math.max(last.e, r.e); }
+      else { merged.push({ ...r }); }
+    }
+
+    // 3) Obtener citas activas del día
+    const dayStart = new Date(ref); dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(ref); dayEnd.setHours(23, 59, 59, 999);
+
+    const citas = await this.appointmentRepo
+      .createQueryBuilder('a')
+      .select(['a.id', 'a.scheduledAt', 'a.durationMin'])
+      .where('(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)', { cuentaId })
+      .andWhere('a.estado IN (:...states)', { states: ['pendiente', 'confirmada'] })
+      .andWhere('a.fecha_hora >= :dayStart', { dayStart })
+      .andWhere('a.fecha_hora <= :dayEnd', { dayEnd })
+      .getMany();
+
+    // Ocupados como rangos en minutos
+    const occupied = citas.map(c => {
+      const d = new Date(c.scheduledAt);
+      const s = d.getHours() * 60 + d.getMinutes();
+      return { s, e: s + (c.durationMin ?? 30) };
+    });
+
+    // 4) Generar slots dentro de cada bloque de disponibilidad
+    const now = new Date();
+    const isToday = ref.toDateString() === now.toDateString();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const toHHMM = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+
+    const result: { start: string; end: string; available: boolean }[] = [];
+
+    for (const block of merged) {
+      for (let cursor = block.s; cursor + effectiveSlot <= block.e; cursor += effectiveSlot) {
+        const slotEnd = cursor + effectiveSlot;
+
+        // ¿Está en el pasado?
+        const isPast = isToday && cursor < nowMinutes + MIN_LEAD_MINUTES;
+
+        // ¿Colisiona con alguna cita?
+        const isTaken = occupied.some(o => cursor < o.e && slotEnd > o.s);
+
+        result.push({
+          start: toHHMM(cursor),
+          end: toHHMM(slotEnd),
+          available: !isPast && !isTaken,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Reemplaza la disponibilidad completa del profesional.
    * Si hay citas futuras que ya no encajan en el nuevo horario,
    * se cancelan automáticamente y se notifica a los participantes.

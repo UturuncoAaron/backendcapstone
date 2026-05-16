@@ -97,6 +97,21 @@ export class AppointmentsController {
     return this.service.getSlotsTaken(cuentaId, date);
   }
 
+  // ── Slots libres calculados (disponibilidad − ocupados − pasados) ─
+  @Get('free-slots/:cuentaId')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
+  getFreeSlots(
+    @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
+    @Query('date') date: string,
+    @Query('slotMinutes') slotMinutes?: string,
+  ) {
+    return this.service.getFreeSlots(
+      cuentaId,
+      date,
+      slotMinutes ? parseInt(slotMinutes, 10) : undefined,
+    );
+  }
+
   // ── Reemplazar atómicamente toda mi disponibilidad ──────────────
   @Put('availability/bulk')
   @Roles('psicologa', 'docente', 'auxiliar', 'admin')
