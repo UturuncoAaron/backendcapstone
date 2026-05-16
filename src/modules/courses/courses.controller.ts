@@ -1,6 +1,6 @@
 import {
     Controller, Get, Post, Patch, Delete,
-    Body, Param, Query, ParseUUIDPipe, ParseIntPipe,
+    Body, Param, Query, ParseUUIDPipe,
     UseGuards,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service.js';
@@ -31,6 +31,8 @@ export class CoursesController {
     }
 
     // POST /api/courses
+    // periodo_id es UUID (ver schema), no entero. La firma anterior decía `number`
+    // pero Postgres lo recibía como string y funcionaba por coerción del driver.
     @Post()
     @Roles('admin')
     create(@Body() dto: {
@@ -38,7 +40,7 @@ export class CoursesController {
         descripcion?: string;
         docente_id?: string;
         seccion_id: string;
-        periodo_id: number;
+        periodo_id: string;
         color?: string;
     }) {
         return this.coursesService.create(dto);
@@ -47,7 +49,7 @@ export class CoursesController {
     // POST /api/courses/enroll
     @Post('enroll')
     @Roles('admin')
-    enroll(@Body() dto: { alumnoId: string; seccionId: string; periodoId: number }) {
+    enroll(@Body() dto: { alumnoId: string; seccionId: string; periodoId: string }) {
         return this.coursesService.enrollStudent(dto.alumnoId, dto.seccionId, dto.periodoId);
     }
 
@@ -59,11 +61,14 @@ export class CoursesController {
     }
 
     // POST /api/courses/generate/:seccionId/:periodoId
+    // periodoId es UUID. Antes usaba ParseIntPipe → 400 desde el frontend
+    // ("Validation failed (numeric string is expected)") y por eso el editor
+    // de horario reportaba "no deja agregar/generar cursos".
     @Post('generate/:seccionId/:periodoId')
     @Roles('admin')
     generateFromTemplate(
         @Param('seccionId', ParseUUIDPipe) seccionId: string,
-        @Param('periodoId', ParseIntPipe) periodoId: number,
+        @Param('periodoId', ParseUUIDPipe) periodoId: string,
     ) {
         return this.coursesService.generateCoursesFromTemplate(seccionId, periodoId);
     }

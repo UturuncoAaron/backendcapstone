@@ -31,7 +31,29 @@ export class LibretasController {
     @Roles('alumno', 'padre')
     findMine(@CurrentUser() user: AuthUser) {
         const tipo: LibretaTipo = user.rol === 'padre' ? 'padre' : 'alumno';
-        return this.libretasService.findByCuenta(user.id, tipo);
+        return this.libretasService.findByCuenta(user.id, tipo, user.id);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // TRACKING DE LECTURA
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /** Padre o alumno marca una libreta como leída. Idempotente. */
+    @Post(':id/marcar-vista')
+    @Roles('alumno', 'padre')
+    @HttpCode(HttpStatus.OK)
+    marcarVista(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.libretasService.marcarVista(id, user.id);
+    }
+
+    /** Admin/docente consultan quiénes vieron una libreta y cuándo. */
+    @Get(':id/lecturas')
+    @Roles('admin', 'docente')
+    lecturas(@Param('id', ParseUUIDPipe) id: string) {
+        return this.libretasService.listLecturas(id);
     }
 
     @Get('hijo/:alumnoId')

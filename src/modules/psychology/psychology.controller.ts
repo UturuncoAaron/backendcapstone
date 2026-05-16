@@ -9,6 +9,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import {
     CreateRecordDto, UpdateRecordDto, PageQueryDto,
+    CreateInformeDto, UpdateInformeDto,
 } from './dto/psychology.dto.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 
@@ -103,10 +104,86 @@ export class PsychologyController {
         return this.service.getStudentParents(studentId);
     }
 
+    /**
+     * Detalle público de un alumno por id, accesible desde el directorio.
+     * Permite a la psicóloga / docente / auxiliar / admin abrir la ficha
+     * (`/psicologa/student/:id`) sin requerir rol admin.
+     *
+     * No expone credenciales (codigo_acceso, numero_documento, tipo_documento).
+     */
+    @Get('directory/students/:studentId')
+    @Roles('psicologa', 'docente', 'auxiliar', 'admin')
+    getStudentDetail(@Param('studentId', ParseUUIDPipe) studentId: string) {
+        return this.service.getStudentDetail(studentId);
+    }
+
     // ── Listado público de psicólogas ───────────────────────────────
     @Get('psicologas')
     @Roles('alumno', 'padre', 'psicologa', 'docente', 'auxiliar', 'admin')
     listActivePsicologas(@Query('q') q?: string) {
         return this.service.listActivePsicologas(q);
+    }
+
+    // ── Informes psicológicos ───────────────────────────────────────
+    // Solo la psicóloga propietaria puede leer/editar sus informes (incluye
+    // admin? — por ahora NO; las leyes peruanas de salud mental y la
+    // política del colegio piden confidencialidad estricta de la ficha
+    // clínica). Si más adelante se quiere "supervisión" agregar un rol
+    // intermedio (jefe de psicología) en vez de relajar este check.
+
+    @Post('informes')
+    @Roles('psicologa')
+    createInforme(
+        @Body() dto: CreateInformeDto,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.createInforme(user.id, dto);
+    }
+
+    @Get('informes/student/:studentId')
+    @Roles('psicologa')
+    listInformes(
+        @Param('studentId', ParseUUIDPipe) studentId: string,
+        @Query() q: PageQueryDto,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.listInformesByStudent(user.id, studentId, q);
+    }
+
+    @Get('informes/:id')
+    @Roles('psicologa')
+    getInforme(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.findInformeById(user.id, id);
+    }
+
+    @Patch('informes/:id')
+    @Roles('psicologa')
+    updateInforme(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: UpdateInformeDto,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.updateInforme(user.id, id, dto);
+    }
+
+    @Post('informes/:id/finalizar')
+    @Roles('psicologa')
+    finalizeInforme(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.finalizeInforme(user.id, id);
+    }
+
+    @Delete('informes/:id')
+    @Roles('psicologa')
+    deleteInforme(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.deleteInforme(user.id, id);
     }
 }

@@ -1,9 +1,13 @@
 import {
     IsString, IsUUID, IsOptional, IsEnum, IsDateString,
-    Length, Matches, IsInt, Min, Max,
+    Length, Matches, IsInt, Min, Max, IsBoolean,
 } from 'class-validator';
-import { RECORD_CATEGORIES, WEEK_DAYS } from '../psychology.types.js';
-import type { RecordCategory, WeekDay } from '../psychology.types.js';
+import {
+    RECORD_CATEGORIES, WEEK_DAYS, INFORME_TIPOS,
+} from '../psychology.types.js';
+import type {
+    RecordCategory, WeekDay, InformeTipo,
+} from '../psychology.types.js';
  
 // ── Fichas ───────────────────────────────────────────────────────────────────
  
@@ -87,4 +91,84 @@ export class PageQueryDto {
     @Min(1)
     @Max(100)
     limit?: number;
+}
+// ── Informes psicológicos ───────────────────────────────────────────────────
+
+export class CreateInformeDto {
+    @IsUUID()
+    studentId: string;
+
+    @IsEnum(INFORME_TIPOS)
+    tipo: InformeTipo;
+
+    @IsString()
+    @Length(1, 200)
+    titulo: string;
+
+    @IsString()
+    @Length(1, 4000)
+    motivo: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(0, 6000)
+    antecedentes?: string;
+
+    @IsString()
+    @Length(1, 10000)
+    observaciones: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(0, 4000)
+    recomendaciones?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(0, 500)
+    derivadoA?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    confidencial?: boolean;
+}
+
+export class UpdateInformeDto {
+    @IsOptional()
+    @IsEnum(INFORME_TIPOS)
+    tipo?: InformeTipo;
+
+    @IsOptional()
+    @IsString()
+    @Length(1, 200)
+    titulo?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(1, 4000)
+    motivo?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(0, 6000)
+    antecedentes?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(1, 10000)
+    observaciones?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(0, 4000)
+    recomendaciones?: string;
+
+    @IsOptional()
+    @IsString()
+    @Length(0, 500)
+    derivadoA?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    confidencial?: boolean;
 }

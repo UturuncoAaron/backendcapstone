@@ -1,6 +1,6 @@
 import {
     Controller, Get, Post, Put, Patch, Delete,
-    Param, Body, Query, ParseUUIDPipe, ParseIntPipe,
+    Param, Body, Query, ParseUUIDPipe,
     UseGuards, HttpCode,
 } from '@nestjs/common';
 import { GradesService } from './grades.service.js';
@@ -45,24 +45,25 @@ export class GradesController {
         return { success: true, data };
     }
 
-    // GET /api/grades/course/:cursoId?periodoId=<int>
+    // GET /api/grades/course/:cursoId?periodoId=<uuid>
+    // periodoId es UUID; antes se parseaba como entero y rompia con 400.
     @Get('course/:cursoId')
     @Roles('docente', 'admin')
     getCourseGrid(
         @Param('cursoId', ParseUUIDPipe) cursoId: string,
         @CurrentUser() user: AuthUser,
-        @Query('periodoId', new ParseIntPipe({ optional: true })) periodoId?: number,
+        @Query('periodoId') periodoId?: string,
     ) {
         return this.grades.getCourseGrid(cursoId, user, periodoId);
     }
 
-    // GET /api/grades/course/:cursoId/actividades?periodoId=<int>
+    // GET /api/grades/course/:cursoId/actividades?periodoId=<uuid>
     @Get('course/:cursoId/actividades')
     @Roles('docente', 'admin')
     getActividades(
         @Param('cursoId', ParseUUIDPipe) cursoId: string,
         @CurrentUser() user: AuthUser,
-        @Query('periodoId', new ParseIntPipe({ optional: true })) periodoId?: number,
+        @Query('periodoId') periodoId?: string,
     ) {
         return this.grades.getActividadesByCourse(cursoId, user, periodoId);
     }

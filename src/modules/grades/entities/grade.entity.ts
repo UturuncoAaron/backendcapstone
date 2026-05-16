@@ -43,8 +43,8 @@ export class Grade {
     @JoinColumn({ name: 'curso_id' })
     curso: Course;
 
-    @Column({ name: 'periodo_id' })
-    periodo_id: number;
+    @Column({ name: 'periodo_id', type: 'uuid' })
+    periodo_id: string;
 
     @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'periodo_id' })

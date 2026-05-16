@@ -29,16 +29,16 @@ import type { AuthUser } from '../auth/types/auth-user.js';
 @Controller('appointments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AppointmentsController {
-  constructor(private readonly service: AppointmentsService) {}
+  constructor(private readonly service: AppointmentsService) { }
 
   // ══════════════════════════════════════════════════════════════
   // CRUD DE CITAS
   // ══════════════════════════════════════════════════════════════
 
   // ── Crear cita ──────────────────────────────────────────────────
-  // Regla #3: los alumnos NO pueden agendar (se quita 'alumno' del decorador).
+  // El alumno sólo puede crear cita con psicología (validado en el service).
   @Post()
-  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
   create(@Body() dto: CreateAppointmentDto, @CurrentUser() user: AuthUser) {
     return this.service.createAppointment({ id: user.id, rol: user.rol }, dto);
   }
@@ -46,7 +46,7 @@ export class AppointmentsController {
   // Reglas por rol (lo consume el FE para configurar el dialog). Devuelve
   // `null` si el target no participa del flujo de citas.
   @Get('rules/:targetId')
-  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
   getRules(@Param('targetId', ParseUUIDPipe) targetId: string) {
     return this.service.getRulesForTarget(targetId);
   }
@@ -97,6 +97,21 @@ export class AppointmentsController {
     return this.service.getSlotsTaken(cuentaId, date);
   }
 
+  // ── Slots libres calculados (disponibilidad − ocupados − pasados) ─
+  @Get('free-slots/:cuentaId')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
+  getFreeSlots(
+    @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
+    @Query('date') date: string,
+    @Query('slotMinutes') slotMinutes?: string,
+  ) {
+    return this.service.getFreeSlots(
+      cuentaId,
+      date,
+      slotMinutes ? parseInt(slotMinutes, 10) : undefined,
+    );
+  }
+
   // ── Reemplazar atómicamente toda mi disponibilidad ──────────────
   @Put('availability/bulk')
   @Roles('psicologa', 'docente', 'auxiliar', 'admin')
@@ -106,11 +121,18 @@ export class AppointmentsController {
   ) {
     return this.service.replaceAvailability(user.id, dto.items);
   }
+  @Get('count-future')
+  @Roles('psicologa', 'docente', 'admin')
+  async countFuture(@CurrentUser() user: AuthUser) {
+    const count = await this.service.countFutureAppointments(user.id);
+    return { count };
+  }
 
   // ══════════════════════════════════════════════════════════════
   // OPERACIONES POR ID DE CITA  (van AL FINAL para no chocar con
   // las rutas estáticas anteriores)
   // ══════════════════════════════════════════════════════════════
+
 
   // ── Detalle ─────────────────────────────────────────────────────
   @Get(':id')

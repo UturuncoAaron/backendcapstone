@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { Repository, DataSource, EntityManager, SelectQueryBuilder } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import sharp from 'sharp';
 
@@ -440,12 +440,60 @@ export class UsersService {
     const limit = filters.limit ?? 20;
     const offset = (page - 1) * limit;
 
-    const qb = this.alumnoRepo
-      .createQueryBuilder('a')
-      .innerJoin('cuentas', 'c', 'c.id = a.id')
-      .leftJoin('matriculas', 'm', 'm.alumno_id = a.id AND m.activo = true')
-      .leftJoin('secciones', 's', 's.id = m.seccion_id')
-      .leftJoin('grados', 'g', 'g.id = s.grado_id')
+    const SUB_MATRICULA = `(SELECT DISTINCT ON (mm.alumno_id)
+                                   mm.alumno_id, mm.seccion_id
+                              FROM matriculas mm
+                             WHERE mm.activo = true
+                             ORDER BY mm.alumno_id, mm.created_at DESC)`;
+
+    const applyJoinsAndFilters = <T>(
+      qb: SelectQueryBuilder<T>,
+    ): SelectQueryBuilder<T> => {
+      qb.innerJoin('cuentas', 'c', 'c.id = a.id')
+        .leftJoin(SUB_MATRICULA, 'm', 'm.alumno_id = a.id')
+        .leftJoin('secciones', 's', 's.id = m.seccion_id')
+        .leftJoin('grados', 'g', 'g.id = s.grado_id');
+
+      if (filters.seccionId) {
+        qb.andWhere('s.id = :seccionId', { seccionId: filters.seccionId });
+      } else if (filters.gradoId) {
+        // g.id es UUID — no convertir a Number, rompía con
+        // "invalid input syntax for type uuid: NaN".
+        qb.andWhere('g.id = :gradoId', { gradoId: filters.gradoId });
+      }
+
+      if (filters.activo !== undefined) {
+        qb.andWhere('c.activo = :activo', { activo: filters.activo });
+      }
+
+      if (filters.q && filters.q.trim().length >= 2) {
+        const q = `%${filters.q.trim()}%`;
+        qb.andWhere(
+          `(a.nombre           ILIKE :q
+                OR a.apellido_paterno ILIKE :q
+                OR a.apellido_materno ILIKE :q
+                OR c.numero_documento ILIKE :q
+                OR a.codigo_estudiante ILIKE :q)`,
+          { q },
+        );
+      }
+
+      return qb;
+    };
+
+    // Count: usamos COUNT(DISTINCT a.id) con un SELECT explícito y
+    // getRawOne() para evitar el wrapping inestable de .getCount().
+    const countRow = await applyJoinsAndFilters(
+      this.alumnoRepo.createQueryBuilder('a'),
+    )
+      .select('COUNT(DISTINCT a.id)', 'total')
+      .getRawOne<{ total: string }>();
+    const total = Number.parseInt(countRow?.total ?? '0', 10);
+
+    // Data: misma forma de query con SELECT de campos planos.
+    const rows = await applyJoinsAndFilters(
+      this.alumnoRepo.createQueryBuilder('a'),
+    )
       .select([
         'a.id                AS id',
         'a.codigo_estudiante AS codigo_estudiante',
@@ -464,33 +512,8 @@ export class UsersService {
         'g.id                AS grado_id',
         's.nombre            AS seccion',
         's.id                AS seccion_id',
-      ]);
-
-    if (filters.seccionId) {
-      qb.andWhere('s.id = :seccionId', { seccionId: filters.seccionId });
-    } else if (filters.gradoId) {
-      // g.id es UUID — NO usar Number(): rompía con "invalid input syntax for type uuid: NaN".
-      qb.andWhere('g.id = :gradoId', { gradoId: filters.gradoId });
-    }
-
-    if (filters.activo !== undefined) {
-      qb.andWhere('c.activo = :activo', { activo: filters.activo });
-    }
-
-    if (filters.q && filters.q.trim().length >= 2) {
-      const q = `%${filters.q.trim()}%`;
-      qb.andWhere(
-        `(a.nombre           ILIKE :q
-              OR a.apellido_paterno ILIKE :q
-              OR a.apellido_materno ILIKE :q
-              OR c.numero_documento ILIKE :q
-              OR a.codigo_estudiante ILIKE :q)`,
-        { q },
-      );
-    }
-
-    const total = await qb.getCount();
-    const rows = await qb
+        
+      ])
       .orderBy('a.apellido_paterno', 'ASC')
       .addOrderBy('a.nombre', 'ASC')
       .limit(limit)
@@ -503,7 +526,7 @@ export class UsersService {
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: total === 0 ? 0 : Math.ceil(total / limit),
     };
   }
 
@@ -1125,16 +1148,36 @@ export class UsersService {
   // ACTIVAR / DESACTIVAR
   // ══════════════════════════════════════════════════════════════════════════
 
+  /**
+   * Desactiva la cuenta. Si es **docente**, además limpia el `docente_id` de
+   * todos los cursos donde estaba asignado (no borra los cursos: quedan
+   * "sin docente asignado" para que un admin pueda reasignarlos). Esto evita
+   * que un docente desactivado siga apareciendo como titular en grados/cursos.
+   */
   async deactivate(id: string): Promise<{ message: string }> {
-    const result = await this.cuentaRepo
-      .createQueryBuilder()
-      .update()
-      .set({ activo: false })
-      .where('id = :id AND activo = true', { id })
-      .execute();
-    if (!result.affected)
-      throw new NotFoundException(`Cuenta ${id} no encontrada o ya inactiva`);
-    return { message: 'Usuario desactivado correctamente' };
+    return this.dataSource.transaction(async (em) => {
+      const cuenta = await em
+        .getRepository(Cuenta)
+        .findOne({ where: { id }, select: ['id', 'rol', 'activo'] });
+      if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
+      if (!cuenta.activo)
+        throw new NotFoundException(`Cuenta ${id} ya inactiva`);
+
+      await em
+        .getRepository(Cuenta)
+        .update({ id }, { activo: false });
+
+      if (cuenta.rol === 'docente') {
+        // Cursos asignados → docente_id = NULL. El curso sigue vivo pero
+        // "sin docente"; el admin podrá reasignar.
+        await em.query(
+          `UPDATE cursos SET docente_id = NULL WHERE docente_id = $1`,
+          [id],
+        );
+      }
+
+      return { message: 'Usuario desactivado correctamente' };
+    });
   }
 
   async reactivate(id: string): Promise<{ message: string }> {
@@ -1227,6 +1270,59 @@ export class UsersService {
       padre: `${padre.nombre} ${padre.apellido_paterno}`,
       alumno: `${alumno.nombre} ${alumno.apellido_paterno}`,
     };
+  }
+
+  /**
+   * Últimos vínculos padre-alumno creados (panel "Vínculos recientes" del
+   * admin). Persistente — antes vivía solo en el state del componente y se
+   * perdía al recargar.
+   */
+  async getRecentParentLinks(limit = 10) {
+    const rows = await this.dataSource.query<
+      Array<{
+        padre_id: string;
+        alumno_id: string;
+        created_at: Date;
+        padre_nombre: string;
+        padre_apellido: string;
+        alumno_nombre: string;
+        alumno_apellido: string;
+      }>
+    >(
+      `SELECT pa.padre_id, pa.alumno_id, pa.created_at,
+              p.nombre  AS padre_nombre,  p.apellido_paterno AS padre_apellido,
+              a.nombre  AS alumno_nombre, a.apellido_paterno AS alumno_apellido
+         FROM padre_alumno pa
+         JOIN padres  p ON p.id = pa.padre_id
+         JOIN alumnos a ON a.id = pa.alumno_id
+        ORDER BY pa.created_at DESC
+        LIMIT $1`,
+      [limit],
+    );
+    return rows.map((r) => ({
+      id: `${r.padre_id}_${r.alumno_id}`,
+      padre: `${r.padre_nombre} ${r.padre_apellido}`,
+      alumno: `${r.alumno_nombre} ${r.alumno_apellido}`,
+      created_at: r.created_at,
+    }));
+  }
+
+  /**
+   * Padres vinculados a un alumno (mostrar en el perfil del alumno).
+   * Devuelve datos básicos sin email para no exponer PII innecesaria al
+   * docente o al propio alumno.
+   */
+  async getPadresOfAlumno(alumnoId: string) {
+    return this.dataSource.query(
+      `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno,
+              c.telefono, c.numero_documento
+         FROM padre_alumno pa
+         JOIN padres  p ON p.id = pa.padre_id
+         JOIN cuentas c ON c.id = p.id AND c.activo = TRUE
+        WHERE pa.alumno_id = $1
+        ORDER BY p.apellido_paterno, p.nombre`,
+      [alumnoId],
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════

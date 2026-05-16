@@ -9,6 +9,7 @@ import {
   NOTIFICATION_EVENT_NAMES,
   AnnouncementCreatedEvent,
 } from '../notifications/events/notification-events.js';
+import { AttachmentsService } from '../attachments/attachments.service.js';
 
 @Injectable()
 export class AnnouncementsService {
@@ -16,6 +17,7 @@ export class AnnouncementsService {
     @InjectRepository(Announcement)
     private readonly announcementRepo: Repository<Announcement>,
     private readonly events: EventEmitter2,
+    private readonly attachments: AttachmentsService,
   ) {}
 
   async create(adminId: string, dto: CreateAnnouncementDto) {
@@ -63,7 +65,9 @@ export class AnnouncementsService {
       );
     }
 
-    return qb.getMany();
+    const rows = await qb.getMany();
+    const map = await this.attachments.listByOwnersBulk('announcement', rows.map(r => r.id));
+    return rows.map(r => ({ ...r, attachments: map.get(r.id) ?? [] }));
   }
 
   async findOne(id: string) {
@@ -73,11 +77,14 @@ export class AnnouncementsService {
     });
     if (!announcement)
       throw new NotFoundException(`Comunicado ${id} no encontrado`);
-    return announcement;
+    const attachments = await this.attachments.listByOwner('announcement', id);
+    return { ...announcement, attachments };
   }
 
   async remove(id: string) {
-    const announcement = await this.findOne(id);
+    const announcement = await this.announcementRepo.findOne({ where: { id } });
+    if (!announcement)
+      throw new NotFoundException(`Comunicado ${id} no encontrado`);
     announcement.activo = false;
     await this.announcementRepo.save(announcement);
     return { message: 'Comunicado desactivado correctamente' };

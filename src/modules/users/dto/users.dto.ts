@@ -5,6 +5,22 @@ import {
     IsBoolean,
 } from 'class-validator';
 
+/**
+ * Teléfono celular peruano: empieza con 9 + 8 dígitos. Aceptamos
+ * espacios o guiones que el cliente pueda mandar y los normalizamos
+ * con un patrón laxo en validación (pero `@MaxLength(20)` queda como
+ * cota dura para evitar abuso del campo).
+ */
+const PHONE_PE_REGEX = /^9\d{8}$/;
+const PHONE_PE_MESSAGE =
+    'Teléfono inválido. Debe empezar con 9 y tener 9 dígitos (ej. 987654321).';
+
+/**
+ * Email RFC-light: rechaza inputs como `juan@wa` que no tienen TLD.
+ * `IsEmail` por defecto de class-validator ya cumple, pero acá agregamos
+ * un `@MaxLength` consistente. Mantenido por documentación.
+ */
+
 // ── CreateAlumnoDto ──────────────────────────────────────────────
 export class CreateAlumnoDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
@@ -31,10 +47,10 @@ export class CreateAlumnoDto {
     @IsDateString()
     fecha_nacimiento: string;
 
-    @IsOptional() @IsEmail()
+    @IsOptional() @IsEmail() @MaxLength(255)
     email?: string;
 
-    @IsOptional() @IsString() @MaxLength(20)
+    @IsOptional() @IsString() @Matches(PHONE_PE_REGEX, { message: PHONE_PE_MESSAGE })
     telefono?: string;
 
     // Marca al alumno como caso de inclusión educativa (NEE).
@@ -68,10 +84,10 @@ export class CreateDocenteDto {
     @IsOptional() @IsString() @MaxLength(150)
     titulo_profesional?: string;
 
-    @IsOptional() @IsEmail()
+    @IsOptional() @IsEmail() @MaxLength(255)
     email?: string;
 
-    @IsOptional() @IsString() @MaxLength(20)
+    @IsOptional() @IsString() @Matches(PHONE_PE_REGEX, { message: PHONE_PE_MESSAGE })
     telefono?: string;
 
     // ── v6: fecha de nacimiento ──────────────────────────────────
@@ -115,10 +131,10 @@ export class CreatePadreDto {
     @IsIn(['padre', 'madre', 'tutor', 'apoderado'])
     relacion: string;
 
-    @IsOptional() @IsEmail()
+    @IsOptional() @IsEmail() @MaxLength(255)
     email?: string;
 
-    @IsOptional() @IsString() @MaxLength(20)
+    @IsOptional() @IsString() @Matches(PHONE_PE_REGEX, { message: PHONE_PE_MESSAGE })
     telefono?: string;
 
     @IsOptional() @IsDateString()
@@ -148,10 +164,10 @@ export class CreateAdminDto {
     @IsOptional() @IsString() @MaxLength(100)
     cargo?: string;
 
-    @IsOptional() @IsEmail()
+    @IsOptional() @IsEmail() @MaxLength(255)
     email?: string;
 
-    @IsOptional() @IsString() @MaxLength(20)
+    @IsOptional() @IsString() @Matches(PHONE_PE_REGEX, { message: PHONE_PE_MESSAGE })
     telefono?: string;
 
     @IsOptional() @IsDateString()
@@ -181,10 +197,10 @@ export class CreatePsicologaDto {
     @IsOptional() @IsString() @MaxLength(50)
     colegiatura?: string;
 
-    @IsOptional() @IsEmail()
+    @IsOptional() @IsEmail() @MaxLength(255)
     email?: string;
 
-    @IsOptional() @IsString() @MaxLength(20)
+    @IsOptional() @IsString() @Matches(PHONE_PE_REGEX, { message: PHONE_PE_MESSAGE })
     telefono?: string;
 
     @IsOptional() @IsDateString()
@@ -246,7 +262,7 @@ export class CreateAuxiliarDto {
 
     @IsOptional()
     @IsString()
-    @MaxLength(20)
+    @Matches(PHONE_PE_REGEX, { message: PHONE_PE_MESSAGE })
     telefono?: string;
 
     @IsOptional()

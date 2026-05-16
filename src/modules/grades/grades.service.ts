@@ -9,6 +9,18 @@ import { CreateGradeDto } from './dto/create-grade.dto.js';
 import { UpdateGradeDto } from './dto/update-grade.dto.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 
+/**
+ * Guard para parámetros que deben ser UUID. El frontend a veces manda
+ * periodos legacy con `"1"` (de cuando periodo era integer) y al pasarlos
+ * crudos a Postgres tira `invalid input syntax for type uuid`. En esos
+ * casos preferimos caer al valor por defecto en vez de devolver 500.
+ */
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value: unknown): value is string {
+    return typeof value === 'string' && UUID_RE.test(value);
+}
+
 @Injectable()
 export class GradesService {
     constructor(
@@ -206,7 +218,7 @@ export class GradesService {
     }
 
     async getActividadesByCourse(
-        cursoId: string, user: AuthUser, periodoId?: number,
+        cursoId: string, user: AuthUser, periodoId?: string,
     ) {
         const [curso] = await this.dataSource.query(
             `SELECT id, periodo_id, docente_id FROM cursos WHERE id = $1`,
@@ -216,7 +228,10 @@ export class GradesService {
         if (user.rol === 'docente' && curso.docente_id !== user.id) {
             throw new ForbiddenException('No eres el docente de este curso');
         }
-        const resolvedPeriodoId = periodoId ?? curso.periodo_id;
+        // periodoId es UUID en BD. Si el frontend manda un "1" legacy o
+        // cualquier string no-UUID, en vez de explotar caemos al período
+        // del propio curso.
+        const resolvedPeriodoId = isUuid(periodoId) ? periodoId : curso.periodo_id;
         const actividades = await this.dataSource.query(`
             SELECT
                 titulo, tipo,
@@ -234,7 +249,7 @@ export class GradesService {
     }
 
     /** Planilla del docente: alumnos × actividades del periodo. */
-    async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: number) {
+    async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: string) {
         const [curso] = await this.dataSource.query(
             `SELECT id, seccion_id, periodo_id, docente_id
                FROM cursos WHERE id = $1`,
@@ -244,7 +259,10 @@ export class GradesService {
         if (user.rol === 'docente' && curso.docente_id !== user.id) {
             throw new ForbiddenException('No eres el docente de este curso');
         }
-        const resolvedPeriodoId = periodoId ?? curso.periodo_id;
+        // Mismo guard que en getActividadesByCourse: si no es UUID válido
+        // (típicamente el frontend manda "1" legacy), usamos el período del
+        // curso en vez de tirar 500.
+        const resolvedPeriodoId = isUuid(periodoId) ? periodoId : curso.periodo_id;
 
         const alumnos = await this.dataSource.query(`
             SELECT a.id AS alumno_id, a.codigo_estudiante,
