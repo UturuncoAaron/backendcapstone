@@ -1151,6 +1151,19 @@ export class UsersService {
     this.sanitize(row);
     return row;
   }
+  async getNombreById(id: string, rol: string): Promise<{
+    nombre: string;
+    apellido_paterno: string;
+    apellido_materno: string | null;
+  } | null> {
+    const repo = this.repoByRol(rol);
+    if (!repo) return null;
+    const row = await repo.findOne({
+      where: { id },
+      select: ['nombre', 'apellido_paterno', 'apellido_materno'],
+    });
+    return row ?? null;
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ACTIVAR / DESACTIVAR

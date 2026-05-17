@@ -43,7 +43,7 @@ export class UsersController {
     }
 
     @Get('alumnos')
-    @Roles('admin', 'auxiliar')   // ← auxiliar necesita este endpoint
+    @Roles('admin', 'auxiliar', 'psicologa')
     findAlumnos(
         @Query('q') q?: string,
         @Query('grado_id') gradoId?: string,

@@ -11,6 +11,8 @@ import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
+import { PermisoGuard } from '../auth/guards/permiso.guard.js';
+import { RequierePermiso } from '../auth/decorators/requiere-permiso.decorator.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('announcements')
@@ -32,7 +34,8 @@ export class AnnouncementsController {
     }
 
     @Post()
-    @Roles('admin')
+    @UseGuards(JwtAuthGuard, PermisoGuard)
+    @RequierePermiso('comunicados', 'crear')
     create(
         @CurrentUser() user: AuthUser,
         @Body() dto: CreateAnnouncementDto,

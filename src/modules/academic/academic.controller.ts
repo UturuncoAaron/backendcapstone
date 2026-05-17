@@ -16,13 +16,11 @@ export class AcademicController {
     constructor(private readonly academicService: AcademicService) { }
 
     // ── GRADOS ───────────────────────────────────────────────────
-
     @Get('grados')
-    @Roles('admin', 'docente', 'alumno', 'padre')
+    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa')
     findAllGrados() {
         return this.academicService.findAllGrados();
     }
-
     @Get('grados/:id')
     @Roles('admin', 'docente')
     findGrado(@Param('id', ParseUUIDPipe) id: string) {
@@ -31,8 +29,9 @@ export class AcademicController {
 
     // ── SECCIONES ────────────────────────────────────────────────
 
+
     @Get('secciones')
-    @Roles('admin', 'docente')
+    @Roles('admin', 'docente', 'psicologa')
     findAllSecciones(@Query('gradoId') gradoId?: string) {
         return this.academicService.findAllSecciones(gradoId);
     }
@@ -71,13 +70,13 @@ export class AcademicController {
     // ── PERIODOS ─────────────────────────────────────────────────
 
     @Get('periodos')
-    @Roles('admin', 'docente', 'alumno', 'padre')
+    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa')
     findAllPeriodos() {
         return this.academicService.findAllPeriodos();
     }
 
     @Get('periodos/activo')
-    @Roles('admin', 'docente', 'alumno', 'padre')
+    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa')
     findPeriodoActivo() {
         return this.academicService.findPeriodoActivo();
     }

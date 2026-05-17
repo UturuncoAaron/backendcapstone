@@ -11,6 +11,15 @@ import {
 } from '../notifications/events/notification-events.js';
 import { AttachmentsService } from '../attachments/attachments.service.js';
 
+// Mapeo rol JWT → valor en el array destinatarios de la BD
+const ROL_A_DESTINATARIO: Record<string, string> = {
+  alumno: 'alumnos',
+  docente: 'docentes',
+  padre: 'padres',
+  psicologa: 'psicologas',
+  admin: 'todos',
+};
+
 @Injectable()
 export class AnnouncementsService {
   constructor(
@@ -18,11 +27,68 @@ export class AnnouncementsService {
     private readonly announcementRepo: Repository<Announcement>,
     private readonly events: EventEmitter2,
     private readonly attachments: AttachmentsService,
-  ) {}
+  ) { }
 
-  async create(adminId: string, dto: CreateAnnouncementDto) {
+  // ══════════════════════════════════════════════════════════════
+  // HELPERS PRIVADOS
+  // ══════════════════════════════════════════════════════════════
+
+  /**
+   * Fragmento SQL reutilizable para obtener el nombre del autor.
+   * El COALESCE recorre las tablas especializadas en orden —
+   * si mañana se agrega un nuevo rol que puede crear comunicados,
+   * solo se añade un LEFT JOIN y un COALESCE más aquí.
+   */
+  private get autorJoins(): string {
+    return `
+      INNER JOIN cuentas    c   ON c.id  = a.created_by
+      LEFT  JOIN admins     adm ON adm.id = a.created_by
+      LEFT  JOIN psicologas psi ON psi.id = a.created_by
+      LEFT  JOIN docentes   doc ON doc.id = a.created_by
+      LEFT  JOIN auxiliares aux ON aux.id = a.created_by
+    `;
+  }
+
+  private get autorSelect(): string {
+    return `
+      c.id  AS autor_id,
+      c.rol AS autor_rol,
+      COALESCE(adm.nombre,           psi.nombre,           doc.nombre,           aux.nombre)           AS autor_nombre,
+      COALESCE(adm.apellido_paterno, psi.apellido_paterno, doc.apellido_paterno, aux.apellido_paterno) AS autor_apellido
+    `;
+  }
+
+  private mapAutor(r: any) {
+    return r.autor_id
+      ? {
+        id: r.autor_id,
+        rol: r.autor_rol,
+        nombre: r.autor_nombre ?? '',
+        apellido_paterno: r.autor_apellido ?? '',
+      }
+      : null;
+  }
+
+  private mapRow(r: any, attachments: any[] = []) {
+    return {
+      id: r.id,
+      titulo: r.titulo,
+      contenido: r.contenido,
+      destinatarios: r.destinatarios,
+      activo: r.activo,
+      created_at: r.created_at,
+      autor: this.mapAutor(r),
+      attachments,
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // CREATE
+  // ══════════════════════════════════════════════════════════════
+
+  async create(createdById: string, dto: CreateAnnouncementDto) {
     const announcement = this.announcementRepo.create({
-      admin_id: adminId,
+      created_by: createdById,
       titulo: dto.titulo,
       contenido: dto.contenido,
       destinatarios: dto.destinatarios ?? ['todos'],
@@ -34,52 +100,80 @@ export class AnnouncementsService {
       titulo: saved.titulo,
       contenido: saved.contenido,
       destinatarios: saved.destinatarios,
-      createdById: adminId,
+      createdById,
     } satisfies AnnouncementCreatedEvent);
 
     return saved;
   }
 
-  async findAll(query: QueryAnnouncementsDto) {
-    const qb = this.announcementRepo
-      .createQueryBuilder('a')
-      .leftJoinAndSelect('a.admin', 'admin')
-      .select([
-        'a.id',
-        'a.titulo',
-        'a.contenido',
-        'a.destinatarios',
-        'a.activo',
-        'a.created_at',
-        'admin.id',
-        'admin.nombre',
-        'admin.apellido_paterno',
-      ])
-      .where('a.activo = true')
-      .orderBy('a.created_at', 'DESC');
+  // ══════════════════════════════════════════════════════════════
+  // FIND ALL
+  // ══════════════════════════════════════════════════════════════
 
-    if (query.rol) {
-      qb.andWhere(
-        ":rol = ANY(a.destinatarios) OR 'todos' = ANY(a.destinatarios)",
-        { rol: query.rol },
-      );
+  async findAll(query: QueryAnnouncementsDto) {
+    const dest = query.rol
+      ? (ROL_A_DESTINATARIO[query.rol] ?? query.rol)
+      : null;
+
+    const params: any[] = [];
+    let whereExtra = '';
+
+    if (dest) {
+      params.push(dest);
+      whereExtra = `AND ($${params.length} = ANY(a.destinatarios) OR 'todos' = ANY(a.destinatarios))`;
     }
 
-    const rows = await qb.getMany();
-    const map = await this.attachments.listByOwnersBulk('announcement', rows.map(r => r.id));
-    return rows.map(r => ({ ...r, attachments: map.get(r.id) ?? [] }));
+    const sql = `
+      SELECT
+        a.id, a.titulo, a.contenido, a.destinatarios,
+        a.activo, a.created_at,
+        ${this.autorSelect}
+      FROM comunicados a
+      ${this.autorJoins}
+      WHERE a.activo = true
+      ${whereExtra}
+      ORDER BY a.created_at DESC
+    `;
+
+    const rows = await this.announcementRepo.query(sql, params);
+
+    const attachmentsMap = await this.attachments.listByOwnersBulk(
+      'announcement',
+      rows.map((r: any) => r.id),
+    );
+
+    return rows.map((r: any) =>
+      this.mapRow(r, attachmentsMap.get(r.id) ?? [])
+    );
   }
 
+  // ══════════════════════════════════════════════════════════════
+  // FIND ONE
+  // ══════════════════════════════════════════════════════════════
+
   async findOne(id: string) {
-    const announcement = await this.announcementRepo.findOne({
-      where: { id },
-      relations: ['admin'],
-    });
-    if (!announcement)
+    const sql = `
+      SELECT
+        a.id, a.titulo, a.contenido, a.destinatarios,
+        a.activo, a.created_at,
+        ${this.autorSelect}
+      FROM comunicados a
+      ${this.autorJoins}
+      WHERE a.id = $1
+    `;
+
+    const rows = await this.announcementRepo.query(sql, [id]);
+
+    if (!rows.length)
       throw new NotFoundException(`Comunicado ${id} no encontrado`);
+
     const attachments = await this.attachments.listByOwner('announcement', id);
-    return { ...announcement, attachments };
+    return this.mapRow(rows[0], attachments);
   }
+
+  // ══════════════════════════════════════════════════════════════
+  // REMOVE (soft delete)
+  // ══════════════════════════════════════════════════════════════
 
   async remove(id: string) {
     const announcement = await this.announcementRepo.findOne({ where: { id } });

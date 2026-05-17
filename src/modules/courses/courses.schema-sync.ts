@@ -7,7 +7,13 @@ import { DataSource } from 'typeorm';
  *
  * Se ejecuta una vez al arrancar la app. Todo es idempotente:
  * si ya está correcto, no toca nada.
+ * Se ejecuta una vez al arrancar la app. Todo es idempotente:
+ * si ya está correcto, no toca nada.
  *
+ *  1. Dedupe de matrículas: si un alumno tiene 2+ matrículas activas
+ *     en la misma (seccion, anio), conserva la más reciente y baja las demás.
+ *
+ *  2. Índices de performance para las queries más calientes.
  *  1. Dedupe de matrículas: si un alumno tiene 2+ matrículas activas
  *     en la misma (seccion, anio), conserva la más reciente y baja las demás.
  *
@@ -36,6 +42,9 @@ export class CoursesSchemaSync implements OnApplicationBootstrap {
      *  - idx_matriculas_distinct_on : DISTINCT ON (alumno_id ORDER BY created_at DESC)
      *  - idx_horarios_curso_dia_hora: dashboard del docente (horario semanal)
      *  - idx_notas_curso_periodo    : planilla de calificaciones por curso/período
+     *  - idx_matriculas_distinct_on : DISTINCT ON (alumno_id ORDER BY created_at DESC)
+     *  - idx_horarios_curso_dia_hora: dashboard del docente (horario semanal)
+     *  - idx_notas_curso_periodo    : planilla de calificaciones por curso/período
      */
     private async ensurePerformanceIndexes(): Promise<void> {
         await this.dataSource.query(`
@@ -52,9 +61,13 @@ export class CoursesSchemaSync implements OnApplicationBootstrap {
                 ON notas (curso_id, periodo_id, fecha)
         `);
         this.logger.log('Índices de performance verificados');
+        this.logger.log('Índices de performance verificados');
     }
 
     /**
+     * Para cada (alumno_id, seccion_id, anio), conserva como activo = true
+     * la matrícula con created_at más reciente y desactiva las demás.
+     * No borra filas: queda traza histórica.
      * Para cada (alumno_id, seccion_id, anio), conserva como activo = true
      * la matrícula con created_at más reciente y desactiva las demás.
      * No borra filas: queda traza histórica.
