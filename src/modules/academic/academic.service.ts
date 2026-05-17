@@ -66,7 +66,6 @@ export class AcademicService {
 
         const periodoActivo = await this.periodoRepo.findOne({ where: { activo: true } });
 
-        // saved.id y periodoActivo.id son ambos UUID (string).
         const cursosGenerados = periodoActivo
             ? await this.coursesService.generateCoursesFromTemplate(
                 saved.id as any,
@@ -150,6 +149,7 @@ export class AcademicService {
             [anio],
         );
 
+        // ── CAMBIO: matriculas ahora tiene anio, no periodo_id ──
         const alumnos = await this.dataSource.query(
             `SELECT DISTINCT
                 a.id, a.codigo_estudiante,
@@ -158,8 +158,7 @@ export class AcademicService {
                 NULL::text AS foto_url
              FROM matriculas m
              JOIN alumnos a ON a.id = m.alumno_id
-             JOIN periodos p ON p.id = m.periodo_id
-             WHERE m.seccion_id = $1 AND m.activo = TRUE AND p.anio = $2
+             WHERE m.seccion_id = $1 AND m.activo = TRUE AND m.anio = $2
              ORDER BY a.apellido_paterno, a.nombre`,
             [sec.id, anio],
         );
@@ -262,15 +261,23 @@ export class AcademicService {
     }
 
     // ── MATRÍCULAS ───────────────────────────────────────────────
+    // ── CAMBIO: ya no hay periodo_id en matriculas — filtra por anio ──
 
-    async findMatriculas(periodoId?: string, seccionId?: string) {
+    async findMatriculas(anio?: number, seccionId?: string) {
         const params: any[] = [];
         const conditions: string[] = [];
 
-        if (periodoId) {
-            params.push(periodoId);
-            conditions.push(`m.periodo_id = $${params.length}`);
+        // Usar el año del periodo activo si no se provee
+        let anioFinal = anio;
+        if (!anioFinal) {
+            const periodoActivo = await this.dataSource.query(
+                `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
+            );
+            anioFinal = periodoActivo[0]?.anio ?? new Date().getFullYear();
         }
+
+        params.push(anioFinal);
+        conditions.push(`m.anio = $${params.length}`);
 
         if (seccionId) {
             params.push(seccionId);
@@ -281,7 +288,7 @@ export class AcademicService {
 
         const rows = await this.dataSource.query(
             `SELECT
-                m.id, m.activo, m.fecha_matricula, m.periodo_id, m.seccion_id,
+                m.id, m.activo, m.fecha_matricula, m.anio, m.seccion_id,
                 a.id               AS alumno_id,
                 a.nombre, a.apellido_paterno, a.apellido_materno, a.codigo_estudiante,
                 s.nombre           AS seccion_nombre,
@@ -302,7 +309,7 @@ export class AcademicService {
             id: r.id,
             activo: r.activo,
             fecha_matricula: r.fecha_matricula,
-            periodo_id: r.periodo_id,
+            anio: r.anio,
             seccion_id: r.seccion_id,
             alumno_id: r.alumno_id,
             nombre: r.nombre,

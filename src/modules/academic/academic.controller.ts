@@ -42,7 +42,6 @@ export class AcademicController {
     createSeccion(
         @Body() body: { grado_id: string; nombre: string; capacidad?: number },
     ) {
-        // ⚠️ NUNCA hagas Number(body.grado_id) — es un UUID, no un número.
         return this.academicService.createSeccion(
             body.grado_id,
             body.nombre,
@@ -108,9 +107,12 @@ export class AcademicController {
     @Get('matriculas')
     @Roles('admin')
     findMatriculas(
-        @Query('periodo_id') periodoId?: string,
+        @Query('anio') anio?: string,
         @Query('seccion_id') seccionId?: string,
     ) {
-        return this.academicService.findMatriculas(periodoId, seccionId);
+        return this.academicService.findMatriculas(
+            anio ? parseInt(anio, 10) : undefined,
+            seccionId,
+        );
     }
 }

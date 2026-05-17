@@ -166,4 +166,13 @@ export class AssistsController {
     reporte(@Query() q: ReporteAsistenciaQueryDto) {
         return this.svc.reporte(q);
     }
+
+    // ── HORARIOS DEL DÍA (auxiliar) ──
+
+    /** Devuelve los bloques de horario del día con estado de asistencia ya registrado. */
+    @Get('docente/horarios-dia')
+    @Roles('auxiliar', 'admin')
+    horariosDelDia(@Query('fecha') fecha?: string) {
+        return this.svc.getHorariosDelDia(fecha);
+    }
 }

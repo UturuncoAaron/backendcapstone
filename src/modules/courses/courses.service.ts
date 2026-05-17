@@ -29,10 +29,14 @@ export class CoursesService {
         }
 
         if (rol === 'alumno') {
-            const enrollments = await this.enrollmentRepo.find({
-                where: { alumno_id: userId, activo: true },
-                relations: ['seccion'],
-            });
+            // ── CAMBIO: Enrollment ya no tiene periodo_id, busca por anio ──
+            const anioActual = new Date().getFullYear();
+            const enrollments = await this.dataSource.query<{ seccion_id: string }[]>(
+                `SELECT seccion_id FROM matriculas
+                 WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE
+                 LIMIT 10`,
+                [userId, anioActual],
+            );
             if (!enrollments.length) return [];
 
             const periodoActivo = await this.periodRepo.findOne({ where: { activo: true } });
@@ -174,97 +178,116 @@ export class CoursesService {
     // ── Matrículas ────────────────────────────────────────────
 
     /**
-     * Matrícula a un alumno en una sección para un período dado y, en la
-     * misma transacción, **desactiva cualquier otra matrícula activa** del
-     * mismo alumno en el mismo período. Garantiza la regla de negocio:
-     * "1 alumno = 1 sección activa por período" (cubre también grado, porque
-     * cada sección vive en un solo grado).
-     *
-     * periodoId es UUID (ver schema).
+     * Matricula a un alumno en una sección para un AÑO dado.
+     * La matrícula es anual — un alumno solo puede estar en una sección por año.
+     * El periodoId recibido es el UUID del periodo activo, del cual extraemos el año.
      */
     async enrollStudent(alumnoId: string, seccionId: string, periodoId: string) {
+        // Obtener el año del periodo
+        const [periodo] = await this.dataSource.query<{ anio: number }[]>(
+            `SELECT anio FROM periodos WHERE id = $1`,
+            [periodoId],
+        );
+        if (!periodo) throw new NotFoundException(`Periodo ${periodoId} no encontrado`);
+        const anio = periodo.anio;
+
         return this.dataSource.transaction(async (manager) => {
-            const repo = manager.getRepository(Enrollment);
+            // 1) Desactivar matrículas del alumno en otras secciones del mismo año
+            await manager.query(
+                `UPDATE matriculas
+                 SET activo = FALSE
+                 WHERE alumno_id = $1 AND anio = $2 AND seccion_id <> $3 AND activo = TRUE`,
+                [alumnoId, anio, seccionId],
+            );
 
-            // 1) Bajar todas las matrículas activas del alumno en este período
-            //    que NO sean la sección destino. Si el alumno ya estaba en otra
-            //    sección (incluso de otro grado), aquí lo damos de baja.
-            await repo.createQueryBuilder()
-                .update(Enrollment)
-                .set({ activo: false })
-                .where('alumno_id = :alumnoId', { alumnoId })
-                .andWhere('periodo_id = :periodoId', { periodoId })
-                .andWhere('seccion_id <> :seccionId', { seccionId })
-                .andWhere('activo = true')
-                .execute();
-
-            // 2) Reactivar / crear la matrícula en la sección destino.
-            const existing = await repo.findOne({
-                where: { alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId },
-            });
+            // 2) Buscar matrícula existente en esta sección/año
+            const [existing] = await manager.query<{ id: string; activo: boolean }[]>(
+                `SELECT id, activo FROM matriculas
+                 WHERE alumno_id = $1 AND seccion_id = $2 AND anio = $3`,
+                [alumnoId, seccionId, anio],
+            );
 
             if (existing) {
                 if (!existing.activo) {
-                    existing.activo = true;
-                    return repo.save(existing);
+                    await manager.query(
+                        `UPDATE matriculas SET activo = TRUE WHERE id = $1`,
+                        [existing.id],
+                    );
                 }
-                return existing;
+                const [row] = await manager.query(
+                    `SELECT * FROM matriculas WHERE id = $1`, [existing.id],
+                );
+                return row;
             }
 
-            return repo.save(
-                repo.create({
-                    alumno_id: alumnoId, seccion_id: seccionId, periodo_id: periodoId,
-                }),
+            // 3) Crear nueva matrícula
+            const [created] = await manager.query(
+                `INSERT INTO matriculas (alumno_id, seccion_id, anio, activo, fecha_matricula)
+                 VALUES ($1, $2, $3, TRUE, CURRENT_DATE)
+                 RETURNING *`,
+                [alumnoId, seccionId, anio],
             );
+            return created;
         });
     }
 
     async unenrollStudent(enrollmentId: string) {
-        const enrollment = await this.enrollmentRepo.findOne({
-            where: { id: enrollmentId, activo: true },
-        });
+        const [enrollment] = await this.dataSource.query<{ id: string; activo: boolean }[]>(
+            `SELECT id, activo FROM matriculas WHERE id = $1 AND activo = TRUE`,
+            [enrollmentId],
+        );
         if (!enrollment) throw new NotFoundException(`Matrícula ${enrollmentId} no encontrada`);
 
-        enrollment.activo = false;
-        await this.enrollmentRepo.save(enrollment);
+        await this.dataSource.query(
+            `UPDATE matriculas SET activo = FALSE WHERE id = $1`,
+            [enrollmentId],
+        );
         return { message: 'Alumno retirado de la sección' };
     }
 
     /**
-     * Lista los alumnos matriculados activos en una sección.
-     *
-     * - admin / docente: ven todos los datos del alumno (incluido email).
-     * - alumno: sólo puede consultar la sección donde él mismo está matriculado.
-     *           Se redacta `email` (PII) para no exponer datos de compañeros.
-     *           Cualquier otro caso lanza ForbiddenException.
+     * Lista los alumnos matriculados activos en una sección (año actual o del periodo activo).
      */
     async getEnrollmentsBySeccion(
         seccionId: string,
         caller?: { id: string; rol: string },
     ) {
+        // Verificar que el alumno esté en esta sección si el caller es alumno
         if (caller?.rol === 'alumno') {
-            const matriculado = await this.enrollmentRepo.findOne({
-                where: { seccion_id: seccionId, alumno_id: caller.id, activo: true },
-            });
+            const anioActual = new Date().getFullYear();
+            const [matriculado] = await this.dataSource.query(
+                `SELECT id FROM matriculas
+                 WHERE seccion_id = $1 AND alumno_id = $2 AND anio = $3 AND activo = TRUE`,
+                [seccionId, caller.id, anioActual],
+            );
             if (!matriculado) {
                 throw new ForbiddenException('No estás matriculado en esta sección');
             }
         }
 
-        const enrollments = await this.enrollmentRepo.find({
-            where: { seccion_id: seccionId, activo: true },
-            relations: ['alumno'],
-            order: { alumno: { apellido_paterno: 'ASC' } },
-        });
+        // Obtener año del periodo activo
+        const [periodoActivo] = await this.dataSource.query<{ anio: number }[]>(
+            `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
+        );
+        const anio = periodoActivo?.anio ?? new Date().getFullYear();
+
+        const rows = await this.dataSource.query(
+            `SELECT
+                m.id, m.activo, m.fecha_matricula, m.anio,
+                a.id               AS alumno_id,
+                a.nombre, a.apellido_paterno, a.apellido_materno,
+                a.codigo_estudiante, a.email, a.inclusivo
+             FROM matriculas m
+             JOIN alumnos a ON a.id = m.alumno_id
+             WHERE m.seccion_id = $1 AND m.anio = $2 AND m.activo = TRUE
+             ORDER BY a.apellido_paterno, a.nombre`,
+            [seccionId, anio],
+        );
 
         if (caller?.rol === 'alumno') {
-            return enrollments.map((e) =>
-                e.alumno
-                    ? { ...e, alumno: { ...e.alumno, email: null } }
-                    : e,
-            );
+            return rows.map((r: any) => ({ ...r, email: null }));
         }
 
-        return enrollments;
+        return rows;
     }
 }

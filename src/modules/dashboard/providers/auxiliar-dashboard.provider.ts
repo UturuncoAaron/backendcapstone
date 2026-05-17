@@ -29,26 +29,25 @@ export class AuxiliarDashboardProvider {
     private getSeccionesHoy(): Promise<SeccionAsistenciaItem[]> {
         return this.db.query<SeccionAsistenciaItem[]>(
             `SELECT s.id                  AS "seccionId",
-              s.nombre              AS "seccionNombre",
-              g.nombre              AS "gradoNombre",
-              COUNT(DISTINCT m.alumno_id)::int AS "totalAlumnos",
-              -- ¿ya existe al menos 1 registro de asistencia hoy para esta sección?
-              (COUNT(DISTINCT ag.id) > 0)      AS registrada,
-              COUNT(DISTINCT ag.id) FILTER (WHERE ag.estado = 'falta')::int     AS "totalFaltas",
-              COUNT(DISTINCT ag.id) FILTER (WHERE ag.estado = 'tardanza')::int  AS "totalTardanzas"
-       FROM   secciones s
-       JOIN   grados    g  ON g.id = s.grado_id
-       JOIN   periodos  p  ON p.activo = TRUE
-       JOIN   matriculas m ON m.seccion_id = s.id
-                          AND m.periodo_id = p.id
-                          AND m.activo     = TRUE
-       LEFT JOIN asistencias_generales ag
-              ON ag.seccion_id = s.id
-             AND ag.fecha      = CURRENT_DATE
-             AND ag.periodo_id = p.id
-       WHERE  s.activo = TRUE
-       GROUP  BY s.id, s.nombre, g.nombre, g.orden
-       ORDER  BY g.orden, s.nombre`,
+          s.nombre              AS "seccionNombre",
+          g.nombre              AS "gradoNombre",
+          COUNT(DISTINCT m.alumno_id)::int AS "totalAlumnos",
+          (COUNT(DISTINCT ag.id) > 0)      AS registrada,
+          COUNT(DISTINCT ag.id) FILTER (WHERE ag.estado = 'falta')::int     AS "totalFaltas",
+          COUNT(DISTINCT ag.id) FILTER (WHERE ag.estado = 'tardanza')::int  AS "totalTardanzas"
+   FROM   secciones s
+   JOIN   grados    g  ON g.id = s.grado_id
+   JOIN   periodos  p  ON p.activo = TRUE
+   JOIN   matriculas m ON m.seccion_id = s.id
+                      AND m.anio       = p.anio   -- ← era m.periodo_id = p.id
+                      AND m.activo     = TRUE
+   LEFT JOIN asistencias_generales ag
+          ON ag.seccion_id = s.id
+         AND ag.fecha      = CURRENT_DATE
+         AND ag.periodo_id = p.id
+   WHERE  s.activo = TRUE
+   GROUP  BY s.id, s.nombre, g.nombre, g.orden
+   ORDER  BY g.orden, s.nombre`,
         );
     }
 }
