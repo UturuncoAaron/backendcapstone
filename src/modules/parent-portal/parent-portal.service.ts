@@ -133,6 +133,11 @@ export class ParentPortalService {
     async getChildSchedule(padreId: string, alumnoId: string) {
         await this.verifyRelation(padreId, alumnoId);
 
+        const periodoActivo = await this.dataSource.query<{ anio: number }[]>(
+            `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
+        );
+        const anio = periodoActivo[0]?.anio ?? new Date().getFullYear();
+
         return this.dataSource.query(`
             SELECT
                 h.dia_semana   AS "diaSemana",
@@ -144,7 +149,7 @@ export class ParentPortalService {
             FROM horarios h
             JOIN cursos   c  ON c.id = h.curso_id
             LEFT JOIN docentes d ON d.id = c.docente_id
-            JOIN matriculas m ON m.alumno_id = $1 AND m.activo = TRUE
+            JOIN matriculas m ON m.alumno_id = $1 AND m.activo = TRUE AND m.anio = $2
             JOIN secciones  s ON s.id = m.seccion_id
             WHERE h.curso_id IN (
                 SELECT cc.id FROM cursos cc WHERE cc.seccion_id = s.id
@@ -155,7 +160,7 @@ export class ParentPortalService {
                     WHEN 'jueves' THEN 4 WHEN 'viernes' THEN 5
                 END,
                 h.hora_inicio
-        `, [alumnoId]);
+        `, [alumnoId, anio]);
     }
 
     // ─── Libretas del hijo ──────────────────────────────────────────────────

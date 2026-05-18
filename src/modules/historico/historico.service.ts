@@ -143,8 +143,7 @@ export class HistoricoService {
                   FROM grados g
                   JOIN secciones  s ON s.grado_id   = g.id
                   JOIN matriculas m ON m.seccion_id = s.id
-                  JOIN periodos   p ON p.id         = m.periodo_id
-                 WHERE p.anio = $1
+                 WHERE m.anio = $1 AND m.activo = TRUE
                  ORDER BY g.orden ASC, g.nombre ASC
             `,
         [anio],
@@ -162,8 +161,7 @@ export class HistoricoService {
                   FROM secciones  s
                   JOIN grados     g ON g.id         = s.grado_id
                   JOIN matriculas m ON m.seccion_id = s.id
-                  JOIN periodos   p ON p.id         = m.periodo_id
-                 WHERE p.anio = $1
+                 WHERE m.anio = $1 AND m.activo = TRUE
                  ORDER BY g.orden ASC, s.nombre ASC
             `,
         [anio],
@@ -219,7 +217,7 @@ export class HistoricoService {
     const hasAnio = await this.hasAnioIngreso();
     const offset = (opts.page - 1) * opts.limit;
     const params: any[] = [opts.anio];
-    const where: string[] = ['p.anio = $1'];
+    const where: string[] = ['m.anio = $1', 'm.activo = TRUE'];
 
     if (opts.seccionId) {
       params.push(opts.seccionId);
@@ -231,28 +229,21 @@ export class HistoricoService {
 
     const whereSql = where.join(' AND ');
 
-    // CTE: por cada alumno del año, su matrícula más reciente
-    // (bimestre más alto). Usa idx_matriculas_historico.
+    // CTE: alumnos matriculados en el año (matrícula anual, una sola por alumno).
     const baseCte = `
             WITH matriculas_anio AS (
-                SELECT DISTINCT ON (m.alumno_id)
-                       m.alumno_id,
+                SELECT m.alumno_id,
                        m.seccion_id,
-                       m.periodo_id,
-                       p.anio        AS periodo_anio,
-                       p.bimestre    AS periodo_bimestre,
-                       p.nombre      AS periodo_nombre,
+                       m.anio        AS periodo_anio,
                        s.id          AS s_id,
                        s.nombre      AS s_nombre,
                        g.id          AS g_id,
                        g.nombre      AS g_nombre,
                        g.orden       AS g_orden
                   FROM matriculas m
-                  JOIN periodos  p ON p.id = m.periodo_id
                   JOIN secciones s ON s.id = m.seccion_id
                   JOIN grados    g ON g.id = s.grado_id
                  WHERE ${whereSql}
-                 ORDER BY m.alumno_id, p.bimestre DESC
             )
         `;
 
@@ -299,9 +290,9 @@ export class HistoricoService {
                    ma.g_nombre        AS grado,
                    ma.s_id            AS seccion_id,
                    ma.s_nombre        AS seccion,
-                   ma.periodo_id      AS periodo_id,
-                   ma.periodo_nombre  AS periodo_nombre,
-                   ma.periodo_bimestre AS periodo_bimestre,
+                   NULL               AS periodo_id,
+                   NULL               AS periodo_nombre,
+                   NULL               AS periodo_bimestre,
                    ma.periodo_anio    AS periodo_anio
               FROM matriculas_anio ma
               JOIN alumnos a ON a.id = ma.alumno_id

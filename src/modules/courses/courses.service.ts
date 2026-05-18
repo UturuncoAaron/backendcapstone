@@ -5,7 +5,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Course } from './entities/course.entity.js';
 import { Enrollment } from './entities/enrollment.entity.js';
-import { Period } from '../academic/entities/period.entity.js';
 import { CURSOS_POR_GRADO, COLORES_CURSOS } from '../academic/course-template.js';
 
 @Injectable()
@@ -13,34 +12,44 @@ export class CoursesService {
     constructor(
         @InjectRepository(Course) private readonly courseRepo: Repository<Course>,
         @InjectRepository(Enrollment) private readonly enrollmentRepo: Repository<Enrollment>,
-        @InjectRepository(Period) private readonly periodRepo: Repository<Period>,
         private readonly dataSource: DataSource,
     ) { }
 
     // ── Listas ────────────────────────────────────────────────
 
-    async findMyCourses(userId: string, rol: string, seccionId?: string) {
+    async findMyCourses(userId: string, rol: string, seccionId?: string, periodoId?: string) {
         if (rol === 'docente') {
-            return this.courseRepo.find({
-                where: { docente_id: userId, activo: true },
-                relations: ['seccion', 'seccion.grado', 'periodo'],
-                order: { nombre: 'ASC' },
-            });
+            const [periodoActivo] = await this.dataSource.query<{ anio: number }[]>(
+                `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
+            );
+            const anio = periodoActivo?.anio ?? new Date().getFullYear();
+
+            return this.courseRepo
+                .createQueryBuilder('c')
+                .leftJoinAndSelect('c.seccion', 's')
+                .leftJoinAndSelect('s.grado', 'g')
+                .leftJoinAndSelect('c.periodo', 'p')
+                .where('c.docente_id = :userId', { userId })
+                .andWhere('c.activo = true')
+                .andWhere('p.anio = :anio', { anio })
+                .orderBy('c.nombre', 'ASC')
+                .getMany();
         }
 
         if (rol === 'alumno') {
             // ── CAMBIO: Enrollment ya no tiene periodo_id, busca por anio ──
-            const anioActual = new Date().getFullYear();
+            const [periodoActivo] = await this.dataSource.query<{ id: string; anio: number }[]>(
+                `SELECT id, anio FROM periodos WHERE activo = TRUE LIMIT 1`,
+            );
+            if (!periodoActivo) return [];
+
             const enrollments = await this.dataSource.query<{ seccion_id: string }[]>(
                 `SELECT seccion_id FROM matriculas
                  WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE
                  LIMIT 10`,
-                [userId, anioActual],
+                [userId, periodoActivo.anio],
             );
             if (!enrollments.length) return [];
-
-            const periodoActivo = await this.periodRepo.findOne({ where: { activo: true } });
-            if (!periodoActivo) return [];
 
             const seccionIds = enrollments.map(e => e.seccion_id);
             return this.courseRepo
@@ -66,6 +75,7 @@ export class CoursesService {
             .where('c.activo = true');
 
         if (seccionId) query.andWhere('c.seccion_id = :seccionId', { seccionId });
+        if (periodoId) query.andWhere('c.periodo_id = :periodoId', { periodoId });
 
         return query.orderBy('c.nombre', 'ASC').getMany();
     }

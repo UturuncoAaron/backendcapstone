@@ -25,12 +25,15 @@ export class Matricula {
     @JoinColumn({ name: 'seccion_id' })
     seccion: Section;
 
-    @Column({ name: 'periodo_id', type: 'uuid' })
-    periodo_id: string;
+    @Column({ name: 'periodo_id', type: 'uuid', nullable: true })
+    periodo_id: string | null;
 
-    @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
+    @ManyToOne(() => Period, { onDelete: 'RESTRICT', nullable: true })
     @JoinColumn({ name: 'periodo_id' })
-    periodo: Period;
+    periodo: Period | null;
+
+    @Column({ type: 'int', nullable: true })
+    anio: number | null;
 
     @Column({ default: true })
     activo: boolean;

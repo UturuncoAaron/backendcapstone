@@ -18,15 +18,26 @@ export class DocenteDashboardProvider {
         );
         if (!existe) throw new NotFoundException(`Docente no encontrado (id: ${docenteId})`);
 
+        // Obtenemos el año del periodo activo para filtrar cursos del año académico actual.
+        const [periodoActivo] = await this.db.query<{ id: string; anio: number }[]>(
+            `SELECT id, anio FROM periodos WHERE activo = TRUE LIMIT 1`,
+        );
+        const anioActual = periodoActivo?.anio ?? new Date().getFullYear();
+
         // Primero obtenemos los curso_ids del docente para pasarlos a getHorarioHoy
         const cursos = await this.db.query<{ id: string }[]>(
             `SELECT c.id
        FROM   cursos c
-       JOIN   periodos p ON p.id = c.periodo_id AND p.activo = TRUE
-       WHERE  c.docente_id = $1 AND c.activo = TRUE`,
-            [docenteId],
+       JOIN   periodos p ON p.id = c.periodo_id
+       WHERE  c.docente_id = $1
+         AND  c.activo = TRUE
+         AND  (
+              p.id = $2
+              OR ($2::uuid IS NULL AND p.anio = $3)
+         )`,
+            [docenteId, periodoActivo?.id ?? null, anioActual],
         );
-        const cursoIds = cursos.map(c => c.id);
+        const cursoIds = [...new Set(cursos.map(c => c.id))];
 
         const [horarioHoy, horario, entregasSinCalificar, comunicados] = await Promise.all([
             this.shared.getHorarioHoy(cursoIds),

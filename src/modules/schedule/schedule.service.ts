@@ -17,7 +17,10 @@ export class ScheduleService {
         const courses = await this.db.query<{ id: string; nombre: string; color: string }[]>(
             `SELECT id, nombre, color
              FROM cursos
-             WHERE seccion_id = $1 AND periodo_id = $2 AND activo = TRUE
+             WHERE seccion_id = $1
+               AND periodo_id = $2
+               AND activo = TRUE
+               AND docente_id IS NOT NULL
              ORDER BY nombre`,
             [seccionId, periodoId],
         );
@@ -76,16 +79,16 @@ export class ScheduleService {
 
     // ── Horario para un alumno ────────────────────────────────────
     async getHorarioForAlumno(alumnoId: string) {
-        const periodoActivo = await this.db.query<{ id: string }[]>(
-            `SELECT id FROM periodos WHERE activo = TRUE LIMIT 1`,
+        const periodoActivo = await this.db.query<{ id: string; anio: number }[]>(
+            `SELECT id, anio FROM periodos WHERE activo = TRUE LIMIT 1`,
         );
         if (!periodoActivo.length) return [];
 
         const enrollment = await this.db.query<{ seccion_id: string }[]>(
             `SELECT seccion_id FROM matriculas
-             WHERE alumno_id = $1 AND periodo_id = $2 AND activo = TRUE
+             WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE
              LIMIT 1`,
-            [alumnoId, periodoActivo[0].id],
+            [alumnoId, periodoActivo[0].anio],
         );
         if (!enrollment.length) return [];
 

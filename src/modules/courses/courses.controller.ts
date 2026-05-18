@@ -26,8 +26,9 @@ export class CoursesController {
     findMyCourses(
         @CurrentUser() user: AuthUser,
         @Query('seccion_id') seccionId?: string,
+        @Query('periodo_id') periodoId?: string,
     ) {
-        return this.coursesService.findMyCourses(user.id, user.rol, seccionId);
+        return this.coursesService.findMyCourses(user.id, user.rol, seccionId, periodoId);
     }
 
     // POST /api/courses

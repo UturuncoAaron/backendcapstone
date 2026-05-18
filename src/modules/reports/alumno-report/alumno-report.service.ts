@@ -31,10 +31,10 @@ export interface MatriculaReportRow {
     id: string;
     activo: boolean;
     fecha_matricula: string;
-    periodo_id: string;
-    periodo_nombre: string;
+    periodo_id: string | null;
+    periodo_nombre: string | null;
     periodo_anio: number;
-    periodo_bimestre: number;
+    periodo_bimestre: number | null;
     seccion_id: string;
     seccion: string;
     grado_id: string;
@@ -306,17 +306,17 @@ export class AlumnoReportService {
         let extra = '';
         if (anio !== undefined) {
             params.push(anio);
-            extra = `AND p.anio = $${params.length}`;
+            extra = `AND m.anio = $${params.length}`;
         }
         return this.ds.query<MatriculaReportRow[]>(
             `
             SELECT m.id,
                    m.activo,
                    m.fecha_matricula,
-                   p.id        AS periodo_id,
-                   p.nombre    AS periodo_nombre,
-                   p.anio      AS periodo_anio,
-                   p.bimestre  AS periodo_bimestre,
+                   NULL        AS periodo_id,
+                   NULL        AS periodo_nombre,
+                   m.anio      AS periodo_anio,
+                   NULL        AS periodo_bimestre,
                    s.id        AS seccion_id,
                    s.nombre    AS seccion,
                    g.id        AS grado_id,
@@ -326,13 +326,13 @@ export class AlumnoReportService {
                    t.apellido_paterno  AS tutor_apellido_paterno,
                    t.apellido_materno  AS tutor_apellido_materno
               FROM matriculas m
-              JOIN periodos  p ON p.id = m.periodo_id
               JOIN secciones s ON s.id = m.seccion_id
               JOIN grados    g ON g.id = s.grado_id
               LEFT JOIN docentes t ON t.id = s.tutor_id
              WHERE m.alumno_id = $1
+               AND m.activo = true
              ${extra}
-             ORDER BY p.anio DESC, p.bimestre DESC, g.orden ASC
+             ORDER BY m.anio DESC, g.orden ASC
             `,
             params,
         );
