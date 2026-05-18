@@ -1,8 +1,4 @@
-import {
-    Injectable,
-    Logger,
-    OnApplicationBootstrap,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
@@ -34,47 +30,46 @@ import { APPOINTMENT_STATUSES } from './appointments.types.js';
  */
 @Injectable()
 export class AppointmentsSchemaSync implements OnApplicationBootstrap {
-    private readonly logger = new Logger(AppointmentsSchemaSync.name);
+  private readonly logger = new Logger(AppointmentsSchemaSync.name);
 
-    constructor(
-        @InjectDataSource() private readonly dataSource: DataSource,
-    ) {}
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
 
-    async onApplicationBootstrap(): Promise<void> {
-        try {
-            await this.syncEstadoCheck();
-            await this.syncDisponibilidadUnique();
-        } catch (err) {
-            // No queremos que un fallo de sync tire la app entera; lo
-            // logueamos y dejamos que los endpoints normales devuelvan
-            // errores claros si la constraint sigue mal.
-            this.logger.error(
-                'Sincronización de esquema de citas falló — revisar BD manualmente',
-                err instanceof Error ? err.stack : String(err),
-            );
-        }
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      await this.syncEstadoCheck();
+      await this.syncDisponibilidadUnique();
+      await this.syncCitaEstadoLog();
+    } catch (err) {
+      // No queremos que un fallo de sync tire la app entera; lo
+      // logueamos y dejamos que los endpoints normales devuelvan
+      // errores claros si la constraint sigue mal.
+      this.logger.error(
+        'Sincronización de esquema de citas falló — revisar BD manualmente',
+        err instanceof Error ? err.stack : String(err),
+      );
     }
+  }
 
-    /** Reemplaza citas_estado_check con la lista actual de estados. */
-    private async syncEstadoCheck(): Promise<void> {
-        const allowed = APPOINTMENT_STATUSES.map(s => `'${s}'`).join(', ');
-        await this.dataSource.query(`
+  /** Reemplaza citas_estado_check con la lista actual de estados. */
+  private async syncEstadoCheck(): Promise<void> {
+    const allowed = APPOINTMENT_STATUSES.map((s) => `'${s}'`).join(', ');
+    await this.dataSource.query(`
             ALTER TABLE citas DROP CONSTRAINT IF EXISTS citas_estado_check;
             ALTER TABLE citas
                 ADD CONSTRAINT citas_estado_check
                 CHECK (estado IN (${allowed}));
         `);
-        this.logger.log(
-            `citas_estado_check sincronizado (${APPOINTMENT_STATUSES.length} estados)`,
-        );
-    }
+    this.logger.log(
+      `citas_estado_check sincronizado (${APPOINTMENT_STATUSES.length} estados)`,
+    );
+  }
 
-    /**
-     * Reemplaza uq_disp_cuenta_dia por uq_disp_cuenta_dia_hora para permitir
-     * múltiples bloques por día.
-     */
-    private async syncDisponibilidadUnique(): Promise<void> {
-        await this.dataSource.query(`
+  /**
+   * Reemplaza uq_disp_cuenta_dia por uq_disp_cuenta_dia_hora para permitir
+   * múltiples bloques por día.
+   */
+  private async syncDisponibilidadUnique(): Promise<void> {
+    await this.dataSource.query(`
             ALTER TABLE disponibilidad_cuenta
                 DROP CONSTRAINT IF EXISTS uq_disp_cuenta_dia;
             ALTER TABLE disponibilidad_cuenta
@@ -83,8 +78,32 @@ export class AppointmentsSchemaSync implements OnApplicationBootstrap {
                 ADD CONSTRAINT uq_disp_cuenta_dia_hora
                 UNIQUE (cuenta_id, dia_semana, hora_inicio);
         `);
-        this.logger.log(
-            'uq_disp_cuenta_dia → uq_disp_cuenta_dia_hora aplicado',
-        );
-    }
+    this.logger.log('uq_disp_cuenta_dia → uq_disp_cuenta_dia_hora aplicado');
+  }
+
+  /**
+   * Crea (si no existe) `cita_estado_log`. Mantiene el historial
+   * inmutable de transiciones de estado por cita. El BE escribe
+   * acá cada vez que una cita cambia de estado.
+   */
+  private async syncCitaEstadoLog(): Promise<void> {
+    await this.dataSource.query(`
+            CREATE TABLE IF NOT EXISTS cita_estado_log (
+                id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+                cita_id         UUID         NOT NULL,
+                anterior_estado TEXT         NULL,
+                nuevo_estado    TEXT         NOT NULL,
+                changed_by_id   UUID         NULL,
+                razon           TEXT         NULL,
+                changed_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
+                CONSTRAINT fk_cita_estado_log_cita
+                    FOREIGN KEY (cita_id) REFERENCES citas(id) ON DELETE CASCADE,
+                CONSTRAINT fk_cita_estado_log_cuenta
+                    FOREIGN KEY (changed_by_id) REFERENCES cuentas(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_cita_estado_log_cita
+                ON cita_estado_log (cita_id, changed_at);
+        `);
+    this.logger.log('cita_estado_log sincronizada');
+  }
 }

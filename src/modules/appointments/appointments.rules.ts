@@ -31,12 +31,25 @@ export interface AppointmentRoleRule {
   fixedDurationMin: number | null;
   maxDurationMin: number;
   slotMinutes: number;
+  /**
+   * Máxima cantidad de slots consecutivos que puede ocupar una cita.
+   * El BE valida `durationMin <= maxConsecutiveSlots * slotMinutes` cuando
+   * `fixedDurationMin` es null (duración variable).
+   */
+  maxConsecutiveSlots: number;
   allowedDays: readonly DiaSemanaIso[];
   defaultHours: { start: string; end: string };
   label: string;
   requiresChild: boolean;
   directBooking: boolean;
 }
+
+/**
+ * Tope global de slots consecutivos por cita: una cita puede ocupar 1
+ * o 2 slots seguidos (cita simple o cita doble). Aplica a todos los
+ * roles con `fixedDurationMin = null`.
+ */
+export const MAX_CONSECUTIVE_SLOTS = 2;
 
 const WEEK_FULL: readonly DiaSemanaIso[] = [
   'lunes',
@@ -50,8 +63,10 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
   psicologa: {
     role: 'psicologa',
     fixedDurationMin: null,
-    maxDurationMin: 180,
+    // 2 slots consecutivos × 30 min = 60 min máx por cita.
+    maxDurationMin: 60,
     slotMinutes: 30,
+    maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '16:00' },
     label: 'Psicología',
@@ -63,6 +78,8 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
     fixedDurationMin: 45,
     maxDurationMin: 45,
     slotMinutes: 45,
+    // El docente tiene duración fija, sólo cabe 1 slot por cita.
+    maxConsecutiveSlots: 1,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '15:30' },
     label: 'Docente',
@@ -71,9 +88,11 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
   },
   director: {
     role: 'director',
-    fixedDurationMin: null, // ← antes era 15 fijo; ahora flexible en bloques de 15
-    maxDurationMin: 60, // tope razonable; ajustá si querés más
+    fixedDurationMin: null,
+    // 2 slots × 15 min = 30 min máx.
+    maxDurationMin: 30,
     slotMinutes: 15,
+    maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
     allowedDays: ['martes', 'jueves'],
     defaultHours: { start: '08:00', end: '15:30' },
     label: 'Dirección',
@@ -83,8 +102,9 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
   admin: {
     role: 'admin',
     fixedDurationMin: null,
-    maxDurationMin: 60,
+    maxDurationMin: 30,
     slotMinutes: 15,
+    maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '15:30' },
     label: 'Administración',
@@ -94,8 +114,9 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
   auxiliar: {
     role: 'auxiliar',
     fixedDurationMin: null,
-    maxDurationMin: 60,
+    maxDurationMin: 30,
     slotMinutes: 15,
+    maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '15:30' },
     label: 'Auxiliar',
@@ -107,6 +128,7 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
     fixedDurationMin: null,
     maxDurationMin: 60,
     slotMinutes: 30,
+    maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '16:00' },
     label: 'Padre / Tutor',

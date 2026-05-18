@@ -16,12 +16,14 @@ import {
 } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Appointment } from './entities/appointment.entity.js';
+import { AppointmentStatusLog } from './entities/appointment-status-log.entity.js';
 import { Cuenta } from '../users/entities/cuenta.entity.js';
 import {
   AccountAvailability,
   DiaSemana,
 } from './entities/account-availability.entity.js';
 import { PsychologistStudent } from '../psychology/entities/psychologist-student.entity.js';
+import type { AppointmentStatus } from './appointments.types.js';
 import {
   CreateAppointmentDto,
   UpdateAppointmentDto,
@@ -104,11 +106,26 @@ interface AppointmentPersonView {
   rol: string;
 }
 
+/**
+ * Información que devolvemos al FE cuando un endpoint produce una
+ * cascada de cancelaciones (vista bonita en el modal "¿Estás seguro?").
+ */
+export interface AffectedAppointmentSummary {
+  id: string;
+  scheduledAt: Date;
+  durationMin: number;
+  estado: AppointmentStatus;
+  motivo: string;
+  studentName: string | null;
+}
+
 @Injectable()
 export class AppointmentsService {
   constructor(
     @InjectRepository(Appointment)
     private readonly appointmentRepo: Repository<Appointment>,
+    @InjectRepository(AppointmentStatusLog)
+    private readonly statusLogRepo: Repository<AppointmentStatusLog>,
     @InjectRepository(Cuenta) private readonly cuentaRepo: Repository<Cuenta>,
     @InjectRepository(AccountAvailability)
     private readonly availabilityRepo: Repository<AccountAvailability>,
@@ -117,6 +134,119 @@ export class AppointmentsService {
     private readonly dataSource: DataSource,
     private readonly events: EventEmitter2,
   ) {}
+
+  // ════════════════════════════════════════════════════════════════
+  // HISTORIAL DE ESTADOS
+  // ════════════════════════════════════════════════════════════════
+
+  /**
+   * Inserta una entrada en `cita_estado_log`. Se llama desde cada
+   * método que cambia el estado de una cita (crear, aceptar, rechazar,
+   * cancelar, aplazar, realizar, no_asistio, cancelaciones en cascada).
+   *
+   * Errores se loguean pero no abortan la transacción principal — el
+   * historial es un complemento, no debe tumbar la operación funcional.
+   */
+  private async appendStatusLog(
+    appointmentId: string,
+    previousStatus: AppointmentStatus | null,
+    nextStatus: AppointmentStatus,
+    changedById: string | null,
+    reason: string | null,
+    em?: EntityManager,
+  ): Promise<void> {
+    try {
+      const repo = em
+        ? em.getRepository(AppointmentStatusLog)
+        : this.statusLogRepo;
+      await repo.save(
+        repo.create({
+          appointmentId,
+          previousStatus,
+          nextStatus,
+          changedById,
+          reason,
+        }),
+      );
+    } catch (err) {
+      this.logger?.warn?.(
+        `appendStatusLog falló para cita ${appointmentId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Devuelve el historial completo de transiciones de estado de una cita.
+   * Sólo participantes (caller en createdById/convocadoAId/parentId) o
+   * admin pueden consultarlo.
+   */
+  async getStatusLog(caller: CallerContext, appointmentId: string) {
+    const appt = await this.appointmentRepo.findOne({
+      where: { id: appointmentId },
+    });
+    if (!appt) throw new NotFoundException('Cita no encontrada');
+    if (
+      caller.rol !== 'admin' &&
+      appt.createdById !== caller.id &&
+      appt.convocadoAId !== caller.id &&
+      appt.parentId !== caller.id
+    ) {
+      throw new ForbiddenException(
+        'No tienes acceso al historial de esta cita',
+      );
+    }
+
+    const rows = await this.dataSource.query<
+      Array<{
+        id: string;
+        previous_status: AppointmentStatus | null;
+        next_status: AppointmentStatus;
+        changed_by_id: string | null;
+        changed_by_nombre: string | null;
+        changed_by_apellido_paterno: string | null;
+        changed_by_rol: string | null;
+        razon: string | null;
+        changed_at: Date;
+      }>
+    >(
+      `SELECT
+            l.id,
+            l.anterior_estado AS previous_status,
+            l.nuevo_estado    AS next_status,
+            l.changed_by_id,
+            c.nombre              AS changed_by_nombre,
+            c.apellido_paterno    AS changed_by_apellido_paterno,
+            c.rol::text           AS changed_by_rol,
+            l.razon,
+            l.changed_at
+         FROM cita_estado_log l
+         LEFT JOIN cuentas c ON c.id = l.changed_by_id
+        WHERE l.cita_id = $1
+        ORDER BY l.changed_at ASC, l.id ASC`,
+      [appointmentId],
+    );
+
+    return rows.map((r) => ({
+      id: r.id,
+      previousStatus: r.previous_status,
+      nextStatus: r.next_status,
+      changedById: r.changed_by_id,
+      changedByName: r.changed_by_nombre
+        ? `${r.changed_by_nombre}${
+            r.changed_by_apellido_paterno
+              ? ' ' + r.changed_by_apellido_paterno
+              : ''
+          }`.trim()
+        : null,
+      changedByRole: r.changed_by_rol,
+      reason: r.razon,
+      changedAt: r.changed_at,
+    }));
+  }
+
+  private readonly logger = new Logger(AppointmentsService.name);
 
   // ════════════════════════════════════════════════════════════════
   // CREATE
@@ -254,6 +384,16 @@ export class AppointmentsService {
         priorNotes: dto.priorNotes ?? null,
       });
       const saved = await em.save(appointment);
+
+      // Primera entrada del historial: anterior=null → nuevo=estado inicial.
+      await this.appendStatusLog(
+        saved.id,
+        null,
+        saved.estado,
+        caller.id,
+        null,
+        em,
+      );
 
       if (dto.studentId) {
         if (convocadoA.rol === 'psicologa')
@@ -501,6 +641,13 @@ export class AppointmentsService {
         nextStatus: saved.estado,
         notifyAccountIds: this.recipientsOf(saved),
       } satisfies AppointmentStatusChangedEvent);
+      await this.appendStatusLog(
+        saved.id,
+        previousStatus as AppointmentStatus,
+        saved.estado,
+        caller.id,
+        null,
+      );
     }
     return saved;
   }
@@ -523,6 +670,7 @@ export class AppointmentsService {
         `No se puede cancelar una cita ${appt.estado}`,
       );
 
+    const previousStatus = appt.estado;
     appt.estado = 'cancelada';
     appt.cancelledAt = new Date();
     appt.cancelledById = caller.id;
@@ -535,6 +683,13 @@ export class AppointmentsService {
       reason: dto.motivo ?? null,
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentCancelledEvent);
+    await this.appendStatusLog(
+      saved.id,
+      previousStatus,
+      'cancelada',
+      caller.id,
+      dto.motivo ?? null,
+    );
     return saved;
   }
 
@@ -564,6 +719,13 @@ export class AppointmentsService {
       nextStatus: 'confirmada',
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentStatusChangedEvent);
+    await this.appendStatusLog(
+      saved.id,
+      'pendiente',
+      'confirmada',
+      caller.id,
+      null,
+    );
     return saved;
   }
 
@@ -596,6 +758,13 @@ export class AppointmentsService {
       reason: motivo.trim(),
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentCancelledEvent);
+    await this.appendStatusLog(
+      saved.id,
+      'pendiente',
+      'rechazada',
+      caller.id,
+      motivo.trim(),
+    );
     return saved;
   }
 
@@ -644,6 +813,13 @@ export class AppointmentsService {
       nextStatus: 'pendiente',
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentStatusChangedEvent);
+    await this.appendStatusLog(
+      saved.id,
+      previousStatus,
+      'pendiente',
+      caller.id,
+      dto.motivo.trim(),
+    );
     return saved;
   }
 
@@ -685,6 +861,13 @@ export class AppointmentsService {
       nextStatus: 'realizada',
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentStatusChangedEvent);
+    await this.appendStatusLog(
+      saved.id,
+      previousStatus,
+      'realizada',
+      caller.id,
+      null,
+    );
     return saved;
   }
 
@@ -726,6 +909,13 @@ export class AppointmentsService {
       nextStatus: 'no_asistio',
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentStatusChangedEvent);
+    await this.appendStatusLog(
+      saved.id,
+      previousStatus,
+      'no_asistio',
+      caller.id,
+      null,
+    );
 
     // Notificación inasistencia_alumno al padre vinculado.
     if (saved.studentId) {
@@ -829,6 +1019,15 @@ export class AppointmentsService {
         priorNotes: `[Derivación] Docente ${caller.id} → Psicóloga ${psicologaSummary.id}`,
       });
       const saved = await em.save(appointment);
+
+      await this.appendStatusLog(
+        saved.id,
+        null,
+        saved.estado,
+        caller.id,
+        'Derivación docente → psicóloga',
+        em,
+      );
 
       await this.upsertPsychologistAssignment(
         em,
@@ -1040,26 +1239,36 @@ export class AppointmentsService {
         })
         .getMany();
 
-      const cancelled: Appointment[] = [];
+      const cancelled: { appt: Appointment; previous: AppointmentStatus }[] =
+        [];
       for (const appt of futureAppts) {
         if (this.fitsInAvailability(appt, saved)) continue;
+        const previous = appt.estado;
         appt.estado = 'cancelada';
         appt.cancelledAt = new Date();
         appt.cancelledById = cuentaId;
         appt.cancelReason =
           'Cancelada automáticamente al actualizar la disponibilidad del profesional';
-        cancelled.push(appt);
+        cancelled.push({ appt, previous });
       }
 
       if (cancelled.length) {
-        await em.getRepository(Appointment).save(cancelled);
-        for (const c of cancelled) {
+        await em.getRepository(Appointment).save(cancelled.map((x) => x.appt));
+        for (const { appt, previous } of cancelled) {
           this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CANCELLED, {
-            appointmentId: c.id,
+            appointmentId: appt.id,
             actorId: cuentaId,
-            reason: c.cancelReason,
-            notifyAccountIds: this.recipientsOf(c),
+            reason: appt.cancelReason,
+            notifyAccountIds: this.recipientsOf(appt),
           } satisfies AppointmentCancelledEvent);
+          await this.appendStatusLog(
+            appt.id,
+            previous,
+            'cancelada',
+            cuentaId,
+            appt.cancelReason,
+            em,
+          );
         }
       }
       return { saved, cancelledCount: cancelled.length };
@@ -1094,7 +1303,7 @@ export class AppointmentsService {
   ): Promise<{
     deleted: true;
     cancelledCount: number;
-    affected?: { id: string; scheduledAt: Date }[];
+    affected?: AffectedAppointmentSummary[];
   }> {
     const slot = await this.availabilityRepo.findOne({ where: { id: slotId } });
     if (!slot)
@@ -1108,6 +1317,7 @@ export class AppointmentsService {
     // el dia_semana y dentro del rango [hora_inicio, hora_fin) del slot.
     const affected = await this.appointmentRepo
       .createQueryBuilder('a')
+      .leftJoinAndSelect('a.student', 'student')
       .where('a.convocado_a_id = :cid', { cid: slot.cuentaId })
       .andWhere('a.estado IN (:...states)', {
         states: ['pendiente', 'confirmada'],
@@ -1125,14 +1335,24 @@ export class AppointmentsService {
       )
       .getMany();
 
+    const summaries = affected.map(
+      (a): AffectedAppointmentSummary => ({
+        id: a.id,
+        scheduledAt: a.scheduledAt,
+        durationMin: a.durationMin,
+        estado: a.estado,
+        motivo: a.motivo,
+        studentName: a.student
+          ? `${a.student.nombre ?? ''} ${a.student.apellido_paterno ?? ''}`.trim()
+          : null,
+      }),
+    );
+
     if (affected.length > 0 && !confirm) {
       throw new ConflictException({
         message: 'Hay citas activas en este bloque. Confirma para cancelarlas.',
         affectedCount: affected.length,
-        affected: affected.map((a) => ({
-          id: a.id,
-          scheduledAt: a.scheduledAt,
-        })),
+        affected: summaries,
       });
     }
 
@@ -1140,6 +1360,9 @@ export class AppointmentsService {
       await em.delete(AccountAvailability, { id: slotId });
       let cancelledCount = 0;
       if (affected.length > 0) {
+        const previousByAppt = new Map<string, AppointmentStatus>(
+          affected.map((a) => [a.id, a.estado]),
+        );
         for (const appt of affected) {
           appt.estado = 'cancelada';
           appt.cancelledAt = new Date();
@@ -1156,16 +1379,21 @@ export class AppointmentsService {
             reason: c.cancelReason,
             notifyAccountIds: this.recipientsOf(c),
           } satisfies AppointmentCancelledEvent);
+          await this.appendStatusLog(
+            c.id,
+            previousByAppt.get(c.id) ?? 'pendiente',
+            'cancelada',
+            caller.id,
+            c.cancelReason,
+            em,
+          );
         }
       }
       return cancelledCount > 0
         ? {
             deleted: true as const,
             cancelledCount,
-            affected: affected.map((a) => ({
-              id: a.id,
-              scheduledAt: a.scheduledAt,
-            })),
+            affected: summaries,
           }
         : { deleted: true as const, cancelledCount };
     });
@@ -1242,6 +1470,7 @@ export class AppointmentsService {
       fixedDurationMin: rule.fixedDurationMin,
       maxDurationMin: rule.maxDurationMin,
       slotMinutes: rule.slotMinutes,
+      maxConsecutiveSlots: rule.maxConsecutiveSlots,
       allowedDays: [...rule.allowedDays],
       defaultHours: { ...rule.defaultHours },
       directBooking: rule.directBooking,
@@ -1279,13 +1508,19 @@ export class AppointmentsService {
       throw new BadRequestException(
         `La duración mínima para ${rule.label} es ${rule.slotMinutes} min`,
       );
-    if (value > rule.maxDurationMin)
-      throw new BadRequestException(
-        `Duración máxima permitida para ${rule.label}: ${rule.maxDurationMin} min`,
-      );
     if (value % rule.slotMinutes !== 0)
       throw new BadRequestException(
         `La duración debe ser múltiplo de ${rule.slotMinutes} min para ${rule.label}`,
+      );
+    // Regla canónica: una cita puede ocupar 1 o N slots consecutivos según
+    // el rol. El tope estricto se calcula como maxConsecutiveSlots * slot.
+    const maxBySlots = rule.maxConsecutiveSlots * rule.slotMinutes;
+    const effectiveMax = Math.min(rule.maxDurationMin, maxBySlots);
+    if (value > effectiveMax)
+      throw new BadRequestException(
+        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${
+          rule.maxConsecutiveSlots === 1 ? '' : 's'
+        } consecutivo${rule.maxConsecutiveSlots === 1 ? '' : 's'} (${effectiveMax} min)`,
       );
     return value;
   }
