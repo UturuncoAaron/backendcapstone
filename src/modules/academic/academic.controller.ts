@@ -21,6 +21,7 @@ export class AcademicController {
     findAllGrados() {
         return this.academicService.findAllGrados();
     }
+
     @Get('grados/:id')
     @Roles('admin', 'docente')
     findGrado(@Param('id', ParseUUIDPipe) id: string) {
@@ -29,11 +30,19 @@ export class AcademicController {
 
     // ── SECCIONES ────────────────────────────────────────────────
 
-
     @Get('secciones')
     @Roles('admin', 'docente', 'psicologa')
     findAllSecciones(@Query('gradoId') gradoId?: string) {
         return this.academicService.findAllSecciones(gradoId);
+    }
+
+    // Secciones donde el docente tiene cursos asignados.
+    // Usado por LibretasPadresPage cuando el usuario es docente.
+    // IMPORTANTE: debe ir ANTES de secciones/:id para evitar conflicto de rutas.
+    @Get('mis-secciones')
+    @Roles('docente')
+    getMisSecciones(@CurrentUser() user: AuthUser) {
+        return this.academicService.getSeccionesDocente(user.id);
     }
 
     @Post('secciones')

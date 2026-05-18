@@ -1,10 +1,3 @@
-// Ubicación en tu proyecto: src/modules/auth/auth.service.ts
-// Cambios vs tu versión actual:
-//   1. Inyecta Section repo para detectar secciones tutoreadas.
-//   2. Helper computeModulos() arma la lista de módulos según rol + es_tutor_de.
-//   3. login() y getProfile() devuelven { ...perfil, rol, modulos[], es_tutor_de[] }.
-// Todo lo demás queda igual.
-
 import {
     Injectable, UnauthorizedException, BadRequestException, Logger,
 } from '@nestjs/common';
@@ -16,12 +9,33 @@ import * as bcrypt from 'bcrypt';
 import { LoginDto, ChangePasswordDto } from './dto/login.dto.js';
 import { UsersService } from '../users/users.service.js';
 import { Section } from '../academic/entities/section.entity.js';
+import { PermissionsService } from '../permissions/permissions.service.js';
 import { getModulosBasePorRol, MODULOS, type Modulo } from './constants/modulos.js';
 
 interface SeccionTutorada {
     id: string;
     nombre: string;
 }
+
+// ── Mapeo permiso_extra → módulo JWT ─────────────────────────────────────────
+// Cuando el admin otorga uno de estos permisos, el módulo correspondiente
+// se inyecta en el JWT al próximo login. Agregar aquí si crece el sistema.
+const PERMISO_A_MODULO: Array<{
+    modulo: string;
+    accion: string;
+    modulo_jwt: Modulo;
+}> = [
+        {
+            modulo: 'reportes',
+            accion: 'ver_todos',
+            modulo_jwt: MODULOS.REPORTES_ACCESO,
+        },
+        {
+            modulo: 'libretas',
+            accion: 'subir_padre',
+            modulo_jwt: MODULOS.LIBRETAS_PADRE_ACCESO,
+        },
+    ];
 
 @Injectable()
 export class AuthService {
@@ -30,6 +44,7 @@ export class AuthService {
     constructor(
         private readonly usersService: UsersService,
         private readonly jwtService: JwtService,
+        private readonly permissionsService: PermissionsService,
         @InjectRepository(Section)
         private readonly sectionRepo: Repository<Section>,
     ) { }
@@ -40,7 +55,6 @@ export class AuthService {
             throw new UnauthorizedException('Código de acceso o contraseña incorrectos');
         }
 
-        // 1. Buscar por codigo_acceso (uppercase) — ej. EST-12345678 / AUX-44444444
         let cuenta = await this.usersService.findCuentaByCodigoAcceso(input.toUpperCase());
         if (!cuenta) {
             cuenta = await this.usersService.findCuentaByNumeroDocumento(input);
@@ -103,22 +117,29 @@ export class AuthService {
     async getProfile(userId: string) {
         const cuenta = await this.usersService.findCuentaById(userId);
         if (!cuenta || !cuenta.activo) throw new UnauthorizedException('Usuario no encontrado o inactivo');
-
         return this.buildPerfilEnriquecido(cuenta.id, cuenta.rol, cuenta.password_changed);
     }
+
     private async buildPerfilEnriquecido(
         id: string,
         rol: string,
         passwordChanged?: boolean,
     ) {
-        const [perfil, esTutorDe] = await Promise.all([
+        const rolesConPermisosExtra = ['docente', 'psicologa'];
+
+        const [perfil, esTutorDe, permisosExtra] = await Promise.all([
             this.usersService.getProfileById(id, rol),
-            rol === 'docente' ? this.findSeccionesTutoreadas(id) : Promise.resolve<SeccionTutorada[]>([]),
+            rol === 'docente'
+                ? this.findSeccionesTutoreadas(id)
+                : Promise.resolve<SeccionTutorada[]>([]),
+            rolesConPermisosExtra.includes(rol)
+                ? this.permissionsService.findByCuenta(id)
+                : Promise.resolve([]),
         ]);
 
         if (!perfil) throw new UnauthorizedException('Rol no reconocido');
 
-        const modulos = this.computeModulos(rol, esTutorDe);
+        const modulos = this.computeModulos(rol, esTutorDe, permisosExtra);
 
         return {
             ...perfil,
@@ -128,22 +149,37 @@ export class AuthService {
             modulos,
         };
     }
+
     private async findSeccionesTutoreadas(docenteId: string): Promise<SeccionTutorada[]> {
-        const secciones = await this.sectionRepo
+        return this.sectionRepo
             .createQueryBuilder('s')
             .select(['s.id AS id', 's.nombre AS nombre'])
             .where('s.tutor_id = :id', { id: docenteId })
             .orderBy('s.nombre', 'ASC')
             .getRawMany();
-        return secciones;
     }
-    private computeModulos(rol: string, esTutorDe: SeccionTutorada[]): Modulo[] {
+
+    private computeModulos(
+        rol: string,
+        esTutorDe: SeccionTutorada[],
+        permisosExtra: Array<{ modulo: string; accion: string }>,
+    ): Modulo[] {
         const base = getModulosBasePorRol(rol);
         const extras: Modulo[] = [];
 
+        // Módulos por condición de negocio
         if (rol === 'docente' && esTutorDe.length > 0) {
             extras.push(MODULOS.TUTORIA, MODULOS.ASIST_GENERAL);
         }
+
+        // Módulos derivados de permisos extra
+        for (const { modulo, accion, modulo_jwt } of PERMISO_A_MODULO) {
+            const tiene = permisosExtra.some(
+                p => p.modulo === modulo && p.accion === accion,
+            );
+            if (tiene) extras.push(modulo_jwt);
+        }
+
         return Array.from(new Set([...base, ...extras]));
     }
 }

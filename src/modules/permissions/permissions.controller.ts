@@ -16,14 +16,13 @@ export class PermissionsController {
 
     constructor(private readonly service: PermissionsService) { }
 
-    // Solo admin gestiona permisos
     @Get()
     @Roles('admin')
     findAll() {
         return this.service.findAll();
     }
 
-    // Admin consulta permisos de cualquier cuenta
+    // Admin consulta permisos de cualquier cuenta — devuelve info de auditoría
     @Get('cuenta/:id')
     @Roles('admin')
     findByCuenta(@Param('id', ParseUUIDPipe) cuentaId: string) {
@@ -60,9 +59,13 @@ export class PermissionsController {
         return this.service.update(id, dto);
     }
 
+    // Se pasa user.id para registrar en log_permisos quién revocó
     @Delete(':id')
     @Roles('admin')
-    remove(@Param('id', ParseUUIDPipe) id: string) {
-        return this.service.remove(id);
+    remove(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.remove(id, user.id);
     }
 }

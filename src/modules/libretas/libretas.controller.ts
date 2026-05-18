@@ -1,6 +1,6 @@
 import {
     Controller, Get, Post, Delete,
-    Param, ParseUUIDPipe,
+    Param, ParseUUIDPipe, Query,
     Body, HttpCode, HttpStatus,
     UseGuards, UseInterceptors, UploadedFile, UploadedFiles,
     BadRequestException,
@@ -65,7 +65,6 @@ export class LibretasController {
         return this.libretasService.findHijoForPadre(user.id, alumnoId);
     }
 
-    // ✅ periodoId es UUID — ParseUUIDPipe en vez de ParseIntPipe
     @Get(':tipo/:cuentaId/periodo/:periodoId')
     @Roles('admin', 'docente')
     findOne(
@@ -77,7 +76,17 @@ export class LibretasController {
             cuentaId, periodoId, this.parseTipo(tipo),
         );
     }
-
+    @Get('padre/seccion/:seccionId')
+    @Roles('admin', 'docente')
+    findPadresPorSeccion(
+        @Param('seccionId', ParseUUIDPipe) seccionId: string,
+        @Query('periodo_id', ParseUUIDPipe) periodoId: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.libretasService.findPadresPorSeccion(
+            seccionId, periodoId, user.id, user.rol,
+        );
+    }
     // ══════════════════════════════════════════════════════════════════════════
     // SUBIDA INDIVIDUAL
     // ══════════════════════════════════════════════════════════════════════════
@@ -92,11 +101,11 @@ export class LibretasController {
     ) {
         if (!file) throw new BadRequestException('Se requiere el archivo (campo: file)');
         return this.libretasService.upsert({
-            cuenta_id:     body.cuenta_id,
-            tipo:          'alumno',
-            periodo_id:    body.periodo_id,   // ✅ UUID string, sin parseInt
-            subido_por:    user.id,
-            rol:           user.rol,
+            cuenta_id: body.cuenta_id,
+            tipo: 'alumno',
+            periodo_id: body.periodo_id,   // ✅ UUID string, sin parseInt
+            subido_por: user.id,
+            rol: user.rol,
             observaciones: body.observaciones,
             file,
         });
@@ -112,11 +121,11 @@ export class LibretasController {
     ) {
         if (!file) throw new BadRequestException('Se requiere el archivo (campo: file)');
         return this.libretasService.upsert({
-            cuenta_id:     body.cuenta_id,
-            tipo:          'padre',
-            periodo_id:    body.periodo_id,   // ✅ UUID string, sin parseInt
-            subido_por:    user.id,
-            rol:           user.rol,
+            cuenta_id: body.cuenta_id,
+            tipo: 'padre',
+            periodo_id: body.periodo_id,   // ✅ UUID string, sin parseInt
+            subido_por: user.id,
+            rol: user.rol,
             observaciones: body.observaciones,
             file,
         });
@@ -163,7 +172,7 @@ export class LibretasController {
             periodoId: body.periodo_id,
             seccionId: body.seccion_id,
             subidoPor: user.id,
-            rol:       user.rol,
+            rol: user.rol,
         });
     }
 
