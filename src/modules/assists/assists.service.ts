@@ -535,28 +535,30 @@ export class AssistsService {
     // ASISTENCIA DOCENTE
     // ════════════════════════════════════════════════════════════
 
-    async bulkDocenteAsistencia(dto: BulkDocenteAsistenciaDto) {
+    async bulkDocenteAsistencia(dto: BulkDocenteAsistenciaDto, userId: string) {
         if (!dto.registros.length) throw new BadRequestException('Lista vacía');
 
-        const records = dto.registros.map(r =>
-            this.docenteRepo.create({
-                horario_id: r.horario_id,
-                docente_id: r.docente_id,
-                fecha: dto.fecha,
-                estado: r.estado as any,
-            }),
-        );
+        const horarioIds = dto.registros.map(r => r.horario_id);
 
-        await this.docenteRepo
-            .createQueryBuilder()
-            .insert()
-            .into(AttendanceDocente)
-            .values(records)
-            .orUpdate(['estado'], ['horario_id', 'fecha'])
-            .execute();
+        await this.dataSource.transaction(async em => {
+            await em.query(
+                `DELETE FROM asistencias_docente
+             WHERE fecha = $1::date
+               AND horario_id = ANY($2::uuid[])`,
+                [dto.fecha, horarioIds],
+            );
 
-        this.logger.log(`Asist. docente bulk: ${records.length} registros | ${dto.fecha}`);
-        return { registrados: records.length };
+            for (const r of dto.registros) {
+                await em.query(
+                    `INSERT INTO asistencias_docente (horario_id, docente_id, fecha, estado, registrado_por)
+                        VALUES ($1::uuid, $2::uuid, $3::date, $4, $5::uuid)`,
+                    [r.horario_id, r.docente_id, dto.fecha, r.estado, userId],
+                );
+            }
+        });
+
+        this.logger.log(`Asist. docente bulk: ${dto.registros.length} registros | ${dto.fecha}`);
+        return { registrados: dto.registros.length };
     }
 
     async getHorariosDelDia(fechaParam?: string) {
@@ -568,6 +570,11 @@ export class AssistsService {
         const date = new Date(fecha + 'T12:00:00');
         const diaSemana = diasMap[date.getDay()];
 
+        // ── Combinamos dos fuentes:
+        //    1. Horarios programados para este día de semana (el comportamiento original)
+        //    2. Horarios que YA tienen un registro guardado para esta fecha exacta
+        //       (cubre fechas pasadas donde el horario puede haber cambiado o no
+        //        coincidir con el día de semana actual)
         const rows = await this.dataSource.query<{
             horario_id: string;
             docente_id: string;
@@ -582,30 +589,48 @@ export class AssistsService {
             hora_llegada: string | null;
             observacion: string | null;
         }[]>(
-            `SELECT
-                h.id           AS horario_id,
-                d.id           AS docente_id,
-                d.nombre       AS docente_nombre,
-                d.apellido_paterno,
-                c.nombre       AS curso_nombre,
-                s.nombre       AS seccion_nombre,
-                h.hora_inicio,
-                h.hora_fin,
-                h.aula,
-                ad.estado      AS estado_actual,
-                ad.hora_llegada,
-                ad.observacion
-             FROM horarios h
-             JOIN cursos    c ON c.id = h.curso_id AND c.activo = TRUE
-             JOIN secciones s ON s.id = c.seccion_id AND s.activo = TRUE
-             JOIN docentes  d ON d.id = c.docente_id
-             JOIN cuentas   cu ON cu.id = d.id AND cu.activo = TRUE
-             LEFT JOIN asistencias_docente ad
-               ON ad.horario_id = h.id AND ad.fecha = $1::date
-             WHERE h.dia_semana = $2
-             ORDER BY h.hora_inicio, d.apellido_paterno`,
+            `SELECT DISTINCT ON (h.id)
+          h.id           AS horario_id,
+          d.id           AS docente_id,
+          d.nombre       AS docente_nombre,
+          d.apellido_paterno,
+          c.nombre       AS curso_nombre,
+          s.nombre       AS seccion_nombre,
+          h.hora_inicio,
+          h.hora_fin,
+          h.aula,
+          ad.estado      AS estado_actual,
+          ad.hora_llegada,
+          ad.observacion
+       FROM horarios h
+       JOIN cursos    c ON c.id = h.curso_id AND c.activo = TRUE
+       JOIN secciones s ON s.id = c.seccion_id AND s.activo = TRUE
+       JOIN docentes  d ON d.id = c.docente_id
+       JOIN cuentas   cu ON cu.id = d.id AND cu.activo = TRUE
+       LEFT JOIN asistencias_docente ad
+         ON ad.horario_id = h.id AND ad.fecha = $1::date
+       WHERE
+         -- Horarios del día de semana correspondiente
+         h.dia_semana = $2
+         OR
+         -- Horarios que ya tienen registro guardado para esta fecha exacta
+         -- (permite ver/editar asistencias de fechas pasadas aunque el
+         --  horario no corresponda al día de semana actual)
+         h.id IN (
+           SELECT horario_id
+           FROM asistencias_docente
+           WHERE fecha = $1::date
+         )
+       ORDER BY h.id, h.hora_inicio`,
             [fecha, diaSemana],
         );
+
+        // Ordenamos por hora de inicio y apellido
+        rows.sort((a, b) => {
+            if (a.hora_inicio < b.hora_inicio) return -1;
+            if (a.hora_inicio > b.hora_inicio) return 1;
+            return a.apellido_paterno.localeCompare(b.apellido_paterno);
+        });
 
         return rows.map(r => ({
             horario_id: r.horario_id,

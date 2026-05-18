@@ -154,8 +154,11 @@ export class AssistsController {
     /** Registra la asistencia de docentes en bloque para el día. */
     @Post('docente/bulk')
     @Roles('auxiliar', 'admin')
-    bulkDocente(@Body() dto: BulkDocenteAsistenciaDto) {
-        return this.svc.bulkDocenteAsistencia(dto);
+    bulkDocente(
+        @CurrentUser() user: AuthUser,
+        @Body() dto: BulkDocenteAsistenciaDto,
+    ) {
+        return this.svc.bulkDocenteAsistencia(dto, user.id);
     }
 
     // ── REPORTE ──
