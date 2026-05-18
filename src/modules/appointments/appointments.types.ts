@@ -48,3 +48,11 @@ export const SELF_CANCELLABLE_STATES: AppointmentStatus[] = [
   'pendiente',
   'confirmada',
 ];
+
+/** Forma mínima de un perfil (alumno/padre/docente/etc.) usada en respuestas. */
+export interface ProfileRow {
+  id: string;
+  nombre: string;
+  apellido_paterno: string;
+  apellido_materno: string | null;
+}

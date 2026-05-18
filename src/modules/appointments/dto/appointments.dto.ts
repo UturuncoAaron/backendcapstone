@@ -98,6 +98,53 @@ export class RejectAppointmentDto {
   motivo: string;
 }
 
+/** Cuerpo común a las acciones que exigen motivo (cancelar/rechazar/aplazar). */
+export class MotivoDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  motivo: string;
+}
+
+export class PostponeAppointmentDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  motivo: string;
+
+  @IsDateString()
+  nuevaFechaHora: string;
+}
+
+export class DeriveAppointmentDto {
+  @IsUUID()
+  alumnoId: string;
+
+  @IsUUID()
+  psicologaId: string;
+
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  motivo: string;
+
+  @IsDateString()
+  scheduledAt: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(15)
+  @Max(180)
+  durationMin?: number;
+}
+
+export class CompleteAppointmentDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notasPosteriores?: string;
+}
+
 export class ListAppointmentsQueryDto {
   @IsOptional()
   @IsEnum(APPOINTMENT_STATUSES)
