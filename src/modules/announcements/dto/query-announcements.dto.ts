@@ -1,12 +1,43 @@
-import { IsEnum, IsOptional, IsIn } from 'class-validator';
-import type { Destinatario } from '../entities/announcement.entity.js';
+import { IsOptional, IsString, IsBoolean, IsUUID, IsInt, Min, Max } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class QueryAnnouncementsDto {
-    @IsEnum(['todos', 'alumnos', 'docentes', 'padres', 'psicologas'])
-    @IsOptional()
-    rol?: Destinatario;
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  size?: number;
 
-    @IsIn(['true', 'false'])
-    @IsOptional()
-    activo?: string;
+  @IsOptional()
+  @IsString()
+  cursor?: string;
+
+  @IsOptional()
+  @IsUUID()
+  periodo_id?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  importante?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  no_leidos?: boolean;
+
+  @IsOptional()
+  @IsString()
+  buscar?: string;
+
+  /** Interno — seteado por el controller con el rol JWT. */
+  @IsOptional()
+  @IsString()
+  rol?: string;
+
+  /** Interno — seteado por el controller con el userId. */
+  @IsOptional()
+  @IsString()
+  userId?: string;
 }

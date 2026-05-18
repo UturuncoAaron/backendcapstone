@@ -1,21 +1,34 @@
-import { IsString, IsNotEmpty, IsArray, IsEnum, ArrayMinSize, IsOptional, MaxLength } from 'class-validator';
-import { Destinatario } from '../entities/announcement.entity.js';
-
-const DESTINATARIOS_VALIDOS: Destinatario[] = ['todos', 'alumnos', 'docentes', 'padres', 'psicologas'];
+import {
+  IsString, IsArray, IsOptional, IsBoolean, IsUUID,
+  MaxLength, ArrayNotEmpty,
+} from 'class-validator';
 
 export class CreateAnnouncementDto {
-    @IsString()
-    @IsNotEmpty()
-    @MaxLength(200)
-    titulo: string;
+  @IsString()
+  @MaxLength(200)
+  titulo: string;
 
-    @IsString()
-    @IsNotEmpty()
-    contenido: string;
+  @IsString()
+  contenido: string;
 
-    @IsArray()
-    @IsEnum(DESTINATARIOS_VALIDOS, { each: true })
-    @ArrayMinSize(1)
-    @IsOptional()
-    destinatarios?: Destinatario[];
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  destinatarios: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  importante?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  fijado?: boolean;
+
+  @IsOptional()
+  @IsString()
+  fijado_hasta?: string;
+
+  @IsOptional()
+  @IsUUID()
+  periodo_id?: string;
 }

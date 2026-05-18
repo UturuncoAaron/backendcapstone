@@ -1,7 +1,6 @@
 import {
-    Controller, Get, Post, Delete,
-    Param, Body, Query,
-    ParseUUIDPipe, UseGuards,
+  Controller, Get, Post, Patch, Delete,
+  Param, Body, Query, ParseUUIDPipe, UseGuards,
 } from '@nestjs/common';
 import { AnnouncementsService } from './announcements.service.js';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto.js';
@@ -15,38 +14,99 @@ import { PermisoGuard } from '../auth/guards/permiso.guard.js';
 import { RequierePermiso } from '../auth/decorators/requiere-permiso.decorator.js';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('announcements')
+@Controller('comunicados')
 export class AnnouncementsController {
-    constructor(private readonly announcementsService: AnnouncementsService) { }
+  constructor(private readonly svc: AnnouncementsService) { }
 
-    // GET /api/announcements — todos los roles ven comunicados
-    @Get()
-    @Roles('alumno', 'docente', 'admin', 'padre', 'psicologa')
-    findAll(@Query() query: QueryAnnouncementsDto) {
-        return this.announcementsService.findAll(query);
-    }
+  // GET /api/comunicados
+  @Get()
+  @Roles('alumno', 'docente', 'admin', 'padre', 'psicologa', 'auxiliar')
+  findAll(@Query() query: QueryAnnouncementsDto, @CurrentUser() user: AuthUser) {
+    query.rol = user.rol;
+    query.userId = user.id;
+    return this.svc.findAll(query);
+  }
 
-    // GET /api/announcements/:id
-    @Get(':id')
-    @Roles('alumno', 'docente', 'admin', 'padre', 'psicologa')
-    findOne(@Param('id', ParseUUIDPipe) id: string) {
-        return this.announcementsService.findOne(id);
-    }
+  // GET /api/comunicados/todos — solo admin
+  @Get('todos')
+  @Roles('admin')
+  findAllAdmin(
+    @Query('size') size?: string,
+    @Query('cursor') cursor?: string,
+    @Query('periodo_id') periodo_id?: string,
+    @Query('activo') activo?: string,
+    @Query('orden') orden?: string,
+    @Query('buscar') buscar?: string,
+  ) {
+    return this.svc.findAllAdmin({
+      size: size ? parseInt(size) : undefined,
+      cursor,
+      periodo_id,
+      activo: activo === undefined ? undefined : activo === 'true',
+      orden,
+      buscar,
+    });
+  }
 
-    @Post()
-    @UseGuards(JwtAuthGuard, PermisoGuard)
-    @RequierePermiso('comunicados', 'crear')
-    create(
-        @CurrentUser() user: AuthUser,
-        @Body() dto: CreateAnnouncementDto,
-    ) {
-        return this.announcementsService.create(user.id, dto);
-    }
+  // GET /api/comunicados/:id
+  @Get(':id')
+  @Roles('alumno', 'docente', 'admin', 'padre', 'psicologa', 'auxiliar')
+  findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.findOne(id, user.id);
+  }
 
-    // DELETE /api/announcements/:id — solo admin (soft delete)
-    @Delete(':id')
-    @Roles('admin')
-    remove(@Param('id', ParseUUIDPipe) id: string) {
-        return this.announcementsService.remove(id);
-    }
+  // POST /api/comunicados
+  @Post()
+  @UseGuards(JwtAuthGuard, PermisoGuard)
+  @RequierePermiso('comunicados', 'crear')
+  async create(@Body() dto: CreateAnnouncementDto, @CurrentUser() user: AuthUser) {
+    await this.svc.validateDestinatarios(dto.destinatarios);
+    return this.svc.create(user, dto);
+  }
+
+  // PATCH /api/comunicados/:id
+  @Patch(':id')
+  @Roles('admin', 'docente', 'psicologa')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: any,
+  ) {
+    return this.svc.update(id, user.id, user.rol, dto);
+  }
+
+  // PATCH /api/comunicados/:id/fijar
+  @Patch(':id/fijar')
+  @Roles('admin')
+  fijar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { fijado: boolean; fijado_hasta?: string },
+  ) {
+    return this.svc.fijar(id, body.fijado, body.fijado_hasta);
+  }
+
+  // PATCH /api/comunicados/:id/archivar
+  @Patch(':id/archivar')
+  @Roles('admin', 'docente', 'psicologa')
+  archivar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
+    return this.svc.archivar(id, user.id, user.rol);
+  }
+
+  // GET /api/comunicados/:id/lecturas
+  @Get(':id/lecturas')
+  @Roles('admin', 'docente', 'psicologa')
+  getLecturas(@Param('id', ParseUUIDPipe) id: string) {
+    return this.svc.getLecturas(id);
+  }
+
+  // DELETE /api/comunicados/:id/archivos/:archivoId
+  @Delete(':id/archivos/:archivoId')
+  @Roles('admin', 'docente', 'psicologa')
+  deleteArchivo(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('archivoId', ParseUUIDPipe) archivoId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.svc.deleteArchivo(id, archivoId, user.id, user.rol);
+  }
 }
