@@ -83,7 +83,76 @@ export class LibretasService {
         }));
         return { vista_en: row.vista_en };
     }
+    async findPadresPorSeccion(
+        seccionId: string,
+        periodoId: string,
+        requesterId: string,
+        requesterRol: string,
+    ) {
+        if (requesterRol === 'docente') {
+            const tieneAcceso = await this.dataSource.query(
+                `SELECT 1 FROM cursos c
+                 WHERE c.seccion_id = $1::uuid
+                   AND c.docente_id = $2::uuid
+                   AND c.activo = TRUE
+                 LIMIT 1`,
+                [seccionId, requesterId],
+            );
+            if (!tieneAcceso.length) {
+                throw new ForbiddenException(
+                    'No tienes acceso a las libretas de esta sección',
+                );
+            }
+        }
 
+        const rows = await this.dataSource.query<Array<{
+            id: string;
+            nombre: string;
+            apellido_paterno: string;
+            apellido_materno: string | null;
+            relacion: string | null;
+            libreta_id: string | null;
+            libreta_storage_key: string | null;
+            libreta_nombre_archivo: string | null;
+        }>>(
+            `SELECT
+        p.id,
+        p.nombre,
+        p.apellido_paterno,
+        p.apellido_materno,
+        p.relacion,
+        l.id              AS libreta_id,
+        l.storage_key     AS libreta_storage_key,
+        l.nombre_archivo  AS libreta_nombre_archivo
+     FROM padres p
+     JOIN padre_alumno pa ON pa.padre_id = p.id
+     JOIN matriculas   m  ON m.alumno_id = pa.alumno_id
+     LEFT JOIN libretas l
+            ON l.cuenta_id = p.id
+           AND l.tipo = 'padre'
+           AND l.periodo_id = $2::uuid
+     WHERE m.seccion_id = $1::uuid
+       AND m.activo = TRUE
+     GROUP BY p.id, p.relacion, l.id
+     ORDER BY p.apellido_paterno NULLS LAST, p.nombre`,
+            [seccionId, periodoId],
+        );
+
+        return Promise.all(rows.map(async r => ({
+            id: r.id,
+            nombre: r.nombre,
+            apellido_paterno: r.apellido_paterno,
+            apellido_materno: r.apellido_materno,
+            relacion: r.relacion ?? 'padre',
+            libreta: r.libreta_id && r.libreta_storage_key
+                ? {
+                    id: r.libreta_id,
+                    url: await this.storageService.getSignedUrl(r.libreta_storage_key),
+                    nombre_archivo: r.libreta_nombre_archivo,
+                }
+                : null,
+        })));
+    }
     /** Para admin/docente: lista de lectores con la fecha en que vieron la libreta. */
     async listLecturas(libretaId: string) {
         return this.dataSource.query<{

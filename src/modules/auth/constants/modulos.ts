@@ -1,5 +1,5 @@
 export const MODULOS = {
-    // ── Comunes a varios roles
+    // ── Comunes
     DASHBOARD: 'dashboard',
     COMUNICADOS: 'comunicados',
     MENSAJES: 'mensajes',
@@ -23,10 +23,11 @@ export const MODULOS = {
     CITAS_DOCENTE: 'citas_docente',
     DISPONIBILIDAD_DOCENTE: 'disponibilidad_docente',
 
-
+    // ── Alumno + Docente
     FORO: 'foro',
     CLASES_VIVO: 'clases_vivo',
 
+    // ── Tutor
     TUTORIA: 'tutoria',
     ASIST_GENERAL: 'asist_general',
 
@@ -42,8 +43,16 @@ export const MODULOS = {
     FICHAS: 'fichas',
     DISPONIBILIDAD: 'disponibilidad',
 
-    // ── Agenda propia (roles con disponibilidad: docente, psicologa, admin, auxiliar)
+    // ── Agenda propia
     AGENDA_PROPIA: 'agenda_propia',
+
+    // ── Reportes
+    REPORTES_GLOBALES: 'reportes_globales',
+    REPORTES_ACCESO: 'reportes_acceso',
+
+    // ── Libretas padres
+    // Admin lo tiene en su base. Docente lo recibe vía permisos_extra.
+    LIBRETAS_PADRE_ACCESO: 'libretas_padre_acceso',
 
     // ── Admin
     USUARIOS: 'usuarios',
@@ -52,7 +61,7 @@ export const MODULOS = {
     CURSOS_ADMIN: 'cursos_admin',
     MATRICULAS: 'matriculas',
     PADRE_HIJO_ADMIN: 'padre_hijo',
-    REPORTES_GLOBALES: 'reportes_globales',
+    REPORTES_GLOBALES_KEY: 'reportes_globales',
     COMUNICADOS_ADMIN: 'comunicados_admin',
     IMPORTAR: 'importar',
     AJUSTES: 'ajustes',
@@ -94,7 +103,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
     ],
     padre: [
         MODULOS.HIJOS, MODULOS.LIBRETAS_HIJOS,
-        MODULOS.CITAS_AGENDADAS, MODULOS.CITAS_PADRE,  // ← NUEVO
+        MODULOS.CITAS_AGENDADAS, MODULOS.CITAS_PADRE,
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,
     ],
@@ -106,6 +115,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         MODULOS.HISTORICO_ALUMNOS,
         MODULOS.AGENDA_PROPIA,
         MODULOS.MENSAJES,
+        MODULOS.LIBRETAS_PADRE_ACCESO, // ← admin siempre puede subir libretas de padres
         ...COMUNES,
     ],
 };

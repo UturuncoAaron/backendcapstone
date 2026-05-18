@@ -13,6 +13,7 @@ import { RolesGuard } from './guards/roles.guard.js';
 import { Cuenta } from '../users/entities/cuenta.entity.js';
 import { Section } from '../academic/entities/section.entity.js';
 import { UsersModule } from '../users/users.module.js';
+import { PermissionsModule } from '../permissions/permissions.module.js';
 
 @Module({
     imports: [
@@ -30,6 +31,7 @@ import { UsersModule } from '../users/users.module.js';
         }),
         TypeOrmModule.forFeature([Cuenta, Section]),
         UsersModule,
+        PermissionsModule, // ← inyecta PermissionsService en AuthService
     ],
     controllers: [AuthController],
     providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, Reflector],

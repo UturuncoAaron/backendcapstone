@@ -50,6 +50,27 @@ export class AcademicService {
         });
     }
 
+    /**
+     * Secciones donde el docente tiene al menos un curso activo asignado.
+     * Usado por LibretasPadresPage para limitar el selector a sus secciones.
+     */
+    async getSeccionesDocente(docenteId: string) {
+        return this.dataSource.query(
+            `SELECT DISTINCT
+                s.id,
+                s.nombre,
+                g.nombre  AS grado_nombre,
+                g.orden   AS grado_orden
+             FROM cursos c
+             JOIN secciones s ON s.id = c.seccion_id
+             JOIN grados    g ON g.id = s.grado_id
+             WHERE c.docente_id = $1
+               AND c.activo     = TRUE
+             ORDER BY g.orden ASC, s.nombre ASC`,
+            [docenteId],
+        );
+    }
+
     async createSeccion(gradoId: string, nombre: string, capacidad = 35) {
         if (!gradoId) throw new BadRequestException('grado_id es requerido');
 
@@ -149,7 +170,6 @@ export class AcademicService {
             [anio],
         );
 
-        // ── CAMBIO: matriculas ahora tiene anio, no periodo_id ──
         const alumnos = await this.dataSource.query(
             `SELECT DISTINCT
                 a.id, a.codigo_estudiante,
@@ -261,13 +281,11 @@ export class AcademicService {
     }
 
     // ── MATRÍCULAS ───────────────────────────────────────────────
-    // ── CAMBIO: ya no hay periodo_id en matriculas — filtra por anio ──
 
     async findMatriculas(anio?: number, seccionId?: string) {
         const params: any[] = [];
         const conditions: string[] = [];
 
-        // Usar el año del periodo activo si no se provee
         let anioFinal = anio;
         if (!anioFinal) {
             const periodoActivo = await this.dataSource.query(

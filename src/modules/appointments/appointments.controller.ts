@@ -23,13 +23,17 @@ import {
   ListAppointmentsQueryDto,
   ReplaceAvailabilityDto,
   RejectAppointmentDto,
+  MotivoDto,
+  PostponeAppointmentDto,
+  DeriveAppointmentDto,
+  CompleteAppointmentDto,
 } from './dto/appointments.dto.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller('appointments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AppointmentsController {
-  constructor(private readonly service: AppointmentsService) { }
+  constructor(private readonly service: AppointmentsService) {}
 
   // ══════════════════════════════════════════════════════════════
   // CRUD DE CITAS
@@ -128,11 +132,35 @@ export class AppointmentsController {
     return { count };
   }
 
+  // ── Borrar un bloque individual de disponibilidad ──────────────
+  // Si hay citas activas en ese bloque, devuelve 409 a menos que
+  // se pase ?confirm=true, en cuyo caso las cancela en cascada y
+  // emite notificación a las partes.
+  @Delete('availability/slot/:slotId')
+  @Roles('psicologa', 'docente', 'auxiliar', 'admin')
+  deleteAvailabilitySlot(
+    @Param('slotId', ParseUUIDPipe) slotId: string,
+    @Query('confirm') confirm: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.deleteAvailabilitySlot(
+      { id: user.id, rol: user.rol },
+      slotId,
+      confirm === 'true',
+    );
+  }
+
+  // ── Derivación docente → psicóloga ──────────────────────────────
+  @Post('derivar')
+  @Roles('docente')
+  derivar(@Body() dto: DeriveAppointmentDto, @CurrentUser() user: AuthUser) {
+    return this.service.deriveToPsicologa({ id: user.id, rol: user.rol }, dto);
+  }
+
   // ══════════════════════════════════════════════════════════════
   // OPERACIONES POR ID DE CITA  (van AL FINAL para no chocar con
   // las rutas estáticas anteriores)
   // ══════════════════════════════════════════════════════════════
-
 
   // ── Detalle ─────────────────────────────────────────────────────
   @Get(':id')
@@ -199,5 +227,81 @@ export class AppointmentsController {
       id,
       dto.motivo,
     );
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // ENDPOINTS CANÓNICOS DEL SPEC (PATCH /:id/<accion>)
+  // ══════════════════════════════════════════════════════════════
+
+  @Patch(':id/confirmar')
+  @Roles('padre', 'alumno', 'admin')
+  confirmar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.acceptAppointment({ id: user.id, rol: user.rol }, id);
+  }
+
+  @Patch(':id/aplazar')
+  @Roles('padre', 'alumno', 'admin')
+  aplazar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PostponeAppointmentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.postponeAppointment(
+      { id: user.id, rol: user.rol },
+      id,
+      dto,
+    );
+  }
+
+  @Patch(':id/cancelar')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
+  cancelar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MotivoDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.cancelAppointment({ id: user.id, rol: user.rol }, id, {
+      motivo: dto.motivo,
+    });
+  }
+
+  @Patch(':id/rechazar')
+  @Roles('padre', 'admin')
+  rechazar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectAppointmentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.rejectAppointment(
+      { id: user.id, rol: user.rol },
+      id,
+      dto.motivo,
+    );
+  }
+
+  @Patch(':id/realizar')
+  @Roles('psicologa', 'admin')
+  realizar(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CompleteAppointmentDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.markAsRealizada(
+      { id: user.id, rol: user.rol },
+      id,
+      dto,
+    );
+  }
+
+  @Patch(':id/inasistencia')
+  @Roles('psicologa', 'admin')
+  inasistencia(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.markAsNoAsistio({ id: user.id, rol: user.rol }, id);
   }
 }

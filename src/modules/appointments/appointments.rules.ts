@@ -71,8 +71,8 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
   },
   director: {
     role: 'director',
-    fixedDurationMin: null,        // ← antes era 15 fijo; ahora flexible en bloques de 15
-    maxDurationMin: 60,            // tope razonable; ajustá si querés más
+    fixedDurationMin: null, // ← antes era 15 fijo; ahora flexible en bloques de 15
+    maxDurationMin: 60, // tope razonable; ajustá si querés más
     slotMinutes: 15,
     allowedDays: ['martes', 'jueves'],
     defaultHours: { start: '08:00', end: '15:30' },
@@ -164,4 +164,47 @@ export function formatAllowedDays(rule: AppointmentRoleRule): string {
     sabado: 'sábado',
   };
   return rule.allowedDays.map((d) => labels[d]).join(' y ');
+}
+
+// ============================================================================
+// MATRIZ DE INVITACIÓN — quién puede citar a quién
+// ----------------------------------------------------------------------------
+// Spec (Aarón, 2026-05):
+//   docente  -> SOLO padre del alumno (alumno obligatorio)
+//   psicologa-> alumno, padre, o ambos (autocompleta padre vía padre_alumno)
+//   padre    -> psicologa o docente
+//   alumno   -> SOLO psicologa
+//   admin/director -> SOLO padre (alumno obligatorio)
+//   auxiliar -> SOLO padre (alumno obligatorio) — mismo tratamiento que admin
+// ============================================================================
+
+export type CallerRol = Rol;
+export type RecipientRol = Rol;
+
+/** Roles a los que cada rol que cita puede dirigir una cita. */
+const INVITATION_MATRIX: Record<CallerRol, readonly RecipientRol[]> = {
+  docente: ['padre'],
+  psicologa: ['alumno', 'padre'],
+  padre: ['psicologa', 'docente'],
+  alumno: ['psicologa'],
+  admin: ['padre'],
+  auxiliar: ['padre'],
+};
+
+/** True si `caller` puede agendar una cita dirigida a un usuario con rol `recipient`. */
+export function canInvite(caller: CallerRol, recipient: RecipientRol): boolean {
+  return (INVITATION_MATRIX[caller] ?? []).includes(recipient);
+}
+
+/** Devuelve los roles permitidos para el destinatario según el rol del convocante. */
+export function allowedRecipientsFor(
+  caller: CallerRol,
+): readonly RecipientRol[] {
+  return INVITATION_MATRIX[caller] ?? [];
+}
+
+/** True si el rol que cita necesita SIEMPRE indicar `alumno_id` en la cita. */
+export function callerRequiresStudent(caller: CallerRol): boolean {
+  // docente y admin/auxiliar siempre citan en torno a un alumno específico.
+  return caller === 'docente' || caller === 'admin' || caller === 'auxiliar';
 }

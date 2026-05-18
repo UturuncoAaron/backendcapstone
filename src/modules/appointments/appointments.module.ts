@@ -6,6 +6,7 @@ import { AccountAvailability } from './entities/account-availability.entity.js';
 import { PsychologistStudent } from '../psychology/entities/psychologist-student.entity.js';
 import { AppointmentsService } from './appointments.service.js';
 import { AppointmentsController } from './appointments.controller.js';
+import { PublicAvailabilityController } from './public-availability.controller.js';
 import { AppointmentsSchemaSync } from './appointments.schema-sync.js';
 
 @Module({
@@ -17,7 +18,7 @@ import { AppointmentsSchemaSync } from './appointments.schema-sync.js';
       PsychologistStudent,
     ]),
   ],
-  controllers: [AppointmentsController],
+  controllers: [AppointmentsController, PublicAvailabilityController],
   providers: [AppointmentsService, AppointmentsSchemaSync],
   exports: [AppointmentsService],
 })
