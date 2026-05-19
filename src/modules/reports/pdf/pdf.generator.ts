@@ -43,27 +43,21 @@ export interface InformePdfData {
 
 // ── Colores ──────────────────────────────────────────────────────────────────
 
-const BLUE = '#1a3a6b';
-const INK = '#111111';
-const MUTED = '#555555';
-const BORDER = '#cccccc';
-const BG_NOTE = '#e8edf5';
+const PRIMARY = '#1a3a6b';
+const INK = '#1a1a1a';
+const MUTED = '#4a4a4a';
+const LIGHT = '#7a7a7a';
+const LINE = '#d0d0d0';
 
 const TIPO_LABELS: Record<string, string> = {
-    evaluacion: 'Evaluación Psicológica',
-    seguimiento: 'Reporte de Seguimiento',
-    derivacion_familia: 'Derivación a la Familia',
-    derivacion_externa: 'Derivación Externa',
+    evaluacion: 'Evaluación psicológica',
+    seguimiento: 'Reporte de seguimiento',
+    derivacion_familia: 'Derivación a la familia',
+    derivacion_externa: 'Derivación externa',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Generador de PDFs institucionales usando PDFKit.
- * Stateless: recibe un InformePdfData y devuelve un Buffer.
- * Se puede reutilizar para otros documentos (libretas, constancias, etc.)
- * agregando métodos públicos similares a `generateInformePdf`.
- */
 @Injectable()
 export class PdfGenerator {
 
@@ -73,10 +67,10 @@ export class PdfGenerator {
 
             const doc = new PDFDocument({
                 size: 'A4',
-                margins: { top: 50, bottom: 50, left: 60, right: 60 },
+                margins: { top: 60, bottom: 60, left: 65, right: 65 },
                 info: {
                     Title: `Informe Psicológico — ${data.informe.titulo}`,
-                    Author: 'EduAula · Servicio de Psicología Educativa',
+                    Author: `${data.psicologa.nombre} ${data.psicologa.apellido_paterno}`,
                     Creator: 'EduAula',
                 },
             });
@@ -95,73 +89,55 @@ export class PdfGenerator {
     // ════════════════════════════════════════════════════════════════
 
     private build(doc: PDFKit.PDFDocument, data: InformePdfData): void {
-        // Borde azul superior
-        doc.rect(60, 40, doc.page.width - 120, 4).fill(BLUE);
+        const W = doc.page.width - 130; // ancho útil (margins: 65 + 65)
 
-        this.header(doc);
-        this.sectionDatos(doc, data);
-
-        if (data.informe.tipo === 'derivacion_familia' && data.parents.length > 0) {
-            this.sectionDestinatarios(doc, data.parents);
-        }
+        this.header(doc, W);
+        this.sectionDatos(doc, data, W);
 
         if (data.informe.derivadoA) {
-            this.sectionTexto(doc, 'II.', 'DERIVADO A', data.informe.derivadoA);
+            this.sectionTexto(doc, 'Derivado a', data.informe.derivadoA, W);
         }
 
-        this.sectionTexto(doc, 'II.', 'MOTIVO DE CONSULTA', data.informe.motivo);
+        if (data.informe.tipo === 'derivacion_familia' && data.parents.length > 0) {
+            this.sectionDestinatarios(doc, data.parents, W);
+        }
+
+        this.sectionTexto(doc, 'Motivo de consulta', data.informe.motivo, W);
 
         if (data.informe.antecedentes) {
-            this.sectionTexto(doc, 'III.', 'ANTECEDENTES', data.informe.antecedentes);
+            this.sectionTexto(doc, 'Antecedentes', data.informe.antecedentes, W);
         }
 
-        this.sectionTexto(doc, 'IV.', 'OBSERVACIONES Y HALLAZGOS', data.informe.observaciones);
+        this.sectionTexto(doc, 'Observaciones y hallazgos', data.informe.observaciones, W);
 
         if (data.informe.recomendaciones) {
-            this.sectionTexto(doc, 'V.', 'RECOMENDACIONES', data.informe.recomendaciones);
+            this.sectionTexto(doc, 'Recomendaciones', data.informe.recomendaciones, W);
         }
 
-        this.footer(doc, data);
+        this.footer(doc, data, W);
     }
 
-    // ── Encabezado institucional ────────────────────────────────────
+    // ── Encabezado minimalista ───────────────────────────────────────
 
-    private header(doc: PDFKit.PDFDocument): void {
-        const y = doc.y + 12;
+    private header(doc: PDFKit.PDFDocument, W: number): void {
+        const x = 65;
 
-        // Círculo monograma
-        doc.circle(78, y + 18, 18).fill(BLUE);
-        doc.font('Helvetica-Bold').fontSize(10).fillColor('#ffffff')
-            .text('IE', 72, y + 12);
+        // Línea decorativa superior
+        doc.rect(x, 50, W, 3).fill(PRIMARY);
 
-        // Nombre IE y ubicación
-        doc.font('Helvetica-Bold').fontSize(9).fillColor(BLUE)
-            .text('I.E. JUAN PABLO VIZCARDO Y GUZMÁN', 106, y + 7);
-        doc.font('Helvetica').fontSize(8).fillColor(MUTED)
-            .text('Ugel 04 · Comas, Lima — Perú', 106, y + 20);
+        // Título principal
+        doc.font('Helvetica-Bold').fontSize(18).fillColor(INK)
+            .text('INFORME PSICOLÓGICO', x, 70, {
+                width: W, align: 'center', characterSpacing: 2,
+            });
 
-        // Doble línea con label
-        const lineY = y + 44;
-        doc.moveTo(60, lineY).lineTo(doc.page.width - 60, lineY)
-            .strokeColor(BLUE).lineWidth(1.5).stroke();
-        doc.font('Helvetica-Bold').fontSize(7).fillColor(BLUE)
-            .text('SERVICIO DE PSICOLOGÍA EDUCATIVA', 60, lineY + 5,
-                { width: doc.page.width - 120, align: 'center', characterSpacing: 2 });
-        doc.moveTo(60, lineY + 17).lineTo(doc.page.width - 60, lineY + 17)
-            .strokeColor(BLUE).lineWidth(0.5).stroke();
-
-        // Título
-        doc.font('Helvetica-Bold').fontSize(16).fillColor(INK)
-            .text('INFORME PSICOLÓGICO', 60, lineY + 26,
-                { width: doc.page.width - 120, align: 'center', characterSpacing: 3 });
-
-        doc.moveDown(1.4);
+        doc.moveDown(1.5);
     }
 
-    // ── Sección I: Datos de identificación ─────────────────────────
+    // ── Sección: Datos de identificación ────────────────────────────
 
-    private sectionDatos(doc: PDFKit.PDFDocument, data: InformePdfData): void {
-        this.secTitle(doc, 'I.', 'DATOS DE IDENTIFICACIÓN');
+    private sectionDatos(doc: PDFKit.PDFDocument, data: InformePdfData, W: number): void {
+        this.secTitle(doc, 'Datos de identificación', W);
 
         const s = data.student;
         const fullName = s
@@ -175,23 +151,23 @@ export class PdfGenerator {
             ...(s?.codigo_estudiante ? [['Código', s.codigo_estudiante] as [string, string]] : []),
             ['Tipo de informe', TIPO_LABELS[data.informe.tipo] ?? data.informe.tipo],
             ['Fecha', fecha],
-            ['Estado', data.informe.estado === 'finalizado' ? 'Finalizado' : 'Borrador'],
-            ...(data.informe.confidencial
-                ? [['Confidencialidad', 'Documento confidencial — uso restringido al destinatario'] as [string, string]]
-                : []),
         ];
 
-        const labelW = 150;
-        const valueX = 60 + labelW + 10;
-        const valueW = doc.page.width - 120 - labelW - 10;
+        if (data.informe.confidencial) {
+            rows.push(['Confidencialidad', 'Documento confidencial']);
+        }
+
+        const labelW = 145;
+        const valueX = 65 + labelW + 12;
+        const valueW = W - labelW - 12;
 
         for (const [label, value] of rows) {
             const rowY = doc.y;
-            doc.font('Helvetica-Bold').fontSize(8).fillColor(MUTED)
-                .text(label.toUpperCase(), 60, rowY, { width: labelW, lineBreak: false });
+            doc.font('Helvetica').fontSize(8.5).fillColor(LIGHT)
+                .text(label, 65, rowY, { width: labelW });
             doc.font('Helvetica').fontSize(10).fillColor(INK)
                 .text(value, valueX, rowY, { width: valueW });
-            doc.moveDown(0.15);
+            doc.moveDown(0.3);
         }
 
         doc.moveDown(0.6);
@@ -202,15 +178,14 @@ export class PdfGenerator {
     private sectionDestinatarios(
         doc: PDFKit.PDFDocument,
         parents: InformePdfData['parents'],
+        W: number,
     ): void {
-        this.secTitle(doc, 'II.', 'DESTINATARIOS');
+        this.secTitle(doc, 'Destinatarios', W);
         for (const p of parents) {
             const name = `${p.apellido_paterno} ${p.apellido_materno ?? ''}, ${p.nombre}`.trim();
             const relacion = p.relacion.charAt(0).toUpperCase() + p.relacion.slice(1);
-            const dni = p.codigo_acceso ? ` · ${p.codigo_acceso}` : '';
             doc.font('Helvetica').fontSize(10).fillColor(INK)
-                .text(`${relacion}: ${name}${dni}`, 60, doc.y,
-                    { width: doc.page.width - 120 });
+                .text(`${relacion}: ${name}`, 65, doc.y, { width: W });
             doc.moveDown(0.2);
         }
         doc.moveDown(0.5);
@@ -220,86 +195,76 @@ export class PdfGenerator {
 
     private sectionTexto(
         doc: PDFKit.PDFDocument,
-        num: string,
         title: string,
         content: string,
+        W: number,
     ): void {
-        if (doc.y > doc.page.height - 160) doc.addPage();
-        this.secTitle(doc, num, title);
+        if (doc.y > doc.page.height - 140) doc.addPage();
+        this.secTitle(doc, title, W);
         doc.font('Helvetica').fontSize(10).fillColor(INK)
-            .text(content, 60, doc.y, {
-                width: doc.page.width - 120,
+            .text(content, 65, doc.y, {
+                width: W,
                 align: 'justify',
-                lineGap: 2,
+                lineGap: 3,
             });
-        doc.moveDown(0.8);
+        doc.moveDown(1);
     }
 
-    // ── Footer + Firma ──────────────────────────────────────────────
+    // ── Footer: firma + nombre + colegiatura ────────────────────────
 
-    private footer(doc: PDFKit.PDFDocument, data: InformePdfData): void {
-        const firmaH = data.firmaBuffer ? 80 : 60;
-        if (doc.y > doc.page.height - doc.page.margins.bottom - firmaH - 60) {
+    private footer(doc: PDFKit.PDFDocument, data: InformePdfData, W: number): void {
+        const neededH = data.firmaBuffer ? 130 : 80;
+        if (doc.y > doc.page.height - doc.page.margins.bottom - neededH) {
             doc.addPage();
         }
 
-        doc.moveDown(2);
+        doc.moveDown(3);
 
-        // Nota legal con fondo azul claro
-        const noteY = doc.y;
-        doc.rect(60, noteY, doc.page.width - 120, 28).fill(BG_NOTE);
-        doc.font('Helvetica-Oblique').fontSize(7.5).fillColor(MUTED)
-            .text(
-                'El presente documento tiene carácter informativo y forma parte del expediente psicológico del estudiante.',
-                66, noteY + 8,
-                { width: doc.page.width - 132 },
-            );
-
-        doc.moveDown(2.5);
-
-        // Firma alineada a la derecha
+        // Firma centrada
         const sigW = 200;
-        const sigX = doc.page.width - 60 - sigW;
+        const sigX = 65 + (W - sigW) / 2;
         let sigY = doc.y;
 
         if (data.firmaBuffer) {
             try {
                 doc.image(data.firmaBuffer, sigX + (sigW - 160) / 2, sigY,
                     { width: 160, height: 70, fit: [160, 70] });
-            } catch { /* imagen corrupta: saltar */ }
-            sigY += 74;
+            } catch { /* imagen corrupta — saltar */ }
+            sigY += 76;
         } else {
-            sigY += 55; // espacio en blanco para firma manuscrita
+            sigY += 40;
         }
 
         // Línea de firma
         doc.moveTo(sigX, sigY).lineTo(sigX + sigW, sigY)
-            .strokeColor(INK).lineWidth(0.8).stroke();
+            .strokeColor(INK).lineWidth(0.6).stroke();
 
+        // Nombre de la psicóloga
+        const fullName = `${data.psicologa.nombre} ${data.psicologa.apellido_paterno} ${data.psicologa.apellido_materno ?? ''}`.trim();
         doc.font('Helvetica-Bold').fontSize(9).fillColor(INK)
-            .text('Psicología Educativa', sigX, sigY + 6,
-                { width: sigW, align: 'center' });
+            .text(fullName, sigX, sigY + 8, { width: sigW, align: 'center' });
 
-        doc.font('Helvetica').fontSize(8).fillColor(MUTED)
-            .text('I.E. Juan Pablo Vizcardo y Guzmán — Comas', sigX, sigY + 18,
-                { width: sigW, align: 'center' });
-
+        // Colegiatura
         if (data.psicologa.colegiatura) {
             doc.font('Helvetica').fontSize(8).fillColor(MUTED)
-                .text(`CPsP ${data.psicologa.colegiatura}`, sigX, sigY + 30,
+                .text(`CPsP ${data.psicologa.colegiatura}`, sigX, sigY + 21,
                     { width: sigW, align: 'center' });
         }
     }
 
-    // ── Helpers internos ───────────────────────────────────────────
+    // ── Helpers internos ────────────────────────────────────────────
 
-    private secTitle(doc: PDFKit.PDFDocument, num: string, title: string): void {
+    private secTitle(doc: PDFKit.PDFDocument, title: string, W: number): void {
         const y = doc.y;
-        doc.moveTo(60, y).lineTo(doc.page.width - 60, y)
-            .strokeColor(BORDER).lineWidth(0.5).stroke();
-        doc.font('Helvetica-Bold').fontSize(8).fillColor(BLUE)
-            .text(`${num}  ${title}`, 60, y + 5,
-                { width: doc.page.width - 120, characterSpacing: 1 });
+        // Línea separadora tenue
+        doc.moveTo(65, y).lineTo(65 + W, y)
+            .strokeColor(LINE).lineWidth(0.5).stroke();
+        // Título de sección
+        doc.font('Helvetica-Bold').fontSize(9).fillColor(PRIMARY)
+            .text(title.toUpperCase(), 65, y + 7, {
+                width: W,
+                characterSpacing: 0.8,
+            });
         doc.moveDown(0.7);
     }
 
