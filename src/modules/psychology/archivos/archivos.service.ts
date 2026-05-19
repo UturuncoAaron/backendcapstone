@@ -8,7 +8,7 @@ import { DataSource, Repository } from 'typeorm';
 import { PsychologyArchivo } from '../entities/psychology-archivo.entity.js';
 import { PsychologistStudent } from '../entities/psychologist-student.entity.js';
 import { StorageService } from '../../storage/storage.service.js';
-import { CreateArchivoDto, ArchivoQueryDto } from '../dto/upload-archivo.dto.js';
+import { CreateArchivoDto, ArchivoQueryDto } from '../dto/psychology.dto.js';
 
 // 10 MB. Cualquier tipo de archivo.
 const MAX_ARCHIVO_BYTES = 10 * 1024 * 1024;
