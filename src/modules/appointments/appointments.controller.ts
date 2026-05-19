@@ -172,6 +172,16 @@ export class AppointmentsController {
     return this.service.getOne({ id: user.id, rol: user.rol }, id);
   }
 
+  // ── Historial de estados (timeline / drawer en el FE) ──────────
+  @Get(':id/estado-log')
+  @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')
+  getStatusLog(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.getStatusLog({ id: user.id, rol: user.rol }, id);
+  }
+
   // ── Actualizar (estado, reagendar, notas) ───────────────────────
   @Patch(':id')
   @Roles('admin', 'psicologa', 'docente', 'auxiliar', 'padre', 'alumno')

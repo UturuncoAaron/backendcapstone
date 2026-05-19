@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Appointment } from './entities/appointment.entity.js';
+import { AppointmentStatusLog } from './entities/appointment-status-log.entity.js';
 import { Cuenta } from '../users/entities/cuenta.entity.js';
 import { AccountAvailability } from './entities/account-availability.entity.js';
 import { PsychologistStudent } from '../psychology/entities/psychologist-student.entity.js';
@@ -13,6 +14,7 @@ import { AppointmentsSchemaSync } from './appointments.schema-sync.js';
   imports: [
     TypeOrmModule.forFeature([
       Appointment,
+      AppointmentStatusLog,
       Cuenta,
       AccountAvailability,
       PsychologistStudent,
