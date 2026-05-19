@@ -1,8 +1,9 @@
 // psychology/dto/psychology.dto.ts
 import {
     IsString, IsUUID, IsOptional, IsEnum, IsDateString,
-    Length, Matches, IsInt, Min, Max, IsBoolean,
+    Length, Matches, IsInt, Min, Max, IsBoolean, IsBooleanString,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import {
     RECORD_CATEGORIES, WEEK_DAYS, INFORME_TIPOS, ARCHIVO_CATEGORIAS,
 } from '../psychology.types.js';
@@ -191,6 +192,14 @@ export class CreateArchivoDto {
     @IsString()
     @Length(0, 1000)
     descripcion?: string;
+
+    /**
+     * multipart/form-data manda strings, no booleans. Aceptamos
+     * "true" | "false". Default = true (confidencial) cuando no viene.
+     */
+    @IsOptional()
+    @IsBooleanString()
+    confidencial?: string;
 }
 
 export class ArchivoQueryDto {
@@ -199,11 +208,13 @@ export class ArchivoQueryDto {
     categoria?: ArchivoCategoria;
 
     @IsOptional()
+    @Type(() => Number)
     @IsInt()
     @Min(1)
     page?: number;
 
     @IsOptional()
+    @Type(() => Number)
     @IsInt()
     @Min(1)
     @Max(100)
