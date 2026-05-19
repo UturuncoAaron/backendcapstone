@@ -1,3 +1,4 @@
+// src/modules/reports/academic/academic-reports.controller.ts
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { AcademicReportsService } from './academic-reports.service.js';
@@ -15,20 +16,10 @@ import {
   workbookToBuffer,
   buildFilename,
 } from '../excel/excel.helper.js';
-
-/**
- * Reportes académicos (notas).
- *
- * Cada endpoint acepta `?format=json|xlsx`. Por defecto JSON.
- * Las restricciones por rol viven en el service (defensa en profundidad);
- * acá solo exigimos sesión válida.
- */
 @Controller('reports/academicos')
 @UseGuards(JwtAuthGuard)
 export class AcademicReportsController {
-  constructor(private readonly svc: AcademicReportsService) {}
-
-  // A1 — Libreta del alumno
+  constructor(private readonly svc: AcademicReportsService) { }
   @Get('libreta')
   async libreta(
     @CurrentUser() user: AuthUser,
@@ -79,11 +70,7 @@ export class AcademicReportsController {
     @Query() q: PromediosCursoQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const rows = await this.svc.getPromediosPorCurso(
-      user,
-      q.curso_id,
-      q.periodo_id,
-    );
+    const rows = await this.svc.getPromediosPorCurso(user, q.curso_id, q.periodo_id);
     if (q.format !== 'xlsx') return rows;
 
     const wb = buildXlsx('Promedios curso', rows, {
@@ -105,12 +92,7 @@ export class AcademicReportsController {
     @Query() q: TopRiesgoQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const rows = await this.svc.getTopYRiesgo(
-      user,
-      q.seccion_id,
-      q.periodo_id,
-      q.umbral,
-    );
+    const rows = await this.svc.getTopYRiesgo(user, q.seccion_id, q.periodo_id, q.umbral);
     if (q.format !== 'xlsx') return rows;
 
     const wb = buildXlsx('Top y riesgo', rows, {
@@ -125,12 +107,14 @@ export class AcademicReportsController {
     return this.sendXlsx(res, wb, `top_riesgo_${q.seccion_id}`);
   }
 
-  private sendXlsx(
+  // ── Helper ────────────────────────────────────────────────────────────────
+
+  private async sendXlsx(
     res: Response,
     wb: ReturnType<typeof buildXlsx>,
     baseName: string,
-  ): Buffer {
-    const buf = workbookToBuffer(wb);
+  ): Promise<Buffer> {
+    const buf = await workbookToBuffer(wb);   // ← ahora async
     const filename = buildFilename(baseName);
     res.setHeader(
       'Content-Type',

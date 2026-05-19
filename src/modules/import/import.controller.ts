@@ -28,7 +28,7 @@ export class ImportController {
         if (!['csv', 'xls', 'xlsx'].includes(extension || '')) {
             throw new BadRequestException('El archivo debe ser .csv, .xls o .xlsx');
         }
-        const rows = this.importService.parseFile(file.originalname, file.buffer);
+        const rows = await this.importService.parseFile(file.originalname, file.buffer);
         return this.importService.importStudents(rows, query);
     }
 

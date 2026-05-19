@@ -1,17 +1,22 @@
 import {
     Controller, Get, Post, Patch, Delete,
     Param, Body, Query, ParseUUIDPipe, UseGuards,
+    UseInterceptors, UploadedFile, HttpCode, HttpStatus,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+
 import { PsychologyService } from './psychology.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
+
 import {
     CreateRecordDto, UpdateRecordDto, PageQueryDto,
     CreateInformeDto, UpdateInformeDto,
 } from './dto/psychology.dto.js';
-import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller('psychology')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -20,6 +25,7 @@ export class PsychologyController {
     constructor(private readonly service: PsychologyService) { }
 
     // ── Fichas psicológicas ─────────────────────────────────────────
+
     @Post('records')
     @Roles('psicologa')
     createRecord(@Body() dto: CreateRecordDto, @CurrentUser() user: AuthUser) {
@@ -55,7 +61,8 @@ export class PsychologyController {
         return this.service.deleteRecord(user.id, id);
     }
 
-    // ── Mis alumnos (vista psicóloga) ───────────────────────────────
+    // ── Mis alumnos ─────────────────────────────────────────────────
+
     @Get('my-students')
     @Roles('psicologa')
     getMyStudents(@Query() q: PageQueryDto, @CurrentUser() user: AuthUser) {
@@ -72,6 +79,7 @@ export class PsychologyController {
     }
 
     // ── Directorio ──────────────────────────────────────────────────
+
     @Get('directory/students/search')
     @Roles('psicologa', 'docente', 'auxiliar', 'admin')
     searchStudents(@Query('q') q: string) {
@@ -104,32 +112,47 @@ export class PsychologyController {
         return this.service.getStudentParents(studentId);
     }
 
-    /**
-     * Detalle público de un alumno por id, accesible desde el directorio.
-     * Permite a la psicóloga / docente / auxiliar / admin abrir la ficha
-     * (`/psicologa/student/:id`) sin requerir rol admin.
-     *
-     * No expone credenciales (codigo_acceso, numero_documento, tipo_documento).
-     */
     @Get('directory/students/:studentId')
     @Roles('psicologa', 'docente', 'auxiliar', 'admin')
     getStudentDetail(@Param('studentId', ParseUUIDPipe) studentId: string) {
         return this.service.getStudentDetail(studentId);
     }
 
-    // ── Listado público de psicólogas ───────────────────────────────
+    // ── Psicólogas ──────────────────────────────────────────────────
+
     @Get('psicologas')
     @Roles('alumno', 'padre', 'psicologa', 'docente', 'auxiliar', 'admin')
     listActivePsicologas(@Query('q') q?: string) {
         return this.service.listActivePsicologas(q);
     }
 
+    // ── Firma ───────────────────────────────────────────────────────
+
+    @Get('firma')
+    @Roles('psicologa')
+    async getFirma(@CurrentUser() user: AuthUser) {
+        const psicologa = await this.service.getPsicologaOrFail(user.id);
+        return this.service.getFirmaUrl(user.id, psicologa);
+    }
+
+    @Post('firma')
+    @Roles('psicologa')
+    @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
+    uploadFirma(
+        @UploadedFile() file: Express.Multer.File,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.uploadFirma(user.id, file);
+    }
+
+    @Delete('firma')
+    @Roles('psicologa')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    deleteFirma(@CurrentUser() user: AuthUser) {
+        return this.service.deleteFirma(user.id);
+    }
+
     // ── Informes psicológicos ───────────────────────────────────────
-    // Solo la psicóloga propietaria puede leer/editar sus informes (incluye
-    // admin? — por ahora NO; las leyes peruanas de salud mental y la
-    // política del colegio piden confidencialidad estricta de la ficha
-    // clínica). Si más adelante se quiere "supervisión" agregar un rol
-    // intermedio (jefe de psicología) en vez de relajar este check.
 
     @Post('informes')
     @Roles('psicologa')

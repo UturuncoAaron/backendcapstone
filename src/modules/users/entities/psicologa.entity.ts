@@ -1,5 +1,8 @@
 // users/entities/psicologa.entity.ts
-import { Entity, PrimaryColumn, Column, OneToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+    Entity, PrimaryColumn, Column,
+    OneToOne, JoinColumn, CreateDateColumn, UpdateDateColumn,
+} from 'typeorm';
 import { Cuenta } from './cuenta.entity.js';
 
 @Entity('psicologas')
@@ -28,6 +31,9 @@ export class Psicologa {
 
     @Column({ name: 'foto_storage_key', nullable: true })
     foto_storage_key: string;
+
+    @Column({ name: 'firma_storage_key', nullable: true })
+    firma_storage_key: string | null;
 
     @Column({ length: 255, unique: true, nullable: true })
     email: string;

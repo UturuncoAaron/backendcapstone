@@ -26,32 +26,14 @@ import {
 } from '../dto/teacher-attendance.dto.js';
 import { buildXlsx, workbookToBuffer, buildFilename } from '../excel/excel.helper.js';
 
-/**
- * TeacherAttendanceController
- *
- * Rutas bajo /api/reports/docentes
- *
- * Permisos:
- *   - auxiliar + admin → registrar y ver todo
- *   - otros roles → 403
- *
- * El RolesGuard se aplica a nivel de controlador para proteger todas
- * las rutas. La lógica fina de rol (p.ej. auxiliar solo ve su propia
- * actividad) vive en el servicio.
- */
 @Controller('reports/docentes')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('auxiliar', 'admin')
 export class TeacherAttendanceController {
     constructor(private readonly svc: TeacherAttendanceService) { }
 
-    // ─── Lectura previa para el auxiliar ──────────────────────────────────────
+    // ─── Lectura previa para el auxiliar ─────────────────────────────────
 
-    /**
-     * GET /api/reports/docentes/horarios-dia?fecha=2026-05-08
-     * Lista los bloques de horario del día con estado actual.
-     * El auxiliar lo usa para saber qué bloques faltan registrar.
-     */
     @Get('horarios-dia')
     getHorariosDia(
         @CurrentUser() user: AuthUser,
@@ -60,12 +42,8 @@ export class TeacherAttendanceController {
         return this.svc.getHorariosDia(user, q.fecha);
     }
 
-    // ─── Escritura ─────────────────────────────────────────────────────────────
+    // ─── Escritura ────────────────────────────────────────────────────────
 
-    /**
-     * POST /api/reports/docentes/registrar
-     * Registra o actualiza un bloque individual.
-     */
     @Post('registrar')
     @HttpCode(HttpStatus.OK)
     registrar(
@@ -75,11 +53,6 @@ export class TeacherAttendanceController {
         return this.svc.registrarAsistencia(user, dto);
     }
 
-    /**
-     * POST /api/reports/docentes/registrar/bulk
-     * Registra todos los bloques del día en una sola operación transaccional.
-     * Preferir este endpoint sobre registrar en loop desde el frontend.
-     */
     @Post('registrar/bulk')
     @HttpCode(HttpStatus.OK)
     registrarBulk(
@@ -89,12 +62,8 @@ export class TeacherAttendanceController {
         return this.svc.registrarAsistenciaBulk(user, dto);
     }
 
-    // ─── Reportes ──────────────────────────────────────────────────────────────
+    // ─── Reportes ─────────────────────────────────────────────────────────
 
-    /**
-     * GET /api/reports/docentes/diario?fecha=2026-05-08&format=json|xlsx
-     * Todos los bloques del día con estado de cada docente.
-     */
     @Get('diario')
     async diario(
         @CurrentUser() user: AuthUser,
@@ -124,10 +93,6 @@ export class TeacherAttendanceController {
         return this.sendXlsx(res, wb, `asist_docentes_${q.fecha}`);
     }
 
-    /**
-     * GET /api/reports/docentes/resumen?fecha_inicio=...&fecha_fin=...&format=json|xlsx
-     * Resumen por docente en un rango: % asistencia, ausencias, etc.
-     */
     @Get('resumen')
     async resumen(
         @CurrentUser() user: AuthUser,
@@ -145,40 +110,28 @@ export class TeacherAttendanceController {
             presentes: 'Presentes',
             tardanzas: 'Tardanzas',
             ausentes: 'Ausentes',
-            permisos: 'Permisos',
-            licencias: 'Licencias',
-            sin_registro: 'Sin registro',
-            ausentes_sin_justificacion: 'Ausentes sin justif.',
+            justificadas: 'Justificadas',
             porcentaje_asistencia: '% Asistencia',
         });
-        return this.sendXlsx(
-            res,
-            wb,
-            `resumen_docentes_${q.fecha_inicio}_${q.fecha_fin}`,
-        );
+        return this.sendXlsx(res, wb, `resumen_docentes_${q.fecha_inicio}_${q.fecha_fin}`);
     }
 
-    /**
-     * GET /api/reports/docentes/alertas?fecha_inicio=...&fecha_fin=...&limit=10
-     * Top docentes con más ausencias sin justificación.
-     * El director usa esto para tomar acciones disciplinarias.
-     */
     @Get('alertas')
-    getAlertas(
+    alertas(
         @CurrentUser() user: AuthUser,
         @Query() q: AlertasAusenciaDocenteQueryDto,
     ) {
         return this.svc.getAlertas(user, q.fecha_inicio, q.fecha_fin, q.limit);
     }
 
-    // ─── Privado ───────────────────────────────────────────────────────────────
+    // ─── Privado ─────────────────────────────────────────────────────────
 
-    private sendXlsx(
+    private async sendXlsx(
         res: Response,
         wb: ReturnType<typeof buildXlsx>,
         baseName: string,
-    ): Buffer {
-        const buf = workbookToBuffer(wb);
+    ): Promise<Buffer> {
+        const buf = await workbookToBuffer(wb);
         const filename = buildFilename(baseName);
         res.setHeader(
             'Content-Type',

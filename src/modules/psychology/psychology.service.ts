@@ -1,16 +1,28 @@
+// psychology/psychology.service.ts
 import {
     Injectable, Logger, NotFoundException, ForbiddenException,
+    BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { PsychologistStudent } from './entities/psychologist-student.entity.js';
 import { PsychologyRecord } from './entities/psychology-record.entity.js';
 import { InformePsicologico } from './entities/informe-psicologico.entity.js';
+import { PsychologyArchivo } from './entities/psychology-archivo.entity.js';
+import { Psicologa } from '../users/entities/psicologa.entity.js';
 import {
     CreateRecordDto, UpdateRecordDto, PageQueryDto,
     CreateInformeDto, UpdateInformeDto,
+    CreateArchivoDto, ArchivoQueryDto,
 } from './dto/psychology.dto.js';
+import { StorageService } from '../storage/storage.service.js';
 import { UsersService } from '../users/users.service.js';
+
+// 5 MB para archivos psicológicos
+const MAX_ARCHIVO_BYTES = 5 * 1024 * 1024;
+// 2 MB para imagen de firma
+const MAX_FIRMA_BYTES = 2 * 1024 * 1024;
+const FIRMA_ALLOWED_MIMES = ['image/png', 'image/jpeg', 'image/webp'];
 
 @Injectable()
 export class PsychologyService {
@@ -23,7 +35,12 @@ export class PsychologyService {
         private readonly recordRepo: Repository<PsychologyRecord>,
         @InjectRepository(InformePsicologico)
         private readonly informeRepo: Repository<InformePsicologico>,
+        @InjectRepository(PsychologyArchivo)
+        private readonly archivoRepo: Repository<PsychologyArchivo>,
+        @InjectRepository(Psicologa)
+        private readonly psicologaRepo: Repository<Psicologa>,
         private readonly dataSource: DataSource,
+        private readonly storage: StorageService,
         private readonly usersService: UsersService,
     ) { }
 
@@ -31,7 +48,10 @@ export class PsychologyService {
     // FICHAS PSICOLÓGICAS
     // ════════════════════════════════════════════════════════════════
 
-    async createRecord(psychologistId: string, dto: CreateRecordDto): Promise<PsychologyRecord> {
+    async createRecord(
+        psychologistId: string,
+        dto: CreateRecordDto,
+    ): Promise<PsychologyRecord> {
         return this.dataSource.transaction(async (em) => {
             await em.query(
                 `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde)
@@ -53,7 +73,6 @@ export class PsychologyService {
         await this.assertAssigned(psychologistId, studentId);
         const page = q.page ?? 1;
         const limit = q.limit ?? 25;
-
         const [items, total] = await this.recordRepo.findAndCount({
             where: { studentId },
             order: { createdAt: 'DESC' },
@@ -80,6 +99,175 @@ export class PsychologyService {
         if (!record) throw new NotFoundException('Ficha no encontrada');
         if (record.psychologistId !== psychologistId) throw new ForbiddenException('Acceso denegado');
         await this.recordRepo.remove(record);
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // FIRMA
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * Sube o reemplaza la imagen de firma de la psicóloga.
+     * Si ya tenía una firma, borra la anterior de R2 antes de subir la nueva.
+     * Retorna la URL pública de la nueva firma.
+     */
+    async uploadFirma(
+        psychologistId: string,
+        file: Express.Multer.File,
+    ): Promise<{ firmaUrl: string }> {
+        if (!FIRMA_ALLOWED_MIMES.includes(file.mimetype)) {
+            throw new BadRequestException(
+                'La firma debe ser una imagen PNG, JPG o WEBP',
+            );
+        }
+        if (file.size > MAX_FIRMA_BYTES) {
+            throw new BadRequestException('La imagen de firma no puede superar 2 MB');
+        }
+
+        const psicologa = await this.psicologaRepo.findOne({
+            where: { id: psychologistId },
+        });
+        if (!psicologa) throw new NotFoundException('Psicóloga no encontrada');
+
+        // Borrar firma anterior si existe
+        if (psicologa.firma_storage_key) {
+            await this.storage.deleteFile(psicologa.firma_storage_key).catch((e) =>
+                this.logger.warn(`No se pudo borrar firma anterior: ${e.message}`),
+            );
+        }
+
+        const key = await this.storage.uploadFile(file, 'firmas');
+        psicologa.firma_storage_key = key;
+        await this.psicologaRepo.save(psicologa);
+
+        return { firmaUrl: this.storage.getPublicUrl(key) };
+    }
+
+    /** Elimina la firma de R2 y limpia la columna en BD. */
+    async deleteFirma(psychologistId: string): Promise<void> {
+        const psicologa = await this.psicologaRepo.findOne({
+            where: { id: psychologistId },
+        });
+        if (!psicologa) throw new NotFoundException('Psicóloga no encontrada');
+        if (!psicologa.firma_storage_key) return; // ya no tiene firma, nada que hacer
+
+        await this.storage.deleteFile(psicologa.firma_storage_key).catch((e) =>
+            this.logger.warn(`No se pudo borrar firma de R2: ${e.message}`),
+        );
+        psicologa.firma_storage_key = null;
+        await this.psicologaRepo.save(psicologa);
+    }
+
+    /**
+     * Devuelve la URL pública de la firma activa.
+     * El frontend la embebe en el componente de impresión del informe.
+     */
+    getFirmaUrl(psychologistId: string, psicologa: Psicologa): { firmaUrl: string | null } {
+        if (!psicologa.firma_storage_key) return { firmaUrl: null };
+        return { firmaUrl: this.storage.getPublicUrl(psicologa.firma_storage_key) };
+    }
+
+    async getPsicologaOrFail(psychologistId: string): Promise<Psicologa> {
+        const p = await this.psicologaRepo.findOne({ where: { id: psychologistId } });
+        if (!p) throw new NotFoundException('Psicóloga no encontrada');
+        return p;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // ARCHIVOS (fichas y tests externos)
+    // ════════════════════════════════════════════════════════════════
+
+    async uploadArchivo(
+        psychologistId: string,
+        studentId: string,
+        file: Express.Multer.File,
+        dto: CreateArchivoDto,
+    ): Promise<PsychologyArchivo> {
+        if (file.size > MAX_ARCHIVO_BYTES) {
+            throw new BadRequestException('El archivo no puede superar 5 MB');
+        }
+
+        const key = await this.storage.uploadFile(
+            file,
+            `psychology/${dto.categoria}`,
+        );
+
+        const archivo = this.archivoRepo.create({
+            psychologistId,
+            studentId,
+            categoria: dto.categoria,
+            nombre: dto.nombre?.trim() || file.originalname,
+            descripcion: dto.descripcion?.trim() || null,
+            storageKey: key,
+            nombreOriginal: file.originalname,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+        });
+
+        // Asegurar asignación
+        await this.dataSource.query(
+            `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde)
+             VALUES ($1, $2, TRUE, CURRENT_DATE)
+             ON CONFLICT (psicologa_id, alumno_id)
+             DO UPDATE SET activo = TRUE, hasta = NULL`,
+            [psychologistId, studentId],
+        );
+
+        return this.archivoRepo.save(archivo);
+    }
+
+    async listArchivos(
+        psychologistId: string,
+        studentId: string,
+        q: ArchivoQueryDto,
+    ) {
+        await this.assertAssigned(psychologistId, studentId);
+        const page = q.page ?? 1;
+        const limit = q.limit ?? 50;
+
+        const where: Record<string, any> = { studentId };
+        if (q.categoria) where['categoria'] = q.categoria;
+
+        const [items, total] = await this.archivoRepo.findAndCount({
+            where,
+            order: { createdAt: 'DESC' },
+            skip: (page - 1) * limit,
+            take: limit,
+        });
+
+        return { data: items, total, page, limit, totalPages: Math.ceil(total / limit) || 1 };
+    }
+
+    /** Genera URL firmada para descargar el archivo desde R2. */
+    async getArchivoDownloadUrl(
+        psychologistId: string,
+        archivoId: string,
+    ): Promise<{ url: string }> {
+        const archivo = await this.assertArchivoOwned(psychologistId, archivoId);
+        const url = await this.storage.getDownloadUrl(
+            archivo.storageKey,
+            archivo.nombreOriginal ?? archivo.nombre,
+        );
+        return { url };
+    }
+
+    async deleteArchivo(psychologistId: string, archivoId: string): Promise<void> {
+        const archivo = await this.assertArchivoOwned(psychologistId, archivoId);
+        await this.storage.deleteFile(archivo.storageKey).catch((e) =>
+            this.logger.warn(`No se pudo borrar archivo de R2: ${e.message}`),
+        );
+        await this.archivoRepo.remove(archivo);
+    }
+
+    private async assertArchivoOwned(
+        psychologistId: string,
+        archivoId: string,
+    ): Promise<PsychologyArchivo> {
+        const archivo = await this.archivoRepo.findOne({ where: { id: archivoId } });
+        if (!archivo) throw new NotFoundException('Archivo no encontrado');
+        if (archivo.psychologistId !== psychologistId) {
+            throw new ForbiddenException('Este archivo pertenece a otra psicóloga');
+        }
+        return archivo;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -150,19 +338,9 @@ export class PsychologyService {
         return rows.map((r: any) => this.stripCredentials(r));
     }
 
-    /**
-     * Devuelve el detalle de un alumno (nombre, código, grado, sección, etc.)
-     * para roles con acceso al directorio: psicóloga, docente, auxiliar, admin.
-     *
-     * Internamente delega en `usersService.findAlumnoById` para reutilizar el
-     * mismo shape que usa el panel admin; pero strippea credenciales antes
-     * de devolver. NotFound si el id no existe o la cuenta está inactiva.
-     */
     async getStudentDetail(studentId: string) {
         const row = await this.usersService.findAlumnoById(studentId);
-        if (!row) {
-            throw new NotFoundException('Alumno no encontrado');
-        }
+        if (!row) throw new NotFoundException('Alumno no encontrado');
         return this.stripCredentials(row);
     }
 
@@ -191,7 +369,7 @@ export class PsychologyService {
                 LOWER(ps.apellido_materno) LIKE $1
             )`;
         }
-        return this.dataSource.query(
+        const rows: any[] = await this.dataSource.query(
             `SELECT ps.id,
                     ps.nombre,
                     ps.apellido_paterno,
@@ -199,46 +377,35 @@ export class PsychologyService {
                     ps.especialidad,
                     ps.email,
                     ps.telefono,
-                    ps.foto_storage_key
+                    ps.foto_storage_key,
+                    ps.firma_storage_key
                FROM psicologas ps
                JOIN cuentas    c ON c.id = ps.id
               WHERE ${where}
               ORDER BY ps.apellido_paterno, ps.nombre`,
             params,
         );
+        // Añadir URLs públicas para foto y firma
+        return rows.map((r) => ({
+            ...r,
+            fotoUrl: r.foto_storage_key
+                ? this.storage.getPublicUrl(r.foto_storage_key)
+                : null,
+            firmaUrl: r.firma_storage_key
+                ? this.storage.getPublicUrl(r.firma_storage_key)
+                : null,
+        }));
     }
 
     // ════════════════════════════════════════════════════════════════
-    // HELPERS
+    // INFORMES PSICOLÓGICOS
     // ════════════════════════════════════════════════════════════════
-
-    private async assertAssigned(psychologistId: string, studentId: string): Promise<void> {
-        const exists = await this.assignmentRepo.findOne({
-            where: { psychologistId, studentId, activo: true },
-            select: ['psychologistId'],
-        });
-        if (!exists) {
-            throw new ForbiddenException('Este alumno no está asignado a tu lista');
-        }
-    }
-
-    private stripCredentials<T extends Record<string, any>>(
-        row: T,
-    ): Omit<T, 'codigo_acceso' | 'numero_documento' | 'tipo_documento'> {
-        const { codigo_acceso, numero_documento, tipo_documento, ...safe } = row;
-        return safe as any;
-    }
-
-    // ═════════════════════════════════════════════════════════════════
-    // INFORMES PSICOLÓGICOS (evaluaciones / seguimiento / derivaciones)
-    // ═════════════════════════════════════════════════════════════════
 
     async createInforme(
         psychologistId: string,
         dto: CreateInformeDto,
     ): Promise<InformePsicologico> {
         return this.dataSource.transaction(async (em) => {
-            // Asegurar asignación para no perder rastro de quién tiene el caso.
             await em.query(
                 `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde)
                  VALUES ($1, $2, TRUE, CURRENT_DATE)
@@ -270,9 +437,7 @@ export class PsychologyService {
     ): Promise<InformePsicologico> {
         const informe = await this.assertInformeOwned(psychologistId, id);
         if (informe.estado === 'finalizado') {
-            throw new ForbiddenException(
-                'El informe ya está finalizado y no puede editarse',
-            );
+            throw new ForbiddenException('El informe ya está finalizado y no puede editarse');
         }
         Object.assign(informe, {
             ...(dto.tipo !== undefined && { tipo: dto.tipo }),
@@ -336,6 +501,23 @@ export class PsychologyService {
         };
     }
 
+    // ════════════════════════════════════════════════════════════════
+    // HELPERS
+    // ════════════════════════════════════════════════════════════════
+
+    private async assertAssigned(
+        psychologistId: string,
+        studentId: string,
+    ): Promise<void> {
+        const exists = await this.assignmentRepo.findOne({
+            where: { psychologistId, studentId, activo: true },
+            select: ['psychologistId'],
+        });
+        if (!exists) {
+            throw new ForbiddenException('Este alumno no está asignado a tu lista');
+        }
+    }
+
     private async assertInformeOwned(
         psychologistId: string,
         id: string,
@@ -343,10 +525,15 @@ export class PsychologyService {
         const informe = await this.informeRepo.findOne({ where: { id } });
         if (!informe) throw new NotFoundException('Informe no encontrado');
         if (informe.psychologistId !== psychologistId) {
-            throw new ForbiddenException(
-                'Este informe pertenece a otra psicóloga',
-            );
+            throw new ForbiddenException('Este informe pertenece a otra psicóloga');
         }
         return informe;
+    }
+
+    private stripCredentials<T extends Record<string, any>>(
+        row: T,
+    ): Omit<T, 'codigo_acceso' | 'numero_documento' | 'tipo_documento'> {
+        const { codigo_acceso, numero_documento, tipo_documento, ...safe } = row;
+        return safe as any;
     }
 }

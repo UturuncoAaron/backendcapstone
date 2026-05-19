@@ -25,7 +25,7 @@ export class SectionReportController {
   constructor(
     private readonly service: SectionReportService,
     private readonly xlsxBuilder: XlsxBuilderService,
-  ) {}
+  ) { }
 
   @Get(':seccionId/resumen')
   @Roles('admin', 'docente', 'tutor')
@@ -43,7 +43,7 @@ export class SectionReportController {
     );
 
     if (query.format === 'xlsx') {
-      const buffer = this.xlsxBuilder.buildSeccionResumenXlsx(data);
+      const buffer = await this.xlsxBuilder.buildSeccionResumenXlsx(data);
       const filename = buildXlsxFilename(data, seccionId);
 
       res.set({

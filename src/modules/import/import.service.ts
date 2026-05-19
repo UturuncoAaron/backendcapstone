@@ -2,7 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
-import * as xlsx from 'xlsx';
+import * as ExcelJS from 'exceljs';
 import { Cuenta } from '../users/entities/cuenta.entity.js';
 import { Alumno } from '../users/entities/alumno.entity.js';
 import { Matricula } from '../academic/entities/matricula.entity.js';
@@ -21,42 +21,60 @@ export class ImportService {
         private readonly dataSource: DataSource,
     ) { }
 
-    parseFile(originalname: string, buffer: Buffer): CsvRow[] {
+    async parseFile(originalname: string, buffer: Buffer): Promise<CsvRow[]> {
         const ext = originalname.split('.').pop()?.toLowerCase();
         if (ext === 'csv') {
             return this.parseCsv(buffer);
-        } else {
-            return this.parseExcel(buffer);
         }
+        return this.parseExcel(buffer);
     }
 
-    parseExcel(buffer: Buffer): CsvRow[] {
-        const workbook = xlsx.read(buffer, { type: 'buffer' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
+    async parseExcel(buffer: Buffer): Promise<CsvRow[]> {
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer.buffer.slice(
+            buffer.byteOffset,
+            buffer.byteOffset + buffer.byteLength,
+        ) as ArrayBuffer);
 
-        const rawData = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
+        const ws = wb.worksheets[0];
+        if (!ws) {
+            throw new BadRequestException('El archivo Excel está vacío o no tiene hojas válidas');
+        }
 
-        if (!rawData || rawData.length === 0) {
+        const rows: CsvRow[] = [];
+        let headers: string[] = [];
+
+        ws.eachRow((row, rowNumber) => {
+            // La fila 1 es el encabezado
+            if (rowNumber === 1) {
+                // row.values[0] es undefined (ExcelJS indexa desde 1)
+                headers = (row.values as ExcelJS.CellValue[])
+                    .slice(1)
+                    .map(v => String(v ?? '').trim().toLowerCase());
+                return;
+            }
+
+            // Filas de datos — saltar filas completamente vacías
+            const values = (row.values as ExcelJS.CellValue[]).slice(1);
+            const allEmpty = values.every(v => v === null || v === undefined || v === '');
+            if (allEmpty) return;
+
+            const obj: Record<string, string> = {};
+            headers.forEach((h, i) => {
+                obj[h] = String(values[i] ?? '').trim();
+            });
+            rows.push(obj as unknown as CsvRow);
+        });
+
+        if (rows.length === 0) {
             throw new BadRequestException('El archivo Excel está vacío o no tiene datos válidos');
         }
 
-        const rows: CsvRow[] = rawData.map((row: any) => {
-            const normalizedRow: any = {};
-            for (const key in row) {
-                const normalizedKey = key.trim().toLowerCase();
-                normalizedRow[normalizedKey] = String(row[key]).trim();
-            }
-            return normalizedRow as CsvRow;
-        });
-
+        // Validar columnas obligatorias
         const required = ['tipo_documento', 'numero_documento', 'nombre', 'apellido_paterno'];
-        if (rows.length > 0) {
-            const firstRowHeaders = Object.keys(rows[0]);
-            for (const col of required) {
-                if (!firstRowHeaders.includes(col)) {
-                    throw new BadRequestException(`Columna obligatoria faltante en Excel: "${col}"`);
-                }
+        for (const col of required) {
+            if (!headers.includes(col)) {
+                throw new BadRequestException(`Columna obligatoria faltante en Excel: "${col}"`);
             }
         }
 
@@ -83,9 +101,9 @@ export class ImportService {
 
         return lines.slice(1).map(line => {
             const values = line.split(separator).map(v => v.trim().replace(/^"|"$/g, ''));
-            const row: any = {};
+            const row: Record<string, string> = {};
             headers.forEach((h, idx) => { row[h] = values[idx] ?? ''; });
-            return row as CsvRow;
+            return row as unknown as CsvRow;
         });
     }
 
@@ -120,12 +138,20 @@ export class ImportService {
 
             try {
                 if (!row.tipo_documento || !row.numero_documento || !row.nombre || !row.apellido_paterno) {
-                    result.errores.push({ fila, numero_documento: row.numero_documento ?? '?', motivo: 'Campos obligatorios vacíos' });
+                    result.errores.push({
+                        fila,
+                        numero_documento: row.numero_documento ?? '?',
+                        motivo: 'Campos obligatorios vacíos',
+                    });
                     continue;
                 }
 
                 if (!['dni', 'ce', 'pasaporte'].includes(row.tipo_documento.toLowerCase())) {
-                    result.errores.push({ fila, numero_documento: row.numero_documento, motivo: `tipo_documento inválido: "${row.tipo_documento}"` });
+                    result.errores.push({
+                        fila,
+                        numero_documento: row.numero_documento,
+                        motivo: `tipo_documento inválido: "${row.tipo_documento}"`,
+                    });
                     continue;
                 }
 
@@ -146,11 +172,11 @@ export class ImportService {
                             tipo_documento: row.tipo_documento.toLowerCase() as any,
                             numero_documento: dni,
                             password_hash,
-                            codigo_acceso: `EST-${dni}`, 
+                            codigo_acceso: `EST-${dni}`,
                             password_changed: false,
                             rol: 'alumno',
                             activo: true,
-                        })
+                        }),
                     );
 
                     await this.alumnoRepo.save(
@@ -163,20 +189,23 @@ export class ImportService {
                             email: row.email?.trim() || null,
                             telefono: row.telefono?.trim() || null,
                             fecha_nacimiento: row.fecha_nacimiento ? new Date(row.fecha_nacimiento) : null,
-                        })
+                        }),
                     );
 
                     result.creados++;
                 } else {
                     if (cuenta.rol !== 'alumno') {
-                        result.errores.push({ fila, numero_documento: dni, motivo: `La cuenta ya existe pero tiene rol de ${cuenta.rol}` });
+                        result.errores.push({
+                            fila,
+                            numero_documento: dni,
+                            motivo: `La cuenta ya existe pero tiene rol de ${cuenta.rol}`,
+                        });
                         continue;
                     }
                     if (!cuenta.codigo_acceso) {
                         cuenta.codigo_acceso = `EST-${dni}`;
                         await this.cuentaRepo.save(cuenta);
                     }
-
                     result.omitidos++;
                 }
 
@@ -195,16 +224,16 @@ export class ImportService {
                             seccion_id: query.seccion_id,
                             periodo_id: query.periodo_id,
                             activo: true,
-                        })
+                        }),
                     );
                     result.matriculados++;
                 }
 
-            } catch (err: any) {
+            } catch (err: unknown) {
                 result.errores.push({
                     fila,
                     numero_documento: row.numero_documento ?? '?',
-                    motivo: err.message ?? 'Error desconocido',
+                    motivo: (err as Error).message ?? 'Error desconocido',
                 });
             }
         }

@@ -1,135 +1,203 @@
+// src/modules/reports/excel/xlsx-builder.service.ts
 import { Injectable } from '@nestjs/common';
-import * as XLSX from 'xlsx';
+import * as ExcelJS from 'exceljs';
 
-/**
- * XlsxBuilderService
- *
- * Construye el workbook XLSX del reporte de sección con 4 hojas que
- * mantienen paridad 1:1 con los sub-tabs del frontend:
- *   1. Ranking
- *   2. Notas por curso
- *   3. Asistencia
- *   4. Tareas
- *
- * No depende de Excel, OS de escritorio ni Java — usa la librería xlsx
- * (SheetJS) en memoria. Devuelve un Buffer listo para enviar al cliente.
- *
- * Si en el futuro hace falta otro reporte (asistencia docentes, etc.)
- * agrega un nuevo método público acá. Mantiene toda la lógica de
- * presentación de Excel concentrada en un único archivo.
- */
+// ── Paleta de colores (misma que AlumnoReportXlsxBuilder) ─────────────────────
+const C = {
+  navy: '1E3A5F',
+  darkBlue: '1E3A8A',
+  blue: '2563EB',
+  paleBlue: 'EFF6FF',
+  green: '166534',
+  lightGreen: 'DCFCE7',
+  amber: '92400E',
+  red: '991B1B',
+  gray200: 'E2E8F0',
+  gray500: '64748B',
+  gray900: '0F172A',
+  white: 'FFFFFF',
+};
+
+const HEADER_FILL: ExcelJS.FillPattern = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.navy } };
+const HEADER_FONT: Partial<ExcelJS.Font> = { bold: true, color: { argb: C.white }, size: 11, name: 'Calibri' };
+const VALUE_FONT: Partial<ExcelJS.Font> = { size: 10, color: { argb: C.gray900 }, name: 'Calibri' };
+const STRIPE_FILL: ExcelJS.FillPattern = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.paleBlue } };
+const SECTION_FILL: ExcelJS.FillPattern = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.darkBlue } };
+const SECTION_FONT: Partial<ExcelJS.Font> = { bold: true, size: 12, color: { argb: C.white }, name: 'Calibri' };
+
 @Injectable()
 export class XlsxBuilderService {
-  /**
-   * Genera el libro XLSX completo del reporte por sección.
-   *
-   * @param data Respuesta cruda de SectionReportService.getResumen()
-   * @returns    Buffer con el workbook serializado en formato xlsx
-   */
-  buildSeccionResumenXlsx(data: SeccionResumenResponseLike): Buffer {
-    const wb = XLSX.utils.book_new();
 
-    this.appendRankingSheet(wb, data);
-    this.appendNotasSheet(wb, data);
-    this.appendAsistenciaSheet(wb, data);
-    this.appendTareasSheet(wb, data);
+  async buildSeccionResumenXlsx(data: SeccionResumenResponseLike): Promise<Buffer> {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'EduAula';
+    wb.created = new Date();
 
-    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    this.sheetRanking(wb, data);
+    this.sheetNotas(wb, data);
+    this.sheetAsistencia(wb, data);
+    this.sheetTareas(wb, data);
+
+    const buf = await wb.xlsx.writeBuffer();
+    return Buffer.from(buf);
   }
 
-  // ─── Hoja 1: Ranking ──────────────────────────────────────────────────────
+  // ── Hoja 1: Ranking ───────────────────────────────────────────────────────
 
-  private appendRankingSheet(
-    wb: XLSX.WorkBook,
-    data: SeccionResumenResponseLike,
-  ): void {
-    const rows = (data.ranking ?? []).map((a, i) => ({
-      '#': i + 1,
-      'Apellido paterno': a.apellido_paterno ?? '',
-      'Apellido materno': a.apellido_materno ?? '',
-      Nombre: a.nombre ?? '',
-      DNI: a.dni ?? '',
-      Promedio: numberOrEmpty(a.promedio_general),
-      'Cursos en riesgo': a.cursos_en_riesgo ?? 0,
-      Categoría: prettyCategoria(a.categoria),
-    }));
+  private sheetRanking(wb: ExcelJS.Workbook, data: SeccionResumenResponseLike): void {
+    const ws = wb.addWorksheet('Ranking', { properties: { tabColor: { argb: C.darkBlue } } });
+    ws.columns = [
+      { header: '#', width: 6 },
+      { header: 'Apellido paterno', width: 22 },
+      { header: 'Apellido materno', width: 22 },
+      { header: 'Nombre', width: 22 },
+      { header: 'DNI', width: 14 },
+      { header: 'Promedio', width: 12 },
+      { header: 'Cursos en riesgo', width: 16 },
+      { header: 'Categoría', width: 14 },
+    ];
+    this.styleHeaderRow(ws);
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    autoSizeColumns(ws, rows);
-    XLSX.utils.book_append_sheet(wb, ws, 'Ranking');
+    (data.ranking ?? []).forEach((a, i) => {
+      const row = ws.addRow([
+        i + 1,
+        a.apellido_paterno ?? '',
+        a.apellido_materno ?? '',
+        a.nombre ?? '',
+        a.dni ?? '',
+        numFmt(a.promedio_general),
+        a.cursos_en_riesgo ?? 0,
+        prettyCategoria(a.categoria),
+      ]);
+      if (i % 2 === 1) this.stripeRow(row);
+
+      // Color por categoría
+      const catCell = row.getCell(8);
+      if (a.categoria === 'riesgo') {
+        catCell.font = { ...VALUE_FONT, color: { argb: C.red }, bold: true };
+      } else if (a.categoria === 'top') {
+        catCell.font = { ...VALUE_FONT, color: { argb: C.green }, bold: true };
+      }
+    });
   }
 
-  // ─── Hoja 2: Notas por curso ──────────────────────────────────────────────
+  // ── Hoja 2: Notas por curso ───────────────────────────────────────────────
 
-  private appendNotasSheet(
-    wb: XLSX.WorkBook,
-    data: SeccionResumenResponseLike,
-  ): void {
-    const rows = (data.notas_por_curso ?? []).map((n) => ({
-      'Apellido paterno': n.apellido_paterno ?? '',
-      'Apellido materno': n.apellido_materno ?? '',
-      Nombre: n.nombre ?? '',
-      DNI: n.dni ?? '',
-      Curso: n.curso ?? '',
-      'Total notas': n.total_notas ?? 0,
-      Promedio: numberOrEmpty(n.promedio),
-      Escala: n.escala ?? '',
-    }));
+  private sheetNotas(wb: ExcelJS.Workbook, data: SeccionResumenResponseLike): void {
+    const ws = wb.addWorksheet('Notas por curso', { properties: { tabColor: { argb: C.blue } } });
+    ws.columns = [
+      { header: 'Apellido paterno', width: 22 },
+      { header: 'Apellido materno', width: 22 },
+      { header: 'Nombre', width: 22 },
+      { header: 'DNI', width: 14 },
+      { header: 'Curso', width: 28 },
+      { header: 'Total notas', width: 13 },
+      { header: 'Promedio', width: 12 },
+      { header: 'Escala', width: 10 },
+    ];
+    this.styleHeaderRow(ws);
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    autoSizeColumns(ws, rows);
-    XLSX.utils.book_append_sheet(wb, ws, 'Notas por curso');
+    (data.notas_por_curso ?? []).forEach((n, i) => {
+      const row = ws.addRow([
+        n.apellido_paterno ?? '',
+        n.apellido_materno ?? '',
+        n.nombre ?? '',
+        n.dni ?? '',
+        n.curso ?? '',
+        n.total_notas ?? 0,
+        numFmt(n.promedio),
+        n.escala ?? '',
+      ]);
+      if (i % 2 === 1) this.stripeRow(row);
+    });
   }
 
-  // ─── Hoja 3: Asistencia ───────────────────────────────────────────────────
+  // ── Hoja 3: Asistencia ────────────────────────────────────────────────────
 
-  private appendAsistenciaSheet(
-    wb: XLSX.WorkBook,
-    data: SeccionResumenResponseLike,
-  ): void {
-    const rows = (data.resumen_asistencia ?? []).map((a) => ({
-      'Apellido paterno': a.apellido_paterno ?? '',
-      'Apellido materno': a.apellido_materno ?? '',
-      Nombre: a.nombre ?? '',
-      DNI: a.dni ?? '',
-      'Días registrados': a.dias_registrados ?? 0,
-      Asistencias: a.asistencias ?? 0,
-      Tardanzas: a.tardanzas ?? 0,
-      Faltas: a.faltas ?? 0,
-      '% Asistencia': numberOrEmpty(a.porcentaje_asistencia),
-    }));
+  private sheetAsistencia(wb: ExcelJS.Workbook, data: SeccionResumenResponseLike): void {
+    const ws = wb.addWorksheet('Asistencia', { properties: { tabColor: { argb: C.green } } });
+    ws.columns = [
+      { header: 'Apellido paterno', width: 22 },
+      { header: 'Apellido materno', width: 22 },
+      { header: 'Nombre', width: 22 },
+      { header: 'DNI', width: 14 },
+      { header: 'Días registrados', width: 16 },
+      { header: 'Asistencias', width: 14 },
+      { header: 'Tardanzas', width: 12 },
+      { header: 'Faltas', width: 10 },
+      { header: '% Asistencia', width: 14 },
+    ];
+    this.styleHeaderRow(ws);
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    autoSizeColumns(ws, rows);
-    XLSX.utils.book_append_sheet(wb, ws, 'Asistencia');
+    (data.resumen_asistencia ?? []).forEach((a, i) => {
+      const row = ws.addRow([
+        a.apellido_paterno ?? '',
+        a.apellido_materno ?? '',
+        a.nombre ?? '',
+        a.dni ?? '',
+        a.dias_registrados ?? 0,
+        a.asistencias ?? 0,
+        a.tardanzas ?? 0,
+        a.faltas ?? 0,
+        numFmt(a.porcentaje_asistencia),
+      ]);
+      if (i % 2 === 1) this.stripeRow(row);
+
+      // Color faltas altas
+      const pct = Number(a.porcentaje_asistencia ?? 100);
+      if (Number.isFinite(pct) && pct < 75) {
+        row.getCell(9).font = { ...VALUE_FONT, color: { argb: C.red }, bold: true };
+      }
+    });
   }
 
-  // ─── Hoja 4: Tareas ───────────────────────────────────────────────────────
+  // ── Hoja 4: Tareas ────────────────────────────────────────────────────────
 
-  private appendTareasSheet(
-    wb: XLSX.WorkBook,
-    data: SeccionResumenResponseLike,
-  ): void {
-    const rows = (data.entregas_por_tarea ?? []).map((t) => ({
-      Tarea: t.titulo ?? '',
-      'Fecha límite': formatDate(t.fecha_limite),
-      Entregaron: t.entregaron ?? 0,
-      Pendientes: t.pendientes ?? 0,
-      'Con retraso': t.con_retraso ?? 0,
-      Promedio: numberOrEmpty(t.promedio_calificacion),
-      '% Entrega': numberOrEmpty(t.porcentaje_entrega),
-    }));
+  private sheetTareas(wb: ExcelJS.Workbook, data: SeccionResumenResponseLike): void {
+    const ws = wb.addWorksheet('Tareas', { properties: { tabColor: { argb: C.amber } } });
+    ws.columns = [
+      { header: 'Tarea', width: 32 },
+      { header: 'Fecha límite', width: 16 },
+      { header: 'Entregaron', width: 13 },
+      { header: 'Pendientes', width: 13 },
+      { header: 'Con retraso', width: 13 },
+      { header: 'Promedio', width: 12 },
+      { header: '% Entrega', width: 12 },
+    ];
+    this.styleHeaderRow(ws);
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    autoSizeColumns(ws, rows);
-    XLSX.utils.book_append_sheet(wb, ws, 'Tareas');
+    (data.entregas_por_tarea ?? []).forEach((t, i) => {
+      const row = ws.addRow([
+        t.titulo ?? '',
+        fmtDate(t.fecha_limite),
+        t.entregaron ?? 0,
+        t.pendientes ?? 0,
+        t.con_retraso ?? 0,
+        numFmt(t.promedio_calificacion),
+        numFmt(t.porcentaje_entrega),
+      ]);
+      if (i % 2 === 1) this.stripeRow(row);
+    });
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  private styleHeaderRow(ws: ExcelJS.Worksheet): void {
+    const headerRow = ws.getRow(1);
+    headerRow.height = 22;
+    headerRow.eachCell(cell => {
+      cell.font = HEADER_FONT;
+      cell.fill = HEADER_FILL;
+      cell.alignment = { vertical: 'middle' };
+    });
+  }
+
+  private stripeRow(row: ExcelJS.Row): void {
+    row.eachCell(cell => { cell.fill = STRIPE_FILL; });
   }
 }
 
-// ─── Tipado mínimo (estructural) ──────────────────────────────────────────────
-// Evita un import circular: aceptamos cualquier objeto con la forma esperada.
-// El controller pasa el resultado de SectionReportService.getResumen() y los
-// campos coinciden 1:1 con SeccionResumenResponse del frontend.
+// ── Tipos (estructural, sin import circular) ──────────────────────────────────
 
 interface AlumnoLike {
   alumno_id?: string;
@@ -181,56 +249,27 @@ export interface SeccionResumenResponseLike {
   entregas_por_tarea?: TareaRowLike[];
 }
 
-// ─── Utilidades locales ───────────────────────────────────────────────────────
+// ── Utilidades ────────────────────────────────────────────────────────────────
 
-function numberOrEmpty(v: number | string | null | undefined): number | string {
+function numFmt(v: number | string | null | undefined): number | string {
   if (v === null || v === undefined || v === '') return '';
   const n = typeof v === 'string' ? Number(v) : v;
-  return Number.isFinite(n) ? n : '';
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : '';
 }
 
-function formatDate(v: string | Date | null | undefined): string {
+function fmtDate(v: string | Date | null | undefined): string {
   if (!v) return '';
   const d = v instanceof Date ? v : new Date(v);
   if (isNaN(d.getTime())) return String(v);
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
 function prettyCategoria(c: string | undefined): string {
-  switch (c) {
-    case 'top':
-      return 'Top';
-    case 'normal':
-      return 'Normal';
-    case 'riesgo':
-      return 'Riesgo';
-    case 'sin-datos':
-      return 'Sin datos';
-    default:
-      return c ?? '';
-  }
-}
-
-/**
- * Auto-ajusta el ancho de cada columna en función del contenido más largo.
- * Tope a 60 chars para evitar columnas absurdamente anchas.
- */
-function autoSizeColumns(
-  ws: XLSX.WorkSheet,
-  rows: Record<string, unknown>[],
-): void {
-  if (rows.length === 0) return;
-  const headers = Object.keys(rows[0]);
-  const widths = headers.map((h) => {
-    const maxBody = rows.reduce((max, r) => {
-      const s = String(r[h] ?? '');
-      return Math.max(max, s.length);
-    }, 0);
-    const w = Math.max(h.length, maxBody) + 2;
-    return { wch: Math.min(w, 60) };
-  });
-  ws['!cols'] = widths;
+  const map: Record<string, string> = {
+    top: 'Top',
+    normal: 'Normal',
+    riesgo: 'Riesgo',
+    'sin-datos': 'Sin datos',
+  };
+  return map[c ?? ''] ?? (c ?? '');
 }

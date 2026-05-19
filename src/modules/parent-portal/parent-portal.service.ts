@@ -1,9 +1,19 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import {
+    ForbiddenException, Injectable, NotFoundException,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { DataSource } from 'typeorm';
+
+import { PsychologyArchivosService } from '../psychology/archivos/archivos.service.js';
+import { PsychologyReportService } from '../reports/psychology-report/psychology-report.service.js';
 
 @Injectable()
 export class ParentPortalService {
-    constructor(private readonly dataSource: DataSource) { }
+    constructor(
+        private readonly dataSource: DataSource,
+        private readonly archivosSvc: PsychologyArchivosService,
+        private readonly reportSvc: PsychologyReportService,
+    ) { }
 
     // ─── Verificar vínculo padre-alumno ─────────────────────────────────────
     private async verifyRelation(padreId: string, alumnoId: string) {
@@ -91,7 +101,6 @@ export class ParentPortalService {
     async getChildAttendanceGeneral(padreId: string, alumnoId: string) {
         await this.verifyRelation(padreId, alumnoId);
 
-        // Resumen total
         const [resumen] = await this.dataSource.query(`
             SELECT
                 COUNT(*)::int                                          AS total,
@@ -109,7 +118,6 @@ export class ParentPortalService {
             WHERE ag.alumno_id = $1
         `, [alumnoId]);
 
-        // Detalle diario (últimos 90 días para rendimiento)
         const detalle = await this.dataSource.query(`
             SELECT
                 ag.id,
@@ -182,5 +190,92 @@ export class ParentPortalService {
             WHERE l.cuenta_id = $1
             ORDER BY p.anio DESC, p.bimestre DESC
         `, [alumnoId]);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PSICOLOGÍA
+    // ═══════════════════════════════════════════════════════════════
+
+    /** Lista informes finalizados NO confidenciales del hijo. */
+    async getChildInformes(padreId: string, alumnoId: string) {
+        await this.verifyRelation(padreId, alumnoId);
+        return this.dataSource.query(`
+            SELECT
+                i.id,
+                i.tipo,
+                i.titulo,
+                i.confidencial,
+                i.finalizado_at AS "finalizadoAt",
+                TRIM(CONCAT(
+                    ps.nombre, ' ', ps.apellido_paterno,
+                    COALESCE(' ' || ps.apellido_materno, '')
+                )) AS "psicologaNombre"
+            FROM informes_psicologicos i
+            JOIN psicologas ps ON ps.id = i.psicologa_id
+            WHERE i.alumno_id    = $1
+              AND i.estado       = 'finalizado'
+              AND i.confidencial = FALSE
+            ORDER BY i.finalizado_at DESC
+        `, [alumnoId]);
+    }
+
+    /** Descarga PDF del informe. Solo si finalizado y NO confidencial. */
+    async getChildInformePdf(
+        padreId: string,
+        alumnoId: string,
+        informeId: string,
+        res: Response,
+    ): Promise<void> {
+        await this.verifyRelation(padreId, alumnoId);
+
+        const [informe] = await this.dataSource.query<{
+            psicologa_id: string;
+            alumno_id: string;
+            estado: string;
+            confidencial: boolean;
+        }[]>(
+            `SELECT psicologa_id, alumno_id, estado, confidencial
+               FROM informes_psicologicos
+              WHERE id = $1`,
+            [informeId],
+        );
+
+        if (!informe || informe.estado !== 'finalizado' || informe.alumno_id !== alumnoId) {
+            throw new NotFoundException('Informe no disponible');
+        }
+        if (informe.confidencial) {
+            throw new ForbiddenException('Este informe es confidencial');
+        }
+
+        const { buffer, filename } = await this.reportSvc.generateInformePdf(
+            informe.psicologa_id, informeId,
+        );
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+        res.end(buffer);
+    }
+
+    /** Lista fichas/tests del hijo (solo NO confidenciales). */
+    async getChildArchivos(
+        padreId: string,
+        alumnoId: string,
+        categoria?: 'ficha' | 'test',
+    ) {
+        await this.verifyRelation(padreId, alumnoId);
+        return this.archivosSvc.listForPadre(alumnoId, categoria);
+    }
+
+    /** Devuelve URL firmada para descargar el archivo (valida confidencial + parentesco). */
+    async getChildArchivoUrl(
+        padreId: string,
+        alumnoId: string,
+        archivoId: string,
+    ): Promise<{ url: string }> {
+        await this.verifyRelation(padreId, alumnoId);
+        return this.archivosSvc.resolveDownload(archivoId, {
+            role: 'padre',
+            userId: padreId,
+        });
     }
 }

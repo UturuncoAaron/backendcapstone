@@ -1,41 +1,33 @@
+// psychology/psychology.schema-sync.ts
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
-/**
- * Crea / sincroniza la tabla `informes_psicologicos` idempotentemente.
- * El proyecto no usa migraciones de TypeORM (synchronize: false), por lo
- * que el contrato de esquema vive en estos schema-sync que corren una vez
- * al bootstrap.
- *
- * Diseño:
- *  - PK uuid, FKs a `cuentas` (psicologa) y `alumnos`.
- *  - `tipo` y `estado` quedan como VARCHAR + CHECK, no como ENUM nativo de
- *    Postgres, para que agregar tipos nuevos no requiera ALTER TYPE.
- *  - Índices compuestos (alumno+created, psicologa+created) cubren los
- *    listados típicos. Crecen O(N) con ~600 alumnos/año.
- */
 @Injectable()
 export class PsychologySchemaSync implements OnApplicationBootstrap {
     private readonly logger = new Logger(PsychologySchemaSync.name);
 
-    constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+    constructor(@InjectDataSource() private readonly dataSource: DataSource) { }
 
     async onApplicationBootstrap(): Promise<void> {
         try {
-            await this.ensureTable();
-            await this.ensureConstraints();
-            await this.ensureIndexes();
-            this.logger.log('informes_psicologicos sincronizado');
+            await this.ensureInformesTable();
+            await this.ensureInformesConstraints();
+            await this.ensureInformesIndexes();
+            await this.ensureFirmaColumn();
+            await this.ensureArchivosTable();
+            this.logger.log('Psychology schema sincronizado');
         } catch (err) {
             this.logger.error(
-                'Falla creando informes_psicologicos — revisar BD a mano',
+                'Falla en psychology schema-sync — revisar BD a mano',
                 err instanceof Error ? err.stack : String(err),
             );
         }
     }
 
-    private async ensureTable(): Promise<void> {
+    // ── informes_psicologicos ───────────────────────────────────────────────
+
+    private async ensureInformesTable(): Promise<void> {
         await this.dataSource.query(`
             CREATE TABLE IF NOT EXISTS informes_psicologicos (
                 id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -55,7 +47,6 @@ export class PsychologySchemaSync implements OnApplicationBootstrap {
                 updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         `);
-        // FKs sólo si las tablas existen (los tests sin schema completo no fallan).
         await this.dataSource.query(`
             DO $$ BEGIN
                 IF NOT EXISTS (
@@ -76,22 +67,16 @@ export class PsychologySchemaSync implements OnApplicationBootstrap {
                     FOREIGN KEY (alumno_id) REFERENCES alumnos(id)
                     ON DELETE CASCADE;
                 END IF;
-            EXCEPTION WHEN undefined_table THEN
-                -- En entornos donde psicologas/alumnos aún no existe (tests),
-                -- ignoramos sin tirar el bootstrap.
-                NULL;
+            EXCEPTION WHEN undefined_table THEN NULL;
             END $$;
         `);
     }
 
-    private async ensureConstraints(): Promise<void> {
-        // CHECKs en tipo y estado — agregar valores nuevos es un simple
-        // ALTER TABLE DROP + ADD CONSTRAINT en el siguiente schema-sync.
+    private async ensureInformesConstraints(): Promise<void> {
         await this.dataSource.query(`
             DO $$ BEGIN
                 IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'informes_psic_tipo_check'
+                    SELECT 1 FROM pg_constraint WHERE conname = 'informes_psic_tipo_check'
                 ) THEN
                     ALTER TABLE informes_psicologicos
                     ADD CONSTRAINT informes_psic_tipo_check
@@ -101,8 +86,7 @@ export class PsychologySchemaSync implements OnApplicationBootstrap {
                     ));
                 END IF;
                 IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint
-                    WHERE conname = 'informes_psic_estado_check'
+                    SELECT 1 FROM pg_constraint WHERE conname = 'informes_psic_estado_check'
                 ) THEN
                     ALTER TABLE informes_psicologicos
                     ADD CONSTRAINT informes_psic_estado_check
@@ -112,7 +96,7 @@ export class PsychologySchemaSync implements OnApplicationBootstrap {
         `);
     }
 
-    private async ensureIndexes(): Promise<void> {
+    private async ensureInformesIndexes(): Promise<void> {
         await this.dataSource.query(`
             CREATE INDEX IF NOT EXISTS idx_informes_psic_alumno_created
                 ON informes_psicologicos (alumno_id, created_at DESC)
@@ -125,6 +109,73 @@ export class PsychologySchemaSync implements OnApplicationBootstrap {
             CREATE INDEX IF NOT EXISTS idx_informes_psic_estado
                 ON informes_psicologicos (estado)
                 WHERE estado = 'borrador'
+        `);
+    }
+
+    // ── firma en psicologas ─────────────────────────────────────────────────
+
+    private async ensureFirmaColumn(): Promise<void> {
+        await this.dataSource.query(`
+            ALTER TABLE psicologas
+            ADD COLUMN IF NOT EXISTS firma_storage_key TEXT
+        `);
+    }
+
+    // ── psychology_archivos ─────────────────────────────────────────────────
+
+    private async ensureArchivosTable(): Promise<void> {
+        await this.dataSource.query(`
+            CREATE TABLE IF NOT EXISTS psychology_archivos (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                psicologa_id    UUID NOT NULL,
+                alumno_id       UUID NOT NULL,
+                categoria       VARCHAR(10) NOT NULL,
+                nombre          VARCHAR(255) NOT NULL,
+                descripcion     TEXT,
+                storage_key     TEXT NOT NULL,
+                nombre_original VARCHAR(255),
+                mime_type       TEXT,
+                size_bytes      INTEGER,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        `);
+        await this.dataSource.query(`
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.table_constraints
+                    WHERE constraint_name = 'fk_psych_arch_psicologa'
+                ) THEN
+                    ALTER TABLE psychology_archivos
+                    ADD CONSTRAINT fk_psych_arch_psicologa
+                    FOREIGN KEY (psicologa_id) REFERENCES psicologas(id)
+                    ON DELETE RESTRICT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.table_constraints
+                    WHERE constraint_name = 'fk_psych_arch_alumno'
+                ) THEN
+                    ALTER TABLE psychology_archivos
+                    ADD CONSTRAINT fk_psych_arch_alumno
+                    FOREIGN KEY (alumno_id) REFERENCES alumnos(id)
+                    ON DELETE CASCADE;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'psych_arch_categoria_check'
+                ) THEN
+                    ALTER TABLE psychology_archivos
+                    ADD CONSTRAINT psych_arch_categoria_check
+                    CHECK (categoria IN ('ficha', 'test'));
+                END IF;
+            EXCEPTION WHEN undefined_table THEN NULL;
+            END $$;
+        `);
+        await this.dataSource.query(`
+            CREATE INDEX IF NOT EXISTS idx_psych_arch_alumno_cat
+                ON psychology_archivos (alumno_id, categoria, created_at DESC)
+        `);
+        await this.dataSource.query(`
+            CREATE INDEX IF NOT EXISTS idx_psych_arch_psicologa
+                ON psychology_archivos (psicologa_id, created_at DESC)
         `);
     }
 }

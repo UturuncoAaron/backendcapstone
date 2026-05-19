@@ -18,7 +18,7 @@ import {
 @Controller('reports/asistencias')
 @UseGuards(JwtAuthGuard)
 export class AttendanceReportsController {
-  constructor(private readonly svc: AttendanceReportsService) {}
+  constructor(private readonly svc: AttendanceReportsService) { }
 
   // B1
   @Get('diaria')
@@ -102,12 +102,12 @@ export class AttendanceReportsController {
     return this.sendXlsx(res, wb, `top_inasistentes_${q.seccion_id}`);
   }
 
-  private sendXlsx(
+  private async sendXlsx(
     res: Response,
     wb: ReturnType<typeof buildXlsx>,
     baseName: string,
-  ): Buffer {
-    const buf = workbookToBuffer(wb);
+  ): Promise<Buffer> {
+    const buf = await workbookToBuffer(wb);
     const filename = buildFilename(baseName);
     res.setHeader(
       'Content-Type',
