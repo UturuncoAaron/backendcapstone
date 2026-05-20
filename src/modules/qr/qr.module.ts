@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { QrController } from './qr.controller';
-import { QrService } from './qr.service';
-import { AuthModule } from '../auth/auth.module';
+import { QrController } from './qr.controller.js';
+import { QrService } from './qr.service.js';
+import { AuthModule } from '../auth/auth.module.js';
 
 @Module({
     imports: [

@@ -1,66 +1,46 @@
-import {
-    Controller,
-    Get,
-    Param,
-    ParseUUIDPipe,
-    Res,
-    UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { QrService } from './qr.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
+import { QrService } from './qr.service.js';
+import type { AuthUser } from '../auth/types/auth-user.js';
+const NO_CACHE = 'no-store';
 
-/**
- * Endpoints para que el ADMIN descargue el QR del alumno
- * (PNG/SVG para imprimir, JSON para integraciones/debug).
- *
- * El QR codifica un JWT estable (sub = alumno_id) que el auxiliar verifica
- * al escanear.
- */
-@Controller('admin/users/alumnos/:id')
+@Controller('alumnos/me')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin')
+@Roles('alumno')
 export class QrController {
-    constructor(private readonly qr: QrService) { }
+    constructor(private readonly qr: QrService) {}
 
-    /** PNG — para descargar e imprimir en el carnet/agenda escolar. */
+    /** PNG 500×500 — resolución óptima para impresión en carnet */
     @Get('qr.png')
     async getPng(
-        @Param('id', new ParseUUIDPipe()) id: string,
+        @CurrentUser() user: AuthUser,
         @Res() res: Response,
     ): Promise<void> {
-        const buffer = await this.qr.generatePng(id);
+        const buffer = await this.qr.generatePng(user.id);
         res.set({
             'Content-Type': 'image/png',
-            'Content-Disposition': `inline; filename="qr-${id}.png"`,
-            'Cache-Control': 'private, max-age=3600',
+            'Content-Disposition': 'attachment; filename="mi-qr.png"',
+            'Cache-Control': NO_CACHE,
         });
         res.send(buffer);
     }
 
-    /** SVG — escala sin perder calidad para impresos grandes / PDFs. */
+    /** SVG — para impresión en cualquier tamaño sin pérdida de calidad */
     @Get('qr.svg')
     async getSvg(
-        @Param('id', new ParseUUIDPipe()) id: string,
+        @CurrentUser() user: AuthUser,
         @Res() res: Response,
     ): Promise<void> {
-        const svg = await this.qr.generateSvg(id);
+        const svg = await this.qr.generateSvg(user.id);
         res.set({
             'Content-Type': 'image/svg+xml',
-            'Content-Disposition': `inline; filename="qr-${id}.svg"`,
-            'Cache-Control': 'private, max-age=3600',
+            'Content-Disposition': 'attachment; filename="mi-qr.svg"',
+            'Cache-Control': NO_CACHE,
         });
         res.send(svg);
-    }
-
-    /** JSON — devuelve el JWT crudo (debug / integración). */
-    @Get('qr.json')
-    getJson(@Param('id', new ParseUUIDPipe()) id: string) {
-        return {
-            alumno_id: id,
-            token: this.qr.signAttendanceToken(id),
-        };
     }
 }
