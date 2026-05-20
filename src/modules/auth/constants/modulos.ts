@@ -90,9 +90,13 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,
     ],
+    // El auxiliar es un rol operativo dedicado a asistencias. NO participa
+    // del flujo de citas (ni como convocador, ni declarando disponibilidad,
+    // ni como convocable). Si en el futuro se quiere darle acceso a citas,
+    // hacerlo con un permiso explícito vía `permisos_extra`, no metiéndole
+    // de vuelta MODULOS.AGENDA_PROPIA en la base del rol.
     auxiliar: [
         MODULOS.ASIST_GENERAL,
-        MODULOS.AGENDA_PROPIA,
         MODULOS.COMUNICADOS,
         ...COMUNES,
     ],
