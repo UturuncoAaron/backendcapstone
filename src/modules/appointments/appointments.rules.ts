@@ -17,13 +17,17 @@ export const ISO_WEEK_DAYS: readonly DiaSemanaIso[] = [
   'sabado',
 ] as const;
 
-/** Macro-rol funcional dentro del flujo de citas. */
+/**
+ * Macro-rol funcional dentro del flujo de citas.
+ *
+ * NOTA: `auxiliar` NO está incluido a propósito. El rol auxiliar es operativo
+ * (solo asistencias) y no participa de citas/disponibilidad.
+ */
 export type AppointmentRole =
   | 'psicologa'
   | 'docente'
   | 'director'
   | 'admin'
-  | 'auxiliar'
   | 'padre';
 
 export interface AppointmentRoleRule {
@@ -111,18 +115,6 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
     requiresChild: false,
     directBooking: false,
   },
-  auxiliar: {
-    role: 'auxiliar',
-    fixedDurationMin: null,
-    maxDurationMin: 30,
-    slotMinutes: 15,
-    maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
-    allowedDays: WEEK_FULL,
-    defaultHours: { start: '08:00', end: '15:30' },
-    label: 'Auxiliar',
-    requiresChild: false,
-    directBooking: false,
-  },
   padre: {
     role: 'padre',
     fixedDurationMin: null,
@@ -146,10 +138,11 @@ export function resolveAppointmentRole(
 ): AppointmentRole {
   if (rol === 'admin' && isDirectorCargo(cargo)) return 'director';
   if (rol === 'admin') return 'admin';
-  if (rol === 'auxiliar') return 'auxiliar';
   if (rol === 'docente') return 'docente';
   if (rol === 'psicologa') return 'psicologa';
   if (rol === 'padre') return 'padre';
+  // 'auxiliar', 'alumno' → no participan como convocadores/convocados con
+  // disponibilidad propia. El servicio debe filtrar antes de llegar acá.
   throw new Error(`Rol ${rol} no participa en el flujo de citas`);
 }
 
@@ -197,20 +190,20 @@ export function formatAllowedDays(rule: AppointmentRoleRule): string {
 //   padre    -> psicologa o docente
 //   alumno   -> SOLO psicologa
 //   admin/director -> SOLO padre (alumno obligatorio)
-//   auxiliar -> SOLO padre (alumno obligatorio) — mismo tratamiento que admin
+//   auxiliar -> NO participa en citas (solo asistencias)
 // ============================================================================
 
 export type CallerRol = Rol;
 export type RecipientRol = Rol;
 
 /** Roles a los que cada rol que cita puede dirigir una cita. */
-const INVITATION_MATRIX: Record<CallerRol, readonly RecipientRol[]> = {
+const INVITATION_MATRIX: Partial<Record<CallerRol, readonly RecipientRol[]>> = {
   docente: ['padre'],
   psicologa: ['alumno', 'padre'],
   padre: ['psicologa', 'docente'],
   alumno: ['psicologa'],
   admin: ['padre'],
-  auxiliar: ['padre'],
+  // auxiliar: deliberadamente excluido — solo gestiona asistencias.
 };
 
 /** True si `caller` puede agendar una cita dirigida a un usuario con rol `recipient`. */
@@ -227,6 +220,18 @@ export function allowedRecipientsFor(
 
 /** True si el rol que cita necesita SIEMPRE indicar `alumno_id` en la cita. */
 export function callerRequiresStudent(caller: CallerRol): boolean {
-  // docente y admin/auxiliar siempre citan en torno a un alumno específico.
-  return caller === 'docente' || caller === 'admin' || caller === 'auxiliar';
+  // docente y admin/director siempre citan en torno a un alumno específico.
+  return caller === 'docente' || caller === 'admin';
+}
+
+/**
+ * True si la cita debe usar la regla del CONVOCADOR para calcular
+ * duración / slot. Aplica cuando el convocador tiene su propia
+ * disponibilidad y duración (psicóloga, docente, admin/director).
+ *
+ * El convocado pasivo (padre, alumno) no impone duración: simplemente
+ * acepta o rechaza la cita en el horario que el convocador propuso.
+ */
+export function callerOwnsSchedule(caller: CallerRol): boolean {
+  return caller === 'psicologa' || caller === 'docente' || caller === 'admin';
 }
