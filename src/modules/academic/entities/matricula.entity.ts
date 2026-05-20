@@ -38,6 +38,15 @@ export class Matricula {
     @Column({ default: true })
     activo: boolean;
 
+    /**
+     * Condición académica final del alumno en este año/sección. La promueve
+     * el admin al cierre del año desde la vista "Año Lectivo". La promoción
+     * automática lee este campo para decidir si el alumno avanza, repite o
+     * egresa.
+     */
+    @Column({ name: 'condicion_final', type: 'varchar', length: 20, default: 'pendiente' })
+    condicion_final: 'pendiente' | 'aprobado' | 'desaprobado' | 'retirado';
+
     @Column({ name: 'fecha_matricula', type: 'date', default: () => 'CURRENT_DATE' })
     fecha_matricula: string;
 

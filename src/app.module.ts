@@ -34,6 +34,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AssistsModule } from './modules/assists/assists.module.js';
 import { AppointmentsModule } from './modules/appointments/appointments.module.js';
 import { HistoricoModule } from './modules/historico/historico.module.js';
+import { AcademicYearModule } from './modules/academic-year/academic-year.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -83,6 +84,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
     // ── Academic ──────────────────────────────────────────────────
     AcademicModule,
+    AcademicYearModule,
     CoursesModule,
     ScheduleModule,
     AssistsModule,
@@ -126,4 +128,4 @@ const isDev = process.env.NODE_ENV === 'development';
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}

@@ -46,6 +46,7 @@ import {
   resolveAppointmentRole,
   canInvite,
   callerRequiresStudent,
+  callerOwnsSchedule,
   allowedRecipientsFor,
   CallerRol,
 } from './appointments.rules.js';
@@ -315,10 +316,20 @@ export class AppointmentsService {
     if (caller.rol === 'psicologa' && dto.studentId)
       await this.warnIfPsicologaNotLinked(caller.id, dto.studentId);
 
-    const isAlumnoConvocadoPorPsicologa =
-      convocadoA.rol === 'alumno' && caller.rol === 'psicologa';
-
-    const ruleAccount: AccountSummary = isAlumnoConvocadoPorPsicologa
+    // ── Qué regla manda la duración/slot ───────────────────────────
+    //
+    // Si el CONVOCADOR tiene su propia disponibilidad (psicóloga, docente,
+    // admin/director), su regla gana: la cita se acopla a su calendario y
+    // a su `slotMinutes`. El padre/alumno son convocados pasivos y no
+    // imponen duración.
+    //
+    // Si el CONVOCADOR no tiene disponibilidad (padre, alumno), la cita
+    // se acopla al calendario del CONVOCADO (psicóloga o docente).
+    //
+    // Caso especial preexistente: psicóloga citando a un alumno usa su
+    // propia regla (el alumno no tiene calendario).
+    const callerHasSchedule = callerOwnsSchedule(caller.rol as CallerRol);
+    const ruleAccount: AccountSummary = callerHasSchedule
       ? { id: caller.id, rol: caller.rol, cargo: null }
       : convocadoA;
 
@@ -773,8 +784,20 @@ export class AppointmentsService {
   // ════════════════════════════════════════════════════════════════
 
   /**
-   * El convocado (alumno o padre) propone una nueva fecha con motivo.
-   * La cita vuelve a 'pendiente' y registra la propuesta en notas_previas.
+   * Aplaza la cita proponiendo una nueva fecha. Dos caminos según quién llama:
+   *
+   *  • CONVOCADOR (psicóloga, docente, admin/director): re-propone el horario
+   *    dentro de su propia disponibilidad. La cita vuelve a `pendiente` y el
+   *    convocado debe re-aceptar.
+   *
+   *  • CONVOCADO (padre, alumno): contra-propone un horario dentro de la
+   *    disponibilidad del CONVOCADOR. También deja la cita en `pendiente`,
+   *    pero ahora es el convocador quien debe re-aceptar.
+   *
+   *  • admin sin ser parte: puede aplazar cualquier cita (uso operativo).
+   *
+   * El motivo es obligatorio en ambos casos y queda registrado tanto en
+   * `prior_notes` como en `cita_estado_log.razon` para auditoría.
    */
   async postponeAppointment(
     caller: CallerContext,
@@ -783,8 +806,15 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new NotFoundException('Cita no encontrada');
-    if (caller.rol !== 'admin' && appt.convocadoAId !== caller.id)
-      throw new ForbiddenException('Solo el convocado puede aplazar la cita');
+
+    const isAdmin = caller.rol === 'admin';
+    const isConvocador = appt.createdById === caller.id;
+    const isConvocado = appt.convocadoAId === caller.id;
+    if (!isAdmin && !isConvocador && !isConvocado)
+      throw new ForbiddenException(
+        'Solo el convocador, el convocado o admin pueden aplazar esta cita',
+      );
+
     if (!['pendiente', 'confirmada'].includes(appt.estado))
       throw new BadRequestException(
         `No se puede aplazar una cita ${appt.estado}`,
@@ -797,12 +827,39 @@ export class AppointmentsService {
     const nuevaFecha = new Date(dto.nuevaFechaHora);
     this.assertScheduledAtIsValid(nuevaFecha);
 
+    // ── Validar disponibilidad según quién aplaza ────────────────
+    // El nuevo horario SIEMPRE debe caer en el calendario del convocador
+    // (es su agenda la que se respeta). Mantenemos también la duración
+    // original de la cita.
+    const convocadorAccount = await this.loadAccountSummary(appt.createdById);
+    if (convocadorAccount && hasAvailability(convocadorAccount.rol)) {
+      const convocadorRule = getAppointmentRule(
+        this.toAppointmentRole(convocadorAccount),
+      );
+      if (!isDayAllowed(convocadorRule, nuevaFecha))
+        throw new BadRequestException(
+          `${convocadorRule.label} atiende solo ${formatAllowedDays(convocadorRule)}`,
+        );
+      await this.assertSlotFitsAvailability(
+        convocadorAccount.id,
+        nuevaFecha,
+        appt.durationMin,
+        appt.id,
+        convocadorRule.defaultHours,
+      );
+    }
+
     const previousScheduled = appt.scheduledAt;
     const previousStatus = appt.estado;
 
     appt.scheduledAt = nuevaFecha;
     appt.estado = 'pendiente';
-    const nota = `[Aplazada por ${caller.rol} el ${new Date().toISOString()}] Motivo: ${dto.motivo.trim()}. Fecha previa: ${previousScheduled.toISOString()}.`;
+    const actorLabel = isConvocador
+      ? `convocador (${caller.rol})`
+      : isConvocado
+        ? `convocado (${caller.rol})`
+        : `admin (${caller.rol})`;
+    const nota = `[Aplazada por ${actorLabel} el ${new Date().toISOString()}] Motivo: ${dto.motivo.trim()}. Fecha previa: ${previousScheduled.toISOString()}.`;
     appt.priorNotes = appt.priorNotes ? `${appt.priorNotes}\n${nota}` : nota;
 
     const saved = await this.appointmentRepo.save(appt);
@@ -818,7 +875,7 @@ export class AppointmentsService {
       previousStatus,
       'pendiente',
       caller.id,
-      dto.motivo.trim(),
+      `Aplazada por ${actorLabel}. ${dto.motivo.trim()}`,
     );
     return saved;
   }
@@ -1475,6 +1532,127 @@ export class AppointmentsService {
       defaultHours: { ...rule.defaultHours },
       directBooking: rule.directBooking,
       label: rule.label,
+    };
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // DIRECTORIO DE DOCENTES CONVOCABLES (role-aware)
+  // ════════════════════════════════════════════════════════════════
+
+  /**
+   * Devuelve los docentes que el caller puede convocar.
+   *
+   * - `padre`: docentes que dictan curso a alguno de sus hijos o son
+   *   tutores de su sección. Solo docentes activos.
+   * - `psicologa` / `admin`: todos los docentes activos.
+   *
+   * El padre llama a esto desde el dialog "Agendar cita con docente". El
+   * admin lo usa desde gestión de citas. El docente NO debe convocar a otro
+   * docente, así que no le exponemos esta ruta.
+   */
+  async listBookableTeachers(caller: CallerContext): Promise<
+    Array<{
+      id: string;
+      nombre: string;
+      apellido_paterno: string;
+      apellido_materno: string | null;
+      especialidad: string | null;
+      tutoria_actual: { seccion_id: string; seccion_label: string } | null;
+    }>
+  > {
+    type Row = {
+      id: string;
+      nombre: string;
+      apellido_paterno: string;
+      apellido_materno: string | null;
+      especialidad: string | null;
+      tutoria_seccion_id: string | null;
+      tutoria_seccion_label: string | null;
+    };
+
+    const baseSelect = `
+      SELECT DISTINCT
+        d.id,
+        d.nombre,
+        d.apellido_paterno,
+        d.apellido_materno,
+        d.especialidad,
+        s.id  AS tutoria_seccion_id,
+        CASE
+          WHEN s.id IS NOT NULL
+          THEN CONCAT(g.nombre, ' · ', s.nombre)
+          ELSE NULL
+        END   AS tutoria_seccion_label
+      FROM docentes d
+      JOIN cuentas c       ON c.id = d.id AND c.activo = TRUE
+      LEFT JOIN secciones s ON s.tutor_id = d.id AND s.activo = TRUE
+      LEFT JOIN grados g    ON g.id = s.grado_id
+    `;
+
+    if (caller.rol === 'admin' || caller.rol === 'psicologa') {
+      const rows = await this.dataSource.query<Row[]>(
+        `${baseSelect}
+         WHERE d.estado_contrato = 'activo'
+         ORDER BY d.apellido_paterno, d.apellido_materno, d.nombre`,
+      );
+      return rows.map((r) => this.mapTeacherRow(r));
+    }
+
+    if (caller.rol === 'padre') {
+      // Docentes vinculados a los hijos del padre, vía:
+      //   1. curso dictado en sección donde el hijo está matriculado
+      //      (matrícula activa en el año en curso)
+      //   2. tutor de la sección donde el hijo está matriculado
+      const rows = await this.dataSource.query<Row[]>(
+        `${baseSelect}
+         WHERE d.estado_contrato = 'activo'
+           AND d.id IN (
+             -- Docentes que dictan cursos a los hijos del padre
+             SELECT c2.docente_id
+             FROM cursos c2
+             JOIN matriculas m ON m.seccion_id = c2.seccion_id AND m.activo = TRUE
+             JOIN padre_alumno pa ON pa.alumno_id = m.alumno_id
+             WHERE pa.padre_id = $1
+               AND c2.docente_id IS NOT NULL
+             UNION
+             -- Tutores de las secciones donde están los hijos
+             SELECT s2.tutor_id
+             FROM secciones s2
+             JOIN matriculas m ON m.seccion_id = s2.id AND m.activo = TRUE
+             JOIN padre_alumno pa ON pa.alumno_id = m.alumno_id
+             WHERE pa.padre_id = $1
+               AND s2.tutor_id IS NOT NULL
+           )
+         ORDER BY d.apellido_paterno, d.apellido_materno, d.nombre`,
+        [caller.id],
+      );
+      return rows.map((r) => this.mapTeacherRow(r));
+    }
+
+    return [];
+  }
+
+  private mapTeacherRow(r: {
+    id: string;
+    nombre: string;
+    apellido_paterno: string;
+    apellido_materno: string | null;
+    especialidad: string | null;
+    tutoria_seccion_id: string | null;
+    tutoria_seccion_label: string | null;
+  }) {
+    return {
+      id: r.id,
+      nombre: r.nombre,
+      apellido_paterno: r.apellido_paterno,
+      apellido_materno: r.apellido_materno,
+      especialidad: r.especialidad,
+      tutoria_actual: r.tutoria_seccion_id
+        ? {
+            seccion_id: r.tutoria_seccion_id,
+            seccion_label: r.tutoria_seccion_label ?? '',
+          }
+        : null,
     };
   }
 
