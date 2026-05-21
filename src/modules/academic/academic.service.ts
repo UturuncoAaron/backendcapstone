@@ -282,53 +282,55 @@ export class AcademicService {
 
     // ── MATRÍCULAS ───────────────────────────────────────────────
 
-    async findMatriculas(anio?: number, seccionId?: string) {
-        const params: any[] = [];
-        const conditions: string[] = [];
-
+    async findMatriculas(anio?: number, seccionId?: string, gradoId?: string) {
         let anioFinal = anio;
         if (!anioFinal) {
-            const periodoActivo = await this.dataSource.query(
+            const [row] = await this.dataSource.query<{ anio: number }[]>(
                 `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
             );
-            anioFinal = periodoActivo[0]?.anio ?? new Date().getFullYear();
+            anioFinal = row?.anio ?? new Date().getFullYear();
         }
 
-        params.push(anioFinal);
-        conditions.push(`m.anio = $${params.length}`);
+        const params: (number | string)[] = [anioFinal];
+        const conditions = [`m.anio = $1`];
 
         if (seccionId) {
             params.push(seccionId);
             conditions.push(`m.seccion_id = $${params.length}`);
         }
 
-        const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        if (gradoId) {
+            params.push(gradoId);
+            conditions.push(`g.id = $${params.length}`);
+        }
 
-        const rows = await this.dataSource.query(
+        const rows = await this.dataSource.query<any[]>(
             `SELECT
-                m.id, m.activo, m.fecha_matricula, m.anio, m.seccion_id,
-                a.id               AS alumno_id,
-                a.nombre, a.apellido_paterno, a.apellido_materno, a.codigo_estudiante,
-                s.nombre           AS seccion_nombre,
-                s.capacidad,
-                g.id               AS grado_id,
-                g.nombre           AS grado_nombre,
-                g.orden            AS grado_orden
-             FROM matriculas m
-             JOIN alumnos   a ON a.id = m.alumno_id
-             JOIN secciones s ON s.id = m.seccion_id
-             JOIN grados    g ON g.id = s.grado_id
-             ${where}
-             ORDER BY g.orden ASC, s.nombre ASC, a.apellido_paterno ASC, a.nombre ASC`,
+            m.id, m.activo, m.fecha_matricula, m.anio, m.seccion_id,
+            m.condicion_final,
+            a.id               AS alumno_id,
+            a.nombre, a.apellido_paterno, a.apellido_materno, a.codigo_estudiante,
+            s.nombre           AS seccion_nombre,
+            s.capacidad,
+            g.id               AS grado_id,
+            g.nombre           AS grado_nombre,
+            g.orden            AS grado_orden
+         FROM matriculas m
+         JOIN alumnos   a ON a.id = m.alumno_id
+         JOIN secciones s ON s.id = m.seccion_id
+         JOIN grados    g ON g.id = s.grado_id
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY g.orden ASC, s.nombre ASC, a.apellido_paterno ASC, a.nombre ASC`,
             params,
         );
 
-        return rows.map((r: any) => ({
+        return rows.map(r => ({
             id: r.id,
             activo: r.activo,
             fecha_matricula: r.fecha_matricula,
             anio: r.anio,
             seccion_id: r.seccion_id,
+            condicion_final: r.condicion_final ?? 'pendiente',
             alumno_id: r.alumno_id,
             nombre: r.nombre,
             apellido_paterno: r.apellido_paterno,

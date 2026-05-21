@@ -71,7 +71,7 @@ export class HistoricoService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly storage: StorageService,
-  ) {}
+  ) { }
 
   private async hasAnioIngreso(): Promise<boolean> {
     if (this.anioIngresoExists !== null) return this.anioIngresoExists;
@@ -87,7 +87,7 @@ export class HistoricoService {
     if (!this.anioIngresoExists) {
       this.logger.warn(
         'La columna alumnos.anio_ingreso no existe — el histórico ' +
-          'usará sólo periodos.anio y devolverá anio_ingreso=null.',
+        'usará sólo periodos.anio y devolverá anio_ingreso=null.',
       );
     }
     return this.anioIngresoExists;
@@ -100,34 +100,22 @@ export class HistoricoService {
     try {
       const hasAnio = await this.hasAnioIngreso();
       const sql = hasAnio
-        ? `
-                    SELECT DISTINCT anio FROM (
-                        SELECT anio_ingreso AS anio
-                          FROM alumnos
-                         WHERE anio_ingreso IS NOT NULL
-                        UNION
-                        SELECT anio FROM periodos WHERE anio IS NOT NULL
-                    ) t
-                    ORDER BY anio DESC
-                `
-        : `
-                    SELECT DISTINCT anio FROM periodos
-                     WHERE anio IS NOT NULL
-                     ORDER BY anio DESC
-                `;
+        ? `SELECT DISTINCT anio FROM (
+           SELECT anio_ingreso AS anio FROM alumnos WHERE anio_ingreso IS NOT NULL
+           UNION SELECT anio FROM periodos  WHERE anio IS NOT NULL
+           UNION SELECT anio FROM matriculas WHERE anio IS NOT NULL
+         ) t ORDER BY anio DESC`
+        : `SELECT DISTINCT anio FROM (
+           SELECT anio FROM periodos  WHERE anio IS NOT NULL
+           UNION SELECT anio FROM matriculas WHERE anio IS NOT NULL
+         ) t ORDER BY anio DESC`;
       const rows = await this.dataSource.query<{ anio: number }[]>(sql);
       return { anios: rows.map((r) => Number(r.anio)) };
     } catch (err) {
-      this.logger.error(
-        'findAniosDisponibles falló',
-        err instanceof Error ? err.stack : String(err),
-      );
-      throw new InternalServerErrorException(
-        'No se pudieron obtener los años del histórico',
-      );
+      this.logger.error('findAniosDisponibles falló', err instanceof Error ? err.stack : String(err));
+      throw new InternalServerErrorException('No se pudieron obtener los años del histórico');
     }
   }
-
   // ─────────────────────────────────────────────────────────────
   // Filtros (grados y secciones) disponibles para un año
   // ─────────────────────────────────────────────────────────────
@@ -139,31 +127,31 @@ export class HistoricoService {
     try {
       const grados = await this.dataSource.query<GradoFiltroRow[]>(
         `
-                SELECT DISTINCT g.id, g.nombre, g.orden
-                  FROM grados g
-                  JOIN secciones  s ON s.grado_id   = g.id
-                  JOIN matriculas m ON m.seccion_id = s.id
-                 WHERE m.anio = $1 AND m.activo = TRUE
-                 ORDER BY g.orden ASC, g.nombre ASC
-            `,
+      SELECT DISTINCT g.id, g.nombre, g.orden
+        FROM grados g
+        JOIN secciones  s ON s.grado_id   = g.id
+        JOIN matriculas m ON m.seccion_id = s.id
+       WHERE m.anio = $1
+         -- FIX: quitar AND m.activo = TRUE
+         -- En años pasados las matrículas están inactivas (activo=false)
+         -- pero igual queremos mostrarlas en el histórico
+       ORDER BY g.orden ASC, g.nombre ASC
+      `,
         [anio],
       );
 
-      // Postgres exige que toda columna del ORDER BY aparezca en
-      // la lista de SELECT cuando se usa DISTINCT. Incluimos
-      // g.orden en el SELECT y luego lo descartamos del payload
-      // que devolvemos al cliente.
       const seccionesRaw = await this.dataSource.query<SeccionFiltroRow[]>(
         `
-                SELECT DISTINCT s.id, s.nombre, s.grado_id,
-                                g.nombre AS grado_nombre,
-                                g.orden  AS orden
-                  FROM secciones  s
-                  JOIN grados     g ON g.id         = s.grado_id
-                  JOIN matriculas m ON m.seccion_id = s.id
-                 WHERE m.anio = $1 AND m.activo = TRUE
-                 ORDER BY g.orden ASC, s.nombre ASC
-            `,
+      SELECT DISTINCT s.id, s.nombre, s.grado_id,
+                      g.nombre AS grado_nombre,
+                      g.orden  AS orden
+        FROM secciones  s
+        JOIN grados     g ON g.id         = s.grado_id
+        JOIN matriculas m ON m.seccion_id = s.id
+       WHERE m.anio = $1
+         -- FIX: quitar AND m.activo = TRUE (mismo motivo)
+       ORDER BY g.orden ASC, s.nombre ASC
+      `,
         [anio],
       );
 
@@ -173,6 +161,7 @@ export class HistoricoService {
         grado_id: s.grado_id,
         grado_nombre: s.grado_nombre,
       }));
+
       return { grados, secciones };
     } catch (err) {
       this.logger.error(
@@ -184,7 +173,6 @@ export class HistoricoService {
       );
     }
   }
-
   // ─────────────────────────────────────────────────────────────
   // Listado paginado de alumnos por año (con datos de matrícula)
   //
@@ -203,11 +191,6 @@ export class HistoricoService {
       throw new BadRequestException('Parámetro "anio" inválido');
     }
 
-    // Defensa en profundidad: para mantener la escalabilidad nunca
-    // queremos que un cliente "barra" todos los alumnos del año.
-    // Exigimos que se haya elegido al menos grado o sección. La UI
-    // del histórico no permite consultar sin sección, este check
-    // existe por si alguien llama el endpoint directo.
     if (!opts.gradoId && !opts.seccionId) {
       throw new BadRequestException(
         'Debes especificar grado_id o seccion_id para consultar el histórico',
@@ -217,7 +200,7 @@ export class HistoricoService {
     const hasAnio = await this.hasAnioIngreso();
     const offset = (opts.page - 1) * opts.limit;
     const params: any[] = [opts.anio];
-    const where: string[] = ['m.anio = $1', 'm.activo = TRUE'];
+    const where: string[] = ['m.anio = $1'];
 
     if (opts.seccionId) {
       params.push(opts.seccionId);

@@ -117,10 +117,12 @@ export class AcademicController {
     findMatriculas(
         @Query('anio') anio?: string,
         @Query('seccion_id') seccionId?: string,
+        @Query('grado_id') gradoId?: string,
     ) {
         return this.academicService.findMatriculas(
             anio ? parseInt(anio, 10) : undefined,
             seccionId,
+            gradoId,
         );
     }
 }

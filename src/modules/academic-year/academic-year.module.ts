@@ -13,4 +13,4 @@ import { AcademicYearSchemaSync } from './academic-year.schema-sync.js';
   providers: [AcademicYearService, AcademicYearCron, AcademicYearSchemaSync],
   exports: [AcademicYearService],
 })
-export class AcademicYearModule {}
+export class AcademicYearModule { }

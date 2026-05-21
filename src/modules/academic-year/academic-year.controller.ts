@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -15,25 +16,19 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
-
 import { AcademicYearService } from './academic-year.service.js';
 import {
+  BulkCondicionFinalDto,
+  CambiarSeccionDto,
   CreateAcademicYearDto,
   SetCondicionFinalDto,
   UpdateAcademicYearDto,
 } from './dto/academic-year.dto.js';
 
-/**
- * Endpoints del módulo de Año Lectivo.
- *
- * Todos los endpoints son admin-only excepto `GET current` que cualquier
- * rol autenticado puede llamar (se usa para mostrar el año actual en el
- * header del FE).
- */
 @Controller('academic-years')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AcademicYearController {
-  constructor(private readonly service: AcademicYearService) {}
+  constructor(private readonly service: AcademicYearService) { }
 
   @Get()
   @Roles('admin')
@@ -41,7 +36,6 @@ export class AcademicYearController {
     return this.service.list();
   }
 
-  /** Año en curso — accesible a todos los roles autenticados. */
   @Get('current')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno', 'auxiliar')
   getCurrent() {
@@ -76,7 +70,6 @@ export class AcademicYearController {
     return this.service.activate(anio);
   }
 
-  // ── Promoción ──────────────────────────────────────────────────
   @Get(':anio/promotion/preview')
   @Roles('admin')
   previewPromotion(@Param('anio', ParseIntPipe) anio: number) {
@@ -90,15 +83,6 @@ export class AcademicYearController {
     return this.service.runPromotion(anio);
   }
 
-  // ── Desactivación de egresados ────────────────────────────────
-  @Post(':anio/egresados/deactivate')
-  @HttpCode(HttpStatus.OK)
-  @Roles('admin')
-  deactivateEgresados(@Param('anio', ParseIntPipe) anio: number) {
-    return this.service.runEgresadoDeactivation(anio);
-  }
-
-  // ── Condición final de una matrícula (al cierre del año) ──────
   @Patch('matriculas/:matriculaId/condicion-final')
   @Roles('admin')
   setCondicionFinal(
@@ -106,5 +90,48 @@ export class AcademicYearController {
     @Body() dto: SetCondicionFinalDto,
   ) {
     return this.service.setCondicionFinal(matriculaId, dto);
+  }
+
+  @Post('matriculas/bulk-condicion')
+  @HttpCode(HttpStatus.OK)
+  @Roles('admin')
+  bulkCondicionFinal(@Body() dto: BulkCondicionFinalDto) {
+    return this.service.bulkSetCondicionFinal(dto);
+  }
+
+  @Patch('matriculas/:matriculaId/seccion')
+  @Roles('admin')
+  cambiarSeccion(
+    @Param('matriculaId', ParseUUIDPipe) matriculaId: string,
+    @Body() dto: CambiarSeccionDto,
+  ) {
+    return this.service.cambiarSeccion(matriculaId, dto.seccion_id);
+  }
+
+  @Post(':anio/rematriculas/:matriculaId')
+  @HttpCode(HttpStatus.OK)
+  @Roles('admin')
+  rematricularAlumno(
+    @Param('anio', ParseIntPipe) anio: number,
+    @Param('matriculaId', ParseUUIDPipe) matriculaId: string,
+    @Body() dto: SetCondicionFinalDto,
+  ) {
+    const condicion = dto.condicion as string;
+    if (condicion === 'retirado' || condicion === 'pendiente')
+      throw new BadRequestException(
+        'Solo se puede rematricualr con condición "aprobado" o "desaprobado"',
+      );
+    return this.service.rematricularAlumno(
+      anio,
+      matriculaId,
+      dto.condicion as 'aprobado' | 'desaprobado',
+    );
+  }
+
+  @Post(':anio/egresados/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @Roles('admin')
+  deactivateEgresados(@Param('anio', ParseIntPipe) anio: number) {
+    return this.service.runEgresadoDeactivation(anio);
   }
 }
