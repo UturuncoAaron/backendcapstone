@@ -11,22 +11,15 @@ import { ImportQueryDto, CsvRow, ImportResult } from './dto/import-query.dto.js'
 @Injectable()
 export class ImportService {
     constructor(
-        @InjectRepository(Cuenta)
-        private readonly cuentaRepo: Repository<Cuenta>,
-        @InjectRepository(Alumno)
-        private readonly alumnoRepo: Repository<Alumno>,
-        @InjectRepository(Matricula)
-        private readonly matriculaRepo: Repository<Matricula>,
-        @InjectDataSource()
-        private readonly dataSource: DataSource,
+        @InjectRepository(Cuenta) private readonly cuentaRepo: Repository<Cuenta>,
+        @InjectRepository(Alumno) private readonly alumnoRepo: Repository<Alumno>,
+        @InjectRepository(Matricula) private readonly matriculaRepo: Repository<Matricula>,
+        @InjectDataSource() private readonly dataSource: DataSource,
     ) { }
 
     async parseFile(originalname: string, buffer: Buffer): Promise<CsvRow[]> {
         const ext = originalname.split('.').pop()?.toLowerCase();
-        if (ext === 'csv') {
-            return this.parseCsv(buffer);
-        }
-        return this.parseExcel(buffer);
+        return ext === 'csv' ? this.parseCsv(buffer) : this.parseExcel(buffer);
     }
 
     async parseExcel(buffer: Buffer): Promise<CsvRow[]> {
@@ -37,47 +30,32 @@ export class ImportService {
         ) as ArrayBuffer);
 
         const ws = wb.worksheets[0];
-        if (!ws) {
-            throw new BadRequestException('El archivo Excel está vacío o no tiene hojas válidas');
-        }
+        if (!ws) throw new BadRequestException('El archivo Excel está vacío o no tiene hojas válidas');
 
         const rows: CsvRow[] = [];
         let headers: string[] = [];
 
         ws.eachRow((row, rowNumber) => {
-            // La fila 1 es el encabezado
             if (rowNumber === 1) {
-                // row.values[0] es undefined (ExcelJS indexa desde 1)
                 headers = (row.values as ExcelJS.CellValue[])
                     .slice(1)
                     .map(v => String(v ?? '').trim().toLowerCase());
                 return;
             }
-
-            // Filas de datos — saltar filas completamente vacías
             const values = (row.values as ExcelJS.CellValue[]).slice(1);
-            const allEmpty = values.every(v => v === null || v === undefined || v === '');
-            if (allEmpty) return;
+            if (values.every(v => v === null || v === undefined || v === '')) return;
 
             const obj: Record<string, string> = {};
-            headers.forEach((h, i) => {
-                obj[h] = String(values[i] ?? '').trim();
-            });
+            headers.forEach((h, i) => { obj[h] = String(values[i] ?? '').trim(); });
             rows.push(obj as unknown as CsvRow);
         });
 
-        if (rows.length === 0) {
-            throw new BadRequestException('El archivo Excel está vacío o no tiene datos válidos');
-        }
+        if (rows.length === 0) throw new BadRequestException('El archivo Excel no tiene datos válidos');
 
-        // Validar columnas obligatorias
         const required = ['tipo_documento', 'numero_documento', 'nombre', 'apellido_paterno'];
         for (const col of required) {
-            if (!headers.includes(col)) {
-                throw new BadRequestException(`Columna obligatoria faltante en Excel: "${col}"`);
-            }
+            if (!headers.includes(col)) throw new BadRequestException(`Columna obligatoria faltante: "${col}"`);
         }
-
         return rows;
     }
 
@@ -85,18 +63,14 @@ export class ImportService {
         const text = buffer.toString('utf-8').replace(/^\uFEFF/, '');
         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-        if (lines.length < 2) {
-            throw new BadRequestException('El CSV debe tener encabezado y al menos una fila de datos');
-        }
+        if (lines.length < 2) throw new BadRequestException('El CSV debe tener encabezado y al menos una fila');
 
         const separator = lines[0].includes(';') ? ';' : ',';
         const headers = lines[0].split(separator).map(h => h.trim().toLowerCase());
 
         const required = ['tipo_documento', 'numero_documento', 'nombre', 'apellido_paterno'];
         for (const col of required) {
-            if (!headers.includes(col)) {
-                throw new BadRequestException(`Columna obligatoria faltante: "${col}"`);
-            }
+            if (!headers.includes(col)) throw new BadRequestException(`Columna obligatoria faltante: "${col}"`);
         }
 
         return lines.slice(1).map(line => {
@@ -109,28 +83,15 @@ export class ImportService {
 
     async importStudents(rows: CsvRow[], query: ImportQueryDto): Promise<ImportResult> {
         const result: ImportResult = {
-            total: rows.length,
-            creados: 0,
-            matriculados: 0,
-            omitidos: 0,
-            errores: [],
+            total: rows.length, creados: 0, matriculados: 0, omitidos: 0, errores: [],
         };
 
-        const seccion = await this.dataSource.query(
-            `SELECT id FROM secciones WHERE id = $1`,
-            [query.seccion_id],
+        const [seccion] = await this.dataSource.query(
+            `SELECT id FROM secciones WHERE id = $1`, [query.seccion_id],
         );
-        if (!seccion.length) {
-            throw new BadRequestException(`Sección ${query.seccion_id} no existe`);
-        }
+        if (!seccion) throw new BadRequestException(`Sección ${query.seccion_id} no existe`);
 
-        const periodo = await this.dataSource.query(
-            `SELECT id FROM periodos WHERE id = $1`,
-            [query.periodo_id],
-        );
-        if (!periodo.length) {
-            throw new BadRequestException(`Periodo ${query.periodo_id} no existe`);
-        }
+        const anio = Number(query.anio);
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
@@ -138,94 +99,67 @@ export class ImportService {
 
             try {
                 if (!row.tipo_documento || !row.numero_documento || !row.nombre || !row.apellido_paterno) {
-                    result.errores.push({
-                        fila,
-                        numero_documento: row.numero_documento ?? '?',
-                        motivo: 'Campos obligatorios vacíos',
-                    });
+                    result.errores.push({ fila, numero_documento: row.numero_documento ?? '?', motivo: 'Campos obligatorios vacíos' });
                     continue;
                 }
 
-                if (!['dni', 'ce', 'pasaporte'].includes(row.tipo_documento.toLowerCase())) {
-                    result.errores.push({
-                        fila,
-                        numero_documento: row.numero_documento,
-                        motivo: `tipo_documento inválido: "${row.tipo_documento}"`,
-                    });
+                const tipoDoc = row.tipo_documento.toLowerCase();
+                if (!['dni', 'ce', 'pasaporte'].includes(tipoDoc)) {
+                    result.errores.push({ fila, numero_documento: row.numero_documento, motivo: `tipo_documento inválido: "${row.tipo_documento}"` });
                     continue;
                 }
 
                 const dni = row.numero_documento.trim();
 
                 let cuenta = await this.cuentaRepo.findOne({
-                    where: {
-                        tipo_documento: row.tipo_documento.toLowerCase() as any,
-                        numero_documento: dni,
-                    },
+                    where: { tipo_documento: tipoDoc as any, numero_documento: dni },
                 });
 
                 if (!cuenta) {
                     const password_hash = await bcrypt.hash(dni, 10);
+                    cuenta = await this.cuentaRepo.save(this.cuentaRepo.create({
+                        tipo_documento: tipoDoc as any,
+                        numero_documento: dni,
+                        password_hash,
+                        codigo_acceso: `EST-${dni}`,
+                        password_changed: false,
+                        rol: 'alumno',
+                        activo: true,
+                    }));
 
-                    cuenta = await this.cuentaRepo.save(
-                        this.cuentaRepo.create({
-                            tipo_documento: row.tipo_documento.toLowerCase() as any,
-                            numero_documento: dni,
-                            password_hash,
-                            codigo_acceso: `EST-${dni}`,
-                            password_changed: false,
-                            rol: 'alumno',
-                            activo: true,
-                        }),
-                    );
-
-                    await this.alumnoRepo.save(
-                        this.alumnoRepo.create({
-                            id: cuenta.id,
-                            codigo_estudiante: row.codigo_estudiante?.trim() || `EST-${dni}`,
-                            nombre: row.nombre.trim(),
-                            apellido_paterno: row.apellido_paterno.trim(),
-                            apellido_materno: row.apellido_materno?.trim() || null,
-                            email: row.email?.trim() || null,
-                            telefono: row.telefono?.trim() || null,
-                            fecha_nacimiento: row.fecha_nacimiento ? new Date(row.fecha_nacimiento) : null,
-                        }),
-                    );
+                    await this.alumnoRepo.save(this.alumnoRepo.create({
+                        id: cuenta.id,
+                        codigo_estudiante: `EST-${dni}`,
+                        nombre: row.nombre.trim(),
+                        apellido_paterno: row.apellido_paterno.trim(),
+                        apellido_materno: row.apellido_materno?.trim() || null,
+                        email: row.email?.trim() || null,
+                        telefono: row.telefono?.trim() || null,
+                        fecha_nacimiento: row.fecha_nacimiento ? new Date(row.fecha_nacimiento) : null,
+                    }));
 
                     result.creados++;
                 } else {
                     if (cuenta.rol !== 'alumno') {
-                        result.errores.push({
-                            fila,
-                            numero_documento: dni,
-                            motivo: `La cuenta ya existe pero tiene rol de ${cuenta.rol}`,
-                        });
+                        result.errores.push({ fila, numero_documento: dni, motivo: `Cuenta existente con rol "${cuenta.rol}"` });
                         continue;
-                    }
-                    if (!cuenta.codigo_acceso) {
-                        cuenta.codigo_acceso = `EST-${dni}`;
-                        await this.cuentaRepo.save(cuenta);
                     }
                     result.omitidos++;
                 }
 
+                // Constraint v6: UNIQUE (alumno_id, seccion_id, anio)
                 const yaMatriculado = await this.matriculaRepo.findOne({
-                    where: {
-                        alumno_id: cuenta.id,
-                        seccion_id: query.seccion_id,
-                        periodo_id: query.periodo_id,
-                    },
+                    where: { alumno_id: cuenta.id, anio },
                 });
 
                 if (!yaMatriculado) {
-                    await this.matriculaRepo.save(
-                        this.matriculaRepo.create({
-                            alumno_id: cuenta.id,
-                            seccion_id: query.seccion_id,
-                            periodo_id: query.periodo_id,
-                            activo: true,
-                        }),
-                    );
+                    await this.matriculaRepo.save(this.matriculaRepo.create({
+                        alumno_id: cuenta.id,
+                        seccion_id: query.seccion_id,
+                        anio,
+                        activo: true,
+                        condicion_final: 'pendiente',
+                    }));
                     result.matriculados++;
                 }
 
@@ -239,5 +173,53 @@ export class ImportService {
         }
 
         return result;
+    }
+
+    async buildTemplatexlsx(): Promise<Buffer> {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Alumnos');
+
+        // Cabeceras — sin codigo_estudiante
+        ws.columns = [
+            { header: 'tipo_documento', key: 'tipo_documento', width: 18 },
+            { header: 'numero_documento', key: 'numero_documento', width: 20 },
+            { header: 'nombre', key: 'nombre', width: 20 },
+            { header: 'apellido_paterno', key: 'apellido_paterno', width: 22 },
+            { header: 'apellido_materno', key: 'apellido_materno', width: 22 },
+            { header: 'fecha_nacimiento', key: 'fecha_nacimiento', width: 20 },
+            { header: 'email', key: 'email', width: 28 },
+            { header: 'telefono', key: 'telefono', width: 16 },
+        ];
+
+        // Fila de ejemplo
+        ws.addRow({
+            tipo_documento: 'dni',
+            numero_documento: '12345678',
+            nombre: 'Juan',
+            apellido_paterno: 'García',
+            apellido_materno: 'López',
+            fecha_nacimiento: '2010-03-15',
+            email: 'juan@mail.com',
+            telefono: '999888777',
+        });
+
+        // Hoja de instrucciones
+        const info = wb.addWorksheet('Instrucciones');
+        info.getColumn(1).width = 70;
+        [
+            'INSTRUCCIONES DE IMPORTACIÓN',
+            '',
+            '• tipo_documento: dni | ce | pasaporte',
+            '• numero_documento: se usará como contraseña inicial del alumno',
+            '• El código de estudiante se genera automáticamente: EST-{numero_documento}',
+            '• fecha_nacimiento: formato YYYY-MM-DD  (ej: 2010-03-15)',
+            '• email y telefono son opcionales',
+            '• apellido_materno es opcional',
+            '',
+            'Columnas obligatorias: tipo_documento, numero_documento, nombre, apellido_paterno',
+        ].forEach(line => info.addRow([line]));
+
+        const buf = await wb.xlsx.writeBuffer();
+        return Buffer.from(buf);
     }
 }

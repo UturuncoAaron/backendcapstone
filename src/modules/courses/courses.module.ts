@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { CoursesController } from './courses.controller.js';
 import { CoursesService } from './courses.service.js';
-import { CoursesSchemaSync } from './courses.schema-sync.js';
 import { Course } from './entities/course.entity.js';
 import { Enrollment } from './entities/enrollment.entity.js';
 import { Schedule } from './entities/schedule.entity.js';
@@ -16,7 +15,7 @@ import { MaterialsModule } from '../materials/materials.module.js';
         MaterialsModule,
     ],
     controllers: [CoursesController],
-    providers: [CoursesService, CoursesSchemaSync],
+    providers: [CoursesService],
     exports: [CoursesService],
 })
 export class CoursesModule { }

@@ -1,20 +1,7 @@
-import { IsInt, IsUUID, IsOptional, Min } from 'class-validator';
+import { IsNotEmpty, IsUUID, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class ImportQueryDto {
-    @IsUUID()
-    seccion_id: string;
-
-    @IsUUID()
-    periodo_id: string;
-
-    @Type(() => Number)
-    @IsInt()
-    @IsOptional()
-    anio_nacimiento_default?: number;
-}
-
-export interface CsvRow {
+export class CsvRow {
     tipo_documento: string;
     numero_documento: string;
     nombre: string;
@@ -23,7 +10,12 @@ export interface CsvRow {
     fecha_nacimiento?: string;
     email?: string;
     telefono?: string;
-    codigo_estudiante?: string;
+}
+
+export interface ImportError {
+    fila: number;
+    numero_documento: string;
+    motivo: string;
 }
 
 export interface ImportResult {
@@ -34,8 +26,14 @@ export interface ImportResult {
     errores: ImportError[];
 }
 
-export interface ImportError {
-    fila: number;
-    numero_documento: string;
-    motivo: string;
+export class ImportQueryDto {
+    @IsUUID()
+    @IsNotEmpty()
+    seccion_id: string;
+
+    @Type(() => Number)
+    @IsInt()
+    @Min(2020)
+    @Max(2100)
+    anio: number;
 }

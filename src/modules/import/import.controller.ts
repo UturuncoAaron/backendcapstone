@@ -24,23 +24,22 @@ export class ImportController {
         @Query() query: ImportQueryDto,
     ) {
         if (!file) throw new BadRequestException('Se requiere un archivo (campo: file)');
-        const extension = file.originalname.split('.').pop()?.toLowerCase();
-        if (!['csv', 'xls', 'xlsx'].includes(extension || '')) {
+        const ext = file.originalname.split('.').pop()?.toLowerCase();
+        if (!['csv', 'xls', 'xlsx'].includes(ext || '')) {
             throw new BadRequestException('El archivo debe ser .csv, .xls o .xlsx');
         }
         const rows = await this.importService.parseFile(file.originalname, file.buffer);
         return this.importService.importStudents(rows, query);
     }
 
+    // Sigue siendo @Roles('admin') — el frontend usa ApiService (JWT en header)
     @Get('students/template')
     @Roles('admin')
-    downloadTemplate(@Res() res: Response): void {
-        const headers = 'tipo_documento,numero_documento,nombre,apellido_paterno,apellido_materno,fecha_nacimiento,email,telefono,codigo_estudiante';
-        const example = 'dni,12345678,Juan,García,López,2010-03-15,juan@mail.com,999888777,EST001';
-        const csv = [headers, example].join('\n');
-
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', 'attachment; filename="plantilla_importar_alumnos.csv"');
-        res.send('\uFEFF' + csv);
+    @UseInterceptors()
+    async downloadTemplate(@Res() res: Response): Promise<void> {
+        const buffer = await this.importService.buildTemplatexlsx();
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', 'attachment; filename="plantilla_importar_alumnos.xlsx"');
+        res.send(buffer);
     }
 }

@@ -5,8 +5,6 @@ import { NotificationsService } from './notifications.service.js';
 import { NotificationsController } from './notifications.controller.js';
 import { NotificationsGateway } from './notifications.gateway.js';
 import { NotificationsListener } from './notifications.listener.js';
-import { NotificationsSchemaSync } from './notifications.schema-sync.js';
-
 @Module({
   imports: [TypeOrmModule.forFeature([Notification])],
   controllers: [NotificationsController],
@@ -14,7 +12,6 @@ import { NotificationsSchemaSync } from './notifications.schema-sync.js';
     NotificationsService,
     NotificationsGateway,
     NotificationsListener,
-    NotificationsSchemaSync,
   ],
   exports: [NotificationsService, NotificationsGateway],
 })

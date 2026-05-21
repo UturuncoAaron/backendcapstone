@@ -1,15 +1,3 @@
-// Ubicación: src/modules/historico/historico.service.ts
-//
-// Servicio que consulta el histórico de alumnos reutilizando el
-// esquema existente. NO crea tablas nuevas: apunta directo a
-// alumnos + matriculas + secciones + grados + periodos.
-//
-// Índices que aprovecha (ya presentes en la BD según CHANGELOG_DB.md):
-//   - idx_alumnos_anio_ingreso       (alumnos.anio_ingreso)
-//   - idx_matriculas_historico       (matriculas.alumno_id, periodo_id DESC)
-//   - idx_matriculas_seccion         (matriculas.seccion_id, periodo_id) WHERE activo
-//   - idx_periodos_anio              (periodos.anio, bimestre)
-
 import {
   Injectable,
   BadRequestException,
@@ -20,7 +8,6 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
 import { StorageService } from '../storage/storage.service.js';
-
 interface AlumnoHistoricoRow {
   id: string;
   codigo_estudiante: string;
@@ -36,6 +23,7 @@ interface AlumnoHistoricoRow {
   grado: string | null;
   seccion_id: string | null;
   seccion: string | null;
+  condicion_final: 'pendiente' | 'aprobado' | 'desaprobado' | 'retirado' | null;
   periodo_id: string | null;
   periodo_nombre: string | null;
   periodo_bimestre: number | null;
@@ -173,13 +161,7 @@ export class HistoricoService {
       );
     }
   }
-  // ─────────────────────────────────────────────────────────────
-  // Listado paginado de alumnos por año (con datos de matrícula)
-  //
-  // Estrategia: tomamos los alumnos que tengan matrícula en algún
-  // período del año solicitado. Si un alumno tuvo varias matrículas
-  // ese año (varios bimestres) usamos la más reciente (mayor bimestre).
-  // ─────────────────────────────────────────────────────────────
+
   async findAlumnosPorAnio(opts: {
     anio: number;
     gradoId?: string;
@@ -187,15 +169,13 @@ export class HistoricoService {
     page: number;
     limit: number;
   }) {
-    if (!Number.isFinite(opts.anio)) {
+    if (!Number.isFinite(opts.anio))
       throw new BadRequestException('Parámetro "anio" inválido');
-    }
 
-    if (!opts.gradoId && !opts.seccionId) {
+    if (!opts.gradoId && !opts.seccionId)
       throw new BadRequestException(
         'Debes especificar grado_id o seccion_id para consultar el histórico',
       );
-    }
 
     const hasAnio = await this.hasAnioIngreso();
     const offset = (opts.page - 1) * opts.limit;
@@ -212,23 +192,23 @@ export class HistoricoService {
 
     const whereSql = where.join(' AND ');
 
-    // CTE: alumnos matriculados en el año (matrícula anual, una sola por alumno).
     const baseCte = `
-            WITH matriculas_anio AS (
-                SELECT m.alumno_id,
-                       m.seccion_id,
-                       m.anio        AS periodo_anio,
-                       s.id          AS s_id,
-                       s.nombre      AS s_nombre,
-                       g.id          AS g_id,
-                       g.nombre      AS g_nombre,
-                       g.orden       AS g_orden
-                  FROM matriculas m
-                  JOIN secciones s ON s.id = m.seccion_id
-                  JOIN grados    g ON g.id = s.grado_id
-                 WHERE ${whereSql}
-            )
-        `;
+    WITH matriculas_anio AS (
+        SELECT m.alumno_id,
+               m.seccion_id,
+               m.anio             AS periodo_anio,
+               m.condicion_final,
+               s.id               AS s_id,
+               s.nombre           AS s_nombre,
+               g.id               AS g_id,
+               g.nombre           AS g_nombre,
+               g.orden            AS g_orden
+          FROM matriculas m
+          JOIN secciones s ON s.id = m.seccion_id
+          JOIN grados    g ON g.id = s.grado_id
+         WHERE ${whereSql}
+    )
+  `;
 
     let total = 0;
     try {
@@ -242,48 +222,45 @@ export class HistoricoService {
         `findAlumnosPorAnio.count(${JSON.stringify(opts)}) falló`,
         err instanceof Error ? err.stack : String(err),
       );
-      throw new InternalServerErrorException(
-        'No se pudo contar el histórico de alumnos',
-      );
+      throw new InternalServerErrorException('No se pudo contar el histórico de alumnos');
     }
 
     params.push(opts.limit);
     params.push(offset);
 
-    const anioIngresoSelect = hasAnio
-      ? 'a.anio_ingreso'
-      : 'NULL::int AS anio_ingreso';
+    const anioIngresoSelect = hasAnio ? 'a.anio_ingreso' : 'NULL::int AS anio_ingreso';
 
     let rows: AlumnoHistoricoRow[] = [];
     try {
       rows = await this.dataSource.query<AlumnoHistoricoRow[]>(
         `
-            ${baseCte}
-            SELECT a.id,
-                   a.codigo_estudiante,
-                   a.nombre,
-                   a.apellido_paterno,
-                   a.apellido_materno,
-                   a.inclusivo,
-                   a.foto_storage_key,
-                   ${anioIngresoSelect},
-                   c.numero_documento,
-                   c.tipo_documento,
-                   ma.g_id            AS grado_id,
-                   ma.g_nombre        AS grado,
-                   ma.s_id            AS seccion_id,
-                   ma.s_nombre        AS seccion,
-                   NULL               AS periodo_id,
-                   NULL               AS periodo_nombre,
-                   NULL               AS periodo_bimestre,
-                   ma.periodo_anio    AS periodo_anio
-              FROM matriculas_anio ma
-              JOIN alumnos a ON a.id = ma.alumno_id
-              JOIN cuentas c ON c.id = a.id
-             ORDER BY ma.g_orden ASC, ma.s_nombre ASC,
-                      a.apellido_paterno ASC, a.nombre ASC
-             LIMIT $${params.length - 1} OFFSET $${params.length}
-            `,
+      ${baseCte}
+      SELECT a.id,
+             a.codigo_estudiante,
+             a.nombre,
+             a.apellido_paterno,
+             a.apellido_materno,
+             a.inclusivo,
+             a.foto_storage_key,
+             ${anioIngresoSelect},
+             c.numero_documento,
+             c.tipo_documento,
+             ma.g_id            AS grado_id,
+             ma.g_nombre        AS grado,
+             ma.s_id            AS seccion_id,
+             ma.s_nombre        AS seccion,
+             ma.condicion_final,
+             NULL               AS periodo_id,
+             NULL               AS periodo_nombre,
+             NULL               AS periodo_bimestre,
+             ma.periodo_anio    AS periodo_anio
+        FROM matriculas_anio ma
+        JOIN alumnos a ON a.id = ma.alumno_id
+        JOIN cuentas c ON c.id = a.id
+       ORDER BY ma.g_orden ASC, ma.s_nombre ASC,
+                a.apellido_paterno ASC, a.nombre ASC
+       LIMIT $${params.length - 1} OFFSET $${params.length}
+      `,
         params,
       );
     } catch (err) {
@@ -291,9 +268,7 @@ export class HistoricoService {
         `findAlumnosPorAnio.rows(${JSON.stringify(opts)}) falló`,
         err instanceof Error ? err.stack : String(err),
       );
-      throw new InternalServerErrorException(
-        'No se pudo obtener el histórico de alumnos',
-      );
+      throw new InternalServerErrorException('No se pudo obtener el histórico de alumnos');
     }
 
     const data = rows.map((r) => ({

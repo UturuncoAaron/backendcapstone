@@ -316,19 +316,49 @@ export class AcademicYearService {
     }
 
     return this.ds.transaction('SERIALIZABLE', async (em) => {
+
+      // ── BLOQUEO previo: aprobados sin sección destino ──────────
+      const sinDestino = await em.query<{ count: number; detalle: string }[]>(`
+      SELECT
+        COUNT(*)::int AS count,
+        STRING_AGG(DISTINCT g.nombre || ' — Sec. ' || s.nombre, ', ') AS detalle
+      FROM matriculas m
+      JOIN secciones s ON s.id = m.seccion_id
+      JOIN grados    g ON g.id = s.grado_id
+      WHERE m.anio = $1
+        AND m.activo = TRUE
+        AND m.condicion_final = 'aprobado'
+        AND g.orden < $2
+        AND NOT EXISTS (
+          SELECT 1 FROM secciones ds
+            JOIN grados dg ON dg.id = ds.grado_id
+           WHERE dg.orden  = g.orden + 1
+             AND ds.nombre = s.nombre
+             AND ds.activo = TRUE
+        )
+    `, [anio, this.ULTIMO_GRADO_ORDEN]);
+
+      if (sinDestino[0].count > 0) {
+        throw new BadRequestException(
+          `No se puede ejecutar la promoción: ${sinDestino[0].count} alumno(s) aprobado(s) ` +
+          `no tienen sección destino. Crea primero: ${sinDestino[0].detalle}.`
+        );
+      }
+      // ──────────────────────────────────────────────────────────
+
       const aprobados = await em.query<AprobadoRow[]>(
         `SELECT m.id AS matricula_id, m.alumno_id,
-                g.orden AS origen_grado_orden, s.nombre AS origen_seccion_nombre,
-                (
-                  SELECT ds.id FROM secciones ds
-                    JOIN grados dg ON dg.id = ds.grado_id
-                   WHERE dg.orden = g.orden + 1 AND ds.nombre = s.nombre AND ds.activo = TRUE
-                   LIMIT 1
-                ) AS destino_seccion_id
-           FROM matriculas m
-           JOIN secciones s ON s.id = m.seccion_id
-           JOIN grados    g ON g.id = s.grado_id
-          WHERE m.anio = $1 AND m.activo = TRUE AND m.condicion_final = 'aprobado'`,
+              g.orden AS origen_grado_orden, s.nombre AS origen_seccion_nombre,
+              (
+                SELECT ds.id FROM secciones ds
+                  JOIN grados dg ON dg.id = ds.grado_id
+                 WHERE dg.orden = g.orden + 1 AND ds.nombre = s.nombre AND ds.activo = TRUE
+                 LIMIT 1
+              ) AS destino_seccion_id
+         FROM matriculas m
+         JOIN secciones s ON s.id = m.seccion_id
+         JOIN grados    g ON g.id = s.grado_id
+        WHERE m.anio = $1 AND m.activo = TRUE AND m.condicion_final = 'aprobado'`,
         [anio],
       );
 
@@ -341,16 +371,19 @@ export class AcademicYearService {
           await em.query(`UPDATE matriculas SET activo = FALSE WHERE id = $1`, [r.matricula_id]);
           continue;
         }
+        // Con el bloqueo previo esto nunca debería ocurrir, pero por seguridad:
         if (!r.destino_seccion_id) {
-          this.logger.warn(
-            `Alumno ${r.alumno_id} sin destino (orden=${r.origen_grado_orden}, seccion=${r.origen_seccion_nombre})`,
+          this.logger.error(
+            `BUG: alumno ${r.alumno_id} sin destino tras bloqueo (orden=${r.origen_grado_orden}, seccion=${r.origen_seccion_nombre})`,
           );
-          continue;
+          throw new BadRequestException(
+            `Error inesperado: alumno ${r.alumno_id} sin sección destino. Verifica las secciones.`
+          );
         }
         await em.query(
           `INSERT INTO matriculas (alumno_id, seccion_id, anio, activo, condicion_final)
-           VALUES ($1, $2, $3, TRUE, 'pendiente')
-           ON CONFLICT (alumno_id, seccion_id, anio) DO NOTHING`,
+         VALUES ($1, $2, $3, TRUE, 'pendiente')
+         ON CONFLICT (alumno_id, seccion_id, anio) DO NOTHING`,
           [r.alumno_id, r.destino_seccion_id, anio + 1],
         );
         await em.query(`UPDATE matriculas SET activo = FALSE WHERE id = $1`, [r.matricula_id]);
@@ -359,7 +392,7 @@ export class AcademicYearService {
 
       const desaprobados = await em.query<DesaprobadoRow[]>(
         `SELECT id AS matricula_id, alumno_id, seccion_id FROM matriculas
-          WHERE anio = $1 AND activo = TRUE AND condicion_final = 'desaprobado'`,
+        WHERE anio = $1 AND activo = TRUE AND condicion_final = 'desaprobado'`,
         [anio],
       );
 
@@ -367,8 +400,8 @@ export class AcademicYearService {
       for (const r of desaprobados) {
         await em.query(
           `INSERT INTO matriculas (alumno_id, seccion_id, anio, activo, condicion_final)
-           VALUES ($1, $2, $3, TRUE, 'pendiente')
-           ON CONFLICT (alumno_id, seccion_id, anio) DO NOTHING`,
+         VALUES ($1, $2, $3, TRUE, 'pendiente')
+         ON CONFLICT (alumno_id, seccion_id, anio) DO NOTHING`,
           [r.alumno_id, r.seccion_id, anio + 1],
         );
         await em.query(`UPDATE matriculas SET activo = FALSE WHERE id = $1`, [r.matricula_id]);
@@ -377,23 +410,26 @@ export class AcademicYearService {
 
       const saltados = await em.query<{ id: string }[]>(
         `UPDATE matriculas SET activo = FALSE
-          WHERE anio = $1 AND activo = TRUE AND condicion_final = 'pendiente'
-          RETURNING id`,
+        WHERE anio = $1 AND activo = TRUE AND condicion_final = 'pendiente'
+        RETURNING id`,
         [anio],
       );
       if (saltados.length > 0)
         this.logger.warn(
-          `Promoción ${anio}: ${saltados.length} pendientes saltados — usar POST academic-years/${anio}/rematriculas`,
+          `Promoción ${anio}: ${saltados.length} pendientes saltados — ` +
+          `usar POST academic-years/${anio}/rematriculas/:id`,
         );
 
       await em.query(
         `UPDATE anios_lectivos
-            SET estado = 'cerrado', promocion_ejecutada_at = NOW(), updated_at = NOW()
-          WHERE id = $1`,
+          SET estado = 'cerrado', promocion_ejecutada_at = NOW(), updated_at = NOW()
+        WHERE id = $1`,
         [ay.id],
       );
 
-      this.logger.log(`Promoción ${anio}: ${creadas} promovidos, ${repetidores} repetidores, ${egresados} egresados`);
+      this.logger.log(
+        `Promoción ${anio}: ${creadas} promovidos, ${repetidores} repetidores, ${egresados} egresados`,
+      );
       return { creadas, egresados, repetidores };
     });
   }
