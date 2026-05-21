@@ -272,6 +272,35 @@ export class AppointmentsService {
         'La cuenta convocada no existe o está inactiva',
       );
 
+    // ── Regla "una cita activa por padre" ──────────────────────────
+    //
+    // Spec (Aarón, 2026-05): un padre no puede tener múltiples citas
+    // pendientes/confirmadas simultáneas con profesionales distintos.
+    // Mientras tenga una cita activa con un usuario, no puede pedir
+    // otra con un usuario diferente. Sí puede reprogramar/cancelar la
+    // existente — al hacerlo, queda libre para crear una nueva.
+    if (caller.rol === 'padre') {
+      const existing = await this.appointmentRepo
+        .createQueryBuilder('a')
+        .leftJoin(Cuenta, 'cv', 'cv.id = a.convocado_a_id')
+        .select(['a.id', 'a.scheduledAt', 'a.convocadoAId'])
+        .addSelect('cv.rol::text', 'cv_rol')
+        .where('a.convocado_por_id = :id', { id: caller.id })
+        .andWhere('a.estado IN (:...states)', {
+          states: ['pendiente', 'confirmada'],
+        })
+        .andWhere('a.fecha_hora > NOW()')
+        .andWhere('a.convocado_a_id <> :otherSide', {
+          otherSide: dto.convocadoAId,
+        })
+        .getOne();
+      if (existing) {
+        throw new ConflictException(
+          'Ya tienes una cita pendiente o confirmada con otro profesional. Cancélala o espera a que termine antes de agendar una nueva.',
+        );
+      }
+    }
+
     // Reglas centralizadas: quién puede citar a quién.
     if (!canInvite(caller.rol as CallerRol, convocadoA.rol as CallerRol)) {
       const permitidos = allowedRecipientsFor(caller.rol as CallerRol);
@@ -444,7 +473,45 @@ export class AppointmentsService {
   // READ
   // ════════════════════════════════════════════════════════════════
 
+  /**
+   * Auto-cierre de citas vencidas. Para cualquier cita cuyo
+   * `scheduledAt + durationMin` haya quedado en el pasado y siga en
+   * estado `pendiente` o `confirmada`, el sistema la marca:
+   *
+   *   - `confirmada` → `realizada` (cita aceptada, se asume cumplida)
+   *   - `pendiente`  → `no_asistio` (nadie confirmó a tiempo)
+   *
+   * Es idempotente: si no hay nada para cerrar, no hace nada. Se llama
+   * antes de devolver listados o detalles para que el FE siempre vea
+   * estados coherentes con la fecha actual.
+   */
+  private async autoFinalizePastAppointments(): Promise<void> {
+    try {
+      await this.appointmentRepo.query(
+        `UPDATE citas
+           SET estado = 'realizada'
+         WHERE estado = 'confirmada'
+           AND (fecha_hora + (duracion_min || ' minutes')::interval) < NOW()`,
+      );
+      await this.appointmentRepo.query(
+        `UPDATE citas
+           SET estado = 'no_asistio',
+               cancelled_at = NOW(),
+               cancel_reason = COALESCE(cancel_reason, 'Cita vencida sin confirmar')
+         WHERE estado = 'pendiente'
+           AND (fecha_hora + (duracion_min || ' minutes')::interval) < NOW()`,
+      );
+    } catch (err) {
+      this.logger?.warn?.(
+        `autoFinalizePastAppointments falló: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   async listMine(caller: CallerContext, q: ListAppointmentsQueryDto) {
+    await this.autoFinalizePastAppointments();
     const page = q.page ?? 1;
     const limit = q.limit ?? 25;
     const order = q.order ?? 'DESC';
@@ -1062,6 +1129,11 @@ export class AppointmentsService {
           'Ese horario ya está ocupado para la psicóloga',
         );
 
+      // Spec (Aarón, 2026-05):
+      //   Al derivar el docente al alumno, la cita debe quedar auto-
+      //   confirmada ante la psicóloga (informativa para el docente,
+      //   accionable para la psicóloga). El alumno la verá como
+      //   "confirmada" con subtítulo "Derivado por: <docente>".
       const appointment = em.create(Appointment, {
         createdById: caller.id,
         convocadoAId: psicologaSummary.id,
@@ -1072,7 +1144,7 @@ export class AppointmentsService {
         motivo: dto.motivo,
         scheduledAt,
         durationMin,
-        estado: 'pendiente',
+        estado: 'confirmada',
         priorNotes: `[Derivación] Docente ${caller.id} → Psicóloga ${psicologaSummary.id}`,
       });
       const saved = await em.save(appointment);

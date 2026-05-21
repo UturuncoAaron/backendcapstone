@@ -59,6 +59,21 @@ export class PublicAvailabilityController {
     return this.service.getPublicWeeklyAvailability(docenteId, weekStart);
   }
 
+  /**
+   * Disponibilidad pública de un admin/director. Mantenido aparte de
+   * `psicologa`/`docente` por simetría con el spec del FE — el padre
+   * o alumno puede ver la agenda del admin/director y agendar
+   * directamente sobre ella.
+   */
+  @Get('admins/:adminId/disponibilidad')
+  async getAdminAvailability(
+    @Param('adminId', ParseUUIDPipe) adminId: string,
+    @Query('weekStart') weekStart?: string,
+  ) {
+    await this.assertRole(adminId, 'admin');
+    return this.service.getPublicWeeklyAvailability(adminId, weekStart);
+  }
+
   private async assertRole(
     cuentaId: string,
     expectedRol: string,
