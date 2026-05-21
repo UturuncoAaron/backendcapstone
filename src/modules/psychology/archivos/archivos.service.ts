@@ -42,7 +42,8 @@ export class PsychologyArchivosService {
             );
         }
 
-        await this.assertAssigned(psychologistId, studentId);
+        // Upload asegura la asignación automáticamente
+        await this.ensureAssigned(psychologistId, studentId);
 
         const key = await this.storage.uploadFile(file, `psychology/${dto.categoria}`);
 
@@ -66,7 +67,11 @@ export class PsychologyArchivosService {
         studentId: string,
         q: ArchivoQueryDto,
     ) {
-        await this.assertAssigned(psychologistId, studentId);
+        const assigned = await this.isAssigned(psychologistId, studentId);
+        if (!assigned) {
+            return { data: [], total: 0, page: 1, limit: q.limit ?? 50, totalPages: 1 };
+        }
+
         const page = q.page ?? 1;
         const limit = q.limit ?? 50;
 
@@ -96,7 +101,7 @@ export class PsychologyArchivosService {
 
     async delete(psychologistId: string, archivoId: string): Promise<void> {
         const archivo = await this.assertOwned(psychologistId, archivoId);
-        await this.storage.deleteFile(archivo.storageKey).catch(e =>
+        await this.storage.deleteFile(archivo.storageKey).catch((e) =>
             this.logger.warn(`R2 delete falló: ${(e as Error).message}`),
         );
         await this.archivoRepo.remove(archivo);
@@ -158,13 +163,20 @@ export class PsychologyArchivosService {
 
     // ── Helpers ─────────────────────────────────────────────────────
 
-    private async assertAssigned(psychologistId: string, studentId: string) {
-        const exists = await this.assignmentRepo.exist({
+    /** Retorna true/false sin lanzar. Usar en lecturas. */
+    private async isAssigned(psychologistId: string, studentId: string): Promise<boolean> {
+        return this.assignmentRepo.exist({
             where: { psychologistId, studentId, activo: true },
         });
-        if (!exists) {
-            throw new ForbiddenException('Este alumno no está asignado a tu cartera');
-        }
+    }
+    private async ensureAssigned(psychologistId: string, studentId: string): Promise<void> {
+        await this.dataSource.query(
+            `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde)
+             VALUES ($1, $2, TRUE, CURRENT_DATE)
+             ON CONFLICT (psicologa_id, alumno_id)
+             DO UPDATE SET activo = TRUE, hasta = NULL`,
+            [psychologistId, studentId],
+        );
     }
 
     private async assertOwned(psychologistId: string, archivoId: string) {

@@ -6,20 +6,6 @@ import { Psicologa } from '../../users/entities/psicologa.entity.js';
 import { Alumno } from '../../users/entities/alumno.entity.js';
 import type { InformeTipo, InformeEstado } from '../psychology.types.js';
 
-/**
- * Informe psicológico formal.
- *
- * A diferencia de las fichas (notas internas, eventos), un informe es un
- * documento estructurado que la psicóloga elabora sobre un alumno y que
- * eventualmente puede entregarse en papel/PDF a la familia o a un
- * especialista externo.
- *
- * Flujo:
- *   1. Crear como `borrador` (editable las veces que sea necesario).
- *   2. `finalizar` lo convierte en inmutable y queda `finalizado_at`.
- *   3. El frontend ofrece una vista de impresión amigable que el navegador
- *      puede "Guardar como PDF" sin necesidad de librerías externas.
- */
 @Entity('informes_psicologicos')
 @Index(['studentId', 'createdAt'])
 @Index(['psychologistId', 'createdAt'])
@@ -67,6 +53,9 @@ export class InformePsicologico {
 
     @Column({ name: 'confidencial', default: true })
     confidencial: boolean;
+
+    @Column({ name: 'cita_id', type: 'uuid', nullable: true, default: null })
+    citaId: string | null;
 
     @Column({ name: 'finalizado_at', type: 'timestamptz', nullable: true })
     finalizadoAt: Date | null;

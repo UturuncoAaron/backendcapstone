@@ -1,4 +1,3 @@
-// psychology/dto/psychology.dto.ts
 import {
     IsString, IsUUID, IsOptional, IsEnum, IsDateString,
     Length, Matches, IsInt, Min, Max, IsBoolean, IsBooleanString,
@@ -11,8 +10,6 @@ import type {
     RecordCategory, WeekDay, InformeTipo, ArchivoCategoria,
 } from '../psychology.types.js';
 
-// ── Fichas ───────────────────────────────────────────────────────────────────
-
 export class CreateRecordDto {
     @IsUUID()
     studentId: string;
@@ -23,6 +20,10 @@ export class CreateRecordDto {
     @IsString()
     @Length(1, 10000)
     contenido: string;
+
+    @IsOptional()
+    @IsUUID()
+    citaId?: string;
 }
 
 export class UpdateRecordDto {
@@ -36,8 +37,6 @@ export class UpdateRecordDto {
     contenido?: string;
 }
 
-// ── Disponibilidad ──────────────────────────────────────────────────────────
-
 export class CreateAvailabilityDto {
     @IsEnum(WEEK_DAYS)
     weekDay: WeekDay;
@@ -48,8 +47,6 @@ export class CreateAvailabilityDto {
     @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'endTime debe ser HH:mm' })
     endTime: string;
 }
-
-// ── Bloqueos ────────────────────────────────────────────────────────────────
 
 export class CreateBlockDto {
     @IsDateString()
@@ -63,8 +60,6 @@ export class CreateBlockDto {
     @Length(1, 200)
     motivo?: string;
 }
-
-// ── Slots ───────────────────────────────────────────────────────────────────
 
 export class GetSlotsQueryDto {
     @IsDateString()
@@ -80,8 +75,6 @@ export class GetSlotsQueryDto {
     durationMin?: number;
 }
 
-// ── Listados con paginación ─────────────────────────────────────────────────
-
 export class PageQueryDto {
     @IsOptional()
     @IsInt()
@@ -93,9 +86,16 @@ export class PageQueryDto {
     @Min(1)
     @Max(100)
     limit?: number;
-}
 
-// ── Informes psicológicos ───────────────────────────────────────────────────
+    @IsOptional()
+    @IsUUID()
+    citaId?: string;
+
+    /** true → solo registros sin cita (cita_id IS NULL) */
+    @IsOptional()
+    @IsBooleanString()
+    sinCita?: string;
+}
 
 export class CreateInformeDto {
     @IsUUID()
@@ -134,6 +134,10 @@ export class CreateInformeDto {
     @IsOptional()
     @IsBoolean()
     confidencial?: boolean;
+
+    @IsOptional()
+    @IsUUID()
+    citaId?: string;
 }
 
 export class UpdateInformeDto {
@@ -176,13 +180,10 @@ export class UpdateInformeDto {
     confidencial?: boolean;
 }
 
-// ── Archivos (fichas y tests externos) ─────────────────────────────────────
-
 export class CreateArchivoDto {
     @IsEnum(ARCHIVO_CATEGORIAS)
     categoria: ArchivoCategoria;
 
-    /** Nombre visible. Si no se envía, se usa el nombre original del archivo. */
     @IsOptional()
     @IsString()
     @Length(1, 255)
@@ -193,13 +194,13 @@ export class CreateArchivoDto {
     @Length(0, 1000)
     descripcion?: string;
 
-    /**
-     * multipart/form-data manda strings, no booleans. Aceptamos
-     * "true" | "false". Default = true (confidencial) cuando no viene.
-     */
     @IsOptional()
     @IsBooleanString()
     confidencial?: string;
+
+    @IsOptional()
+    @IsUUID()
+    citaId?: string;
 }
 
 export class ArchivoQueryDto {
@@ -219,4 +220,11 @@ export class ArchivoQueryDto {
     @Min(1)
     @Max(100)
     limit?: number;
+
+    @IsOptional()
+    @IsUUID()
+    citaId?: string;
+    @IsOptional()
+    @IsBooleanString()
+    sinCita?: string;
 }

@@ -116,34 +116,65 @@ export class ImportService {
                 });
 
                 if (!cuenta) {
-                    const password_hash = await bcrypt.hash(dni, 10);
-                    cuenta = await this.cuentaRepo.save(this.cuentaRepo.create({
-                        tipo_documento: tipoDoc as any,
-                        numero_documento: dni,
-                        password_hash,
-                        codigo_acceso: `EST-${dni}`,
-                        password_changed: false,
-                        rol: 'alumno',
-                        activo: true,
-                    }));
+                    try {
+                        await this.dataSource.transaction(async (em) => {
+                            const password_hash = await bcrypt.hash(dni, 10);
 
-                    await this.alumnoRepo.save(this.alumnoRepo.create({
-                        id: cuenta.id,
-                        codigo_estudiante: `EST-${dni}`,
-                        nombre: row.nombre.trim(),
-                        apellido_paterno: row.apellido_paterno.trim(),
-                        apellido_materno: row.apellido_materno?.trim() || null,
-                        email: row.email?.trim() || null,
-                        telefono: row.telefono?.trim() || null,
-                        fecha_nacimiento: row.fecha_nacimiento ? new Date(row.fecha_nacimiento) : null,
-                    }));
+                            cuenta = await em.save(
+                                em.create(Cuenta, {
+                                    tipo_documento: tipoDoc as any,
+                                    numero_documento: dni,
+                                    password_hash,
+                                    codigo_acceso: `EST-${dni}`,
+                                    password_changed: false,
+                                    rol: 'alumno',
+                                    activo: true,
+                                }),
+                            );
 
-                    result.creados++;
-                } else {
-                    if (cuenta.rol !== 'alumno') {
-                        result.errores.push({ fila, numero_documento: dni, motivo: `Cuenta existente con rol "${cuenta.rol}"` });
+                            await em.save(
+                                em.create(Alumno, {
+                                    id: cuenta!.id,
+                                    codigo_estudiante: `EST-${dni}`,
+                                    nombre: row.nombre.trim(),
+                                    apellido_paterno: row.apellido_paterno.trim(),
+                                    apellido_materno: row.apellido_materno?.trim() || null,
+                                    email: row.email?.trim() || null,
+                                    telefono: row.telefono?.trim() || null,
+                                    fecha_nacimiento: row.fecha_nacimiento ? new Date(row.fecha_nacimiento) : null,
+                                }),
+                            );
+                        });
+
+                        result.creados++;
+                    } catch (err: unknown) {
+                        result.errores.push({
+                            fila,
+                            numero_documento: dni,
+                            motivo: (err as Error).message ?? 'Error al crear cuenta/alumno',
+                        });
                         continue;
                     }
+                } else {
+                    if (cuenta.rol !== 'alumno') {
+                        result.errores.push({
+                            fila,
+                            numero_documento: dni,
+                            motivo: `Cuenta existente con rol "${cuenta.rol}"`,
+                        });
+                        continue;
+                    }
+
+                    const alumnoExiste = await this.alumnoRepo.findOne({ where: { id: cuenta.id } });
+                    if (!alumnoExiste) {
+                        result.errores.push({
+                            fila,
+                            numero_documento: dni,
+                            motivo: 'Cuenta existente pero sin perfil de alumno. Elimina la cuenta y reimporta.',
+                        });
+                        continue;
+                    }
+
                     result.omitidos++;
                 }
 

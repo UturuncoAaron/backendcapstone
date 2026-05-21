@@ -37,6 +37,9 @@ export class PsychologyArchivo {
     @Column({ name: 'size_bytes', type: 'bigint', nullable: true })
     sizeBytes!: number | null;
 
+    @Column({ name: 'cita_id', type: 'uuid', nullable: true, default: null })
+    citaId: string | null;
+
     @CreateDateColumn({ name: 'created_at' })
     createdAt!: Date;
 }

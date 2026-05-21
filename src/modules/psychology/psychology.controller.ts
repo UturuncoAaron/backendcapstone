@@ -78,6 +78,7 @@ export class PsychologyController {
         return this.service.unassignStudent(user.id, studentId);
     }
 
+
     // ── Directorio ──────────────────────────────────────────────────
 
     @Get('directory/students/search')
@@ -86,20 +87,25 @@ export class PsychologyController {
         return this.service.searchStudents(q);
     }
 
+    // En psychology.controller.ts — solo el método listStudents cambia:
+
     @Get('directory/students')
-    @Roles('psicologa', 'docente', 'auxiliar', 'admin')
+    @Roles('psicologa', 'docente', 'admin')
     listStudents(
+        @CurrentUser() user: AuthUser,
         @Query('q') q?: string,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
     ) {
-        return this.service.listStudents({
-            search: q,
-            page: page ? parseInt(page, 10) : 1,
-            limit: limit ? parseInt(limit, 10) : 50,
-        });
+        return this.service.listStudents(
+            user.rol === 'psicologa' ? user.id : null,
+            {
+                search: q,
+                page: page ? parseInt(page, 10) : 1,
+                limit: limit ? parseInt(limit, 10) : 50,
+            },
+        );
     }
-
     @Get('directory/parents/search')
     @Roles('psicologa', 'docente', 'auxiliar', 'admin')
     searchParents(@Query('q') q: string) {
@@ -110,6 +116,15 @@ export class PsychologyController {
     @Roles('psicologa', 'docente', 'auxiliar', 'admin')
     getStudentParents(@Param('studentId', ParseUUIDPipe) studentId: string) {
         return this.service.getStudentParents(studentId);
+    }
+    
+    @Get('student/:studentId/profile')
+    @Roles('psicologa')
+    getStudentProfile(
+        @Param('studentId', ParseUUIDPipe) studentId: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.getStudentProfile(user.id, studentId);
     }
 
     @Get('directory/students/:studentId')

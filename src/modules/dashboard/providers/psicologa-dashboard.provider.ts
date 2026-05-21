@@ -52,20 +52,19 @@ export class PsicologaDashboardProvider {
     private getAlumnosSeguimiento(psicologaId: string): Promise<AlumnoSeguimientoItem[]> {
         return this.db.query<AlumnoSeguimientoItem[]>(
             `SELECT a.id               AS "alumnoId",
-              a.nombre,
-              a.apellido_paterno AS "apellidoPaterno",
-              g.nombre           AS grado,
-              s.nombre           AS seccion,
-              pa_rel.desde
-       FROM   psicologa_alumno pa_rel
-       JOIN   alumnos   a ON a.id  = pa_rel.alumno_id
-       JOIN   matriculas m ON m.alumno_id = a.id AND m.activo = TRUE
-       JOIN   secciones  s ON s.id = m.seccion_id
-       JOIN   grados     g ON g.id = s.grado_id
-       JOIN   periodos   p ON p.id = m.periodo_id AND p.activo = TRUE
-       WHERE  pa_rel.psicologa_id = $1
-         AND  pa_rel.activo       = TRUE
-       ORDER  BY a.apellido_paterno, a.nombre`,
+          a.nombre,
+          a.apellido_paterno AS "apellidoPaterno",
+          g.nombre           AS grado,
+          s.nombre           AS seccion,
+          pa_rel.desde
+   FROM   psicologa_alumno pa_rel
+   JOIN   alumnos   a ON a.id  = pa_rel.alumno_id
+   JOIN   matriculas m ON m.alumno_id = a.id AND m.activo = TRUE
+   JOIN   secciones  s ON s.id = m.seccion_id
+   JOIN   grados     g ON g.id = s.grado_id
+   WHERE  pa_rel.psicologa_id = $1
+     AND  pa_rel.activo       = TRUE
+   ORDER  BY a.apellido_paterno, a.nombre`,
             [psicologaId],
         );
     }

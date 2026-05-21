@@ -33,6 +33,9 @@ export class PsychologyRecord {
 
     @Column({ name: 'es_privada', default: true })
     isPrivate: boolean;
+    
+    @Column({ name: 'cita_id', type: 'uuid', nullable: true, default: null })
+    citaId: string | null;
 
     @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
     createdAt: Date;
