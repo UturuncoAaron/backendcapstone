@@ -256,7 +256,7 @@ export class AppointmentsController {
   // ══════════════════════════════════════════════════════════════
 
   @Patch(':id/confirmar')
-  @Roles('padre', 'alumno', 'admin')
+  @Roles('padre', 'alumno', 'admin', 'docente', 'psicologa')
   confirmar(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,
