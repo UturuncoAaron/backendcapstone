@@ -180,6 +180,43 @@ export interface HorarioDelDiaRow {
     observacion: string | null;
 }
 
+/**
+ * Docente del día — 1 fila por docente (nueva UI del auxiliar).
+ * Agrega todos sus bloques del día en una sola fila.
+ */
+export interface DocenteDelDiaRow {
+    docente_id: string;
+    docente_nombre: string;
+    apellido_paterno: string;
+    apellido_materno: string | null;
+    /** Hora de inicio de su primera clase del día (HH:MM) */
+    primera_clase: string;
+    /** Hora de fin de su última clase del día (HH:MM) */
+    ultima_clase: string;
+    /** Cantidad de bloques/clases que tiene hoy */
+    total_bloques: number;
+    /** Estado del día (null = sin registro aún) */
+    estado_actual: EstadoAsistenciaDocente | null;
+    /** Hora de llegada registrada (si tardanza) */
+    hora_llegada: string | null;
+    /** Hora de salida anticipada registrada */
+    hora_salida_anticipada: string | null;
+    /** Motivo de ausencia / salida anticipada / permiso */
+    motivo: string | null;
+    /** Ya tiene al menos un bloque registrado hoy */
+    ya_registrado: boolean;
+    /** Lista de bloques del día para referencia */
+    bloques_json: Array<{
+        horario_id: string;
+        hora_inicio: string;
+        hora_fin: string;
+        aula: string | null;
+        curso_nombre: string;
+        seccion_nombre: string;
+        estado_bloque: EstadoAsistenciaDocente | null;
+    }>;
+}
+
 /** Reporte diario de docentes */
 export interface AsistenciaDocenteDiariaRow {
     asistencia_id: string | null;

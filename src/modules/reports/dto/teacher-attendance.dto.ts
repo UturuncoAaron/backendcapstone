@@ -1,4 +1,3 @@
-
 import {
     IsUUID,
     IsDateString,
@@ -10,13 +9,98 @@ import {
     ValidateIf,
     Matches,
     IsInt,
+    IsArray,
+    ValidateNested,
     Min,
     Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { FormatQueryDto } from './academic-reports.dto.js';
 
-// ─── Registrar / actualizar un bloque ────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// ESTADOS VÁLIDOS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const ESTADOS_DOCENTE = [
+    'presente',
+    'tardanza',
+    'salida_anticipada',
+    'ausente',
+    'permiso',
+    'licencia',
+] as const;
+
+export type EstadoDocenteUI = typeof ESTADOS_DOCENTE[number];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DTO PRINCIPAL — registro diario por docente (no por bloque)
+// El backend distribuye automáticamente a los bloques del horario
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class RegistrarAsistenciaDiariaDocenteDto {
+    /** ID del docente */
+    @IsUUID()
+    docente_id!: string;
+
+    /**
+     * Estado global del docente para el día.
+     * El backend lo distribuye a todos sus bloques, con lógica especial
+     * para salida_anticipada (divide en presente/permiso por hora).
+     */
+    @IsIn(ESTADOS_DOCENTE)
+    estado!: EstadoDocenteUI;
+
+    /**
+     * Hora de llegada — requerida en tardanza y salida_anticipada.
+     * Formato HH:MM (24h).
+     */
+    @IsOptional()
+    @Matches(/^\d{2}:\d{2}$/, { message: 'hora_llegada debe tener formato HH:MM' })
+    @ValidateIf(o => o.estado === 'tardanza' || o.estado === 'salida_anticipada')
+    hora_llegada?: string;
+
+    /**
+     * Hora en que el docente salió anticipadamente.
+     * Solo aplica cuando estado = 'salida_anticipada'.
+     * Bloques que empiezan ANTES de esta hora → presente
+     * Bloques que empiezan DESPUÉS de esta hora → permiso
+     */
+    @IsOptional()
+    @Matches(/^\d{2}:\d{2}$/, { message: 'hora_salida_anticipada debe tener formato HH:MM' })
+    @ValidateIf(o => o.estado === 'salida_anticipada')
+    hora_salida_anticipada?: string;
+
+    /** Motivo — requerido en salida_anticipada, ausente, permiso, licencia */
+    @IsOptional()
+    @IsString()
+    @MaxLength(500)
+    @ValidateIf(o => ['salida_anticipada', 'ausente', 'permiso', 'licencia'].includes(o.estado))
+    motivo?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    hubo_reemplazo?: boolean;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(1000)
+    observacion?: string;
+}
+
+/** Registro masivo diario — el auxiliar envía todos los docentes del día */
+export class RegistrarAsistenciaDiariaBulkDto {
+    @IsDateString()
+    fecha!: string;
+
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => RegistrarAsistenciaDiariaDocenteDto)
+    docentes!: RegistrarAsistenciaDiariaDocenteDto[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DTOs LEGACY — mantener para compatibilidad con el endpoint anterior
+// ─────────────────────────────────────────────────────────────────────────────
 
 export class RegistrarAsistenciaDocenteDto {
     @IsUUID()
@@ -25,24 +109,24 @@ export class RegistrarAsistenciaDocenteDto {
     @IsDateString()
     fecha!: string;
 
-    @IsIn(['presente', 'tardanza', 'ausente', 'permiso', 'licencia'])
+    @IsIn(['presente', 'tardanza', 'ausente', 'permiso', 'licencia', 'salida_anticipada'])
     estado!: string;
 
-    /** Solo cuando estado = 'tardanza'. Formato HH:MM */
     @IsOptional()
     @Matches(/^\d{2}:\d{2}$/, { message: 'hora_llegada debe tener formato HH:MM' })
-    @ValidateIf((o) => o.estado === 'tardanza')
     hora_llegada?: string;
+
+    @IsOptional()
+    @Matches(/^\d{2}:\d{2}$/, { message: 'hora_salida_anticipada debe tener formato HH:MM' })
+    hora_salida_anticipada?: string;
 
     @IsOptional()
     @IsBoolean()
     tiene_justificacion?: boolean;
 
-    /** Obligatorio si tiene_justificacion = true */
     @IsOptional()
     @IsString()
     @MaxLength(500)
-    @ValidateIf((o) => o.tiene_justificacion === true)
     motivo_justificacion?: string;
 
     @IsOptional()
@@ -55,7 +139,6 @@ export class RegistrarAsistenciaDocenteDto {
     observacion?: string;
 }
 
-/** Registro masivo — el auxiliar envía todos los bloques del día de una vez */
 export class RegistrarAsistenciaDocenteBulkDto {
     @IsDateString()
     fecha!: string;
@@ -64,15 +147,15 @@ export class RegistrarAsistenciaDocenteBulkDto {
     registros!: RegistrarAsistenciaDocenteDto[];
 }
 
-// ─── Query params para reportes ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// QUERY PARAMS
+// ─────────────────────────────────────────────────────────────────────────────
 
-/** Reporte diario de asistencia docente */
 export class ReporteDiarioDocenteQueryDto extends FormatQueryDto {
     @IsDateString()
     fecha!: string;
 }
 
-/** Reporte por rango de fechas */
 export class ReporteRangoDocenteQueryDto extends FormatQueryDto {
     @IsDateString()
     fecha_inicio!: string;
@@ -81,7 +164,6 @@ export class ReporteRangoDocenteQueryDto extends FormatQueryDto {
     fecha_fin!: string;
 }
 
-/** Alertas: top docentes con más ausencias */
 export class AlertasAusenciaDocenteQueryDto extends FormatQueryDto {
     @IsDateString()
     fecha_inicio!: string;
@@ -97,7 +179,6 @@ export class AlertasAusenciaDocenteQueryDto extends FormatQueryDto {
     limit?: number;
 }
 
-/** Horarios del día para tomar asistencia */
 export class HorariosDiaQueryDto {
     @IsDateString()
     fecha!: string;
