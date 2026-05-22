@@ -1,53 +1,87 @@
 import {
-    Injectable, NotFoundException, ForbiddenException,
+    Injectable, NotFoundException, ForbiddenException, ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Course } from './entities/course.entity.js';
 import { Enrollment } from './entities/enrollment.entity.js';
-import { CURSOS_POR_GRADO, COLORES_CURSOS } from '../academic/course-template.js';
+import { CourseCatalog } from './entities/course-catalog.entity.js';
+import { COLORES_SUGERIDOS } from './course-colors.js';
 
 @Injectable()
 export class CoursesService {
     constructor(
-        @InjectRepository(Course) private readonly courseRepo: Repository<Course>,
-        @InjectRepository(Enrollment) private readonly enrollmentRepo: Repository<Enrollment>,
+        @InjectRepository(Course)
+        private readonly courseRepo: Repository<Course>,
+        @InjectRepository(Enrollment)
+        private readonly enrollmentRepo: Repository<Enrollment>,
+        @InjectRepository(CourseCatalog)
+        private readonly catalogRepo: Repository<CourseCatalog>,
         private readonly dataSource: DataSource,
     ) { }
 
-    // ── Listas ────────────────────────────────────────────────
+    // ── Catálogo ──────────────────────────────────────────────
 
-    async findMyCourses(userId: string, rol: string, seccionId?: string, periodoId?: string) {
+    async findCatalog() {
+        return this.catalogRepo.find({
+            where: { activo: true },
+            order: { nombre: 'ASC' },
+        });
+    }
+
+    async createCatalogItem(dto: { nombre: string; area?: string; color?: string }) {
+        const exists = await this.catalogRepo.findOne({
+            where: { nombre: dto.nombre.trim() },
+        });
+        if (exists) throw new ConflictException(`El curso "${dto.nombre}" ya existe en el catálogo`);
+
+        const item = this.catalogRepo.create({
+            nombre: dto.nombre.trim(),
+            area: dto.area?.trim() ?? null,
+            color: dto.color ?? '#1976d2',
+        });
+        return this.catalogRepo.save(item);
+    }
+
+    async updateCatalogItem(
+        id: string,
+        dto: Partial<{ nombre: string; area: string; color: string; activo: boolean }>,
+    ) {
+        const item = await this.catalogRepo.findOne({ where: { id } });
+        if (!item) throw new NotFoundException(`Curso de catálogo ${id} no encontrado`);
+        Object.assign(item, dto);
+        return this.catalogRepo.save(item);
+    }
+
+    // ── Colores sugeridos ─────────────────────────────────────
+
+    getAvailableColors() {
+        return COLORES_SUGERIDOS;
+    }
+
+    // ── Cursos ────────────────────────────────────────────────
+
+    async findMyCourses(userId: string, rol: string, seccionId?: string, anio?: number) {
+        const anioActual = anio ?? new Date().getFullYear();
+
         if (rol === 'docente') {
-            const [periodoActivo] = await this.dataSource.query<{ anio: number }[]>(
-                `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
-            );
-            const anio = periodoActivo?.anio ?? new Date().getFullYear();
-
             return this.courseRepo
                 .createQueryBuilder('c')
                 .leftJoinAndSelect('c.seccion', 's')
                 .leftJoinAndSelect('s.grado', 'g')
-                .leftJoinAndSelect('c.periodo', 'p')
+                .leftJoinAndSelect('c.catalogo', 'cat')
                 .where('c.docente_id = :userId', { userId })
                 .andWhere('c.activo = true')
-                .andWhere('p.anio = :anio', { anio })
+                .andWhere('c.anio = :anio', { anio: anioActual })
                 .orderBy('c.nombre', 'ASC')
                 .getMany();
         }
 
         if (rol === 'alumno') {
-            // ── CAMBIO: Enrollment ya no tiene periodo_id, busca por anio ──
-            const [periodoActivo] = await this.dataSource.query<{ id: string; anio: number }[]>(
-                `SELECT id, anio FROM periodos WHERE activo = TRUE LIMIT 1`,
-            );
-            if (!periodoActivo) return [];
-
             const enrollments = await this.dataSource.query<{ seccion_id: string }[]>(
                 `SELECT seccion_id FROM matriculas
-                 WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE
-                 LIMIT 10`,
-                [userId, periodoActivo.anio],
+                 WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE`,
+                [userId, anioActual],
             );
             if (!enrollments.length) return [];
 
@@ -56,10 +90,10 @@ export class CoursesService {
                 .createQueryBuilder('c')
                 .leftJoinAndSelect('c.seccion', 's')
                 .leftJoinAndSelect('s.grado', 'g')
-                .leftJoinAndSelect('c.periodo', 'p')
+                .leftJoinAndSelect('c.catalogo', 'cat')
                 .leftJoinAndSelect('c.docente', 'd')
                 .where('c.seccion_id IN (:...ids)', { ids: seccionIds })
-                .andWhere('c.periodo_id = :pid', { pid: periodoActivo.id })
+                .andWhere('c.anio = :anio', { anio: anioActual })
                 .andWhere('c.activo = true')
                 .orderBy('c.nombre', 'ASC')
                 .getMany();
@@ -70,12 +104,12 @@ export class CoursesService {
             .createQueryBuilder('c')
             .leftJoinAndSelect('c.seccion', 's')
             .leftJoinAndSelect('s.grado', 'g')
-            .leftJoinAndSelect('c.periodo', 'p')
+            .leftJoinAndSelect('c.catalogo', 'cat')
             .leftJoinAndSelect('c.docente', 'd')
-            .where('c.activo = true');
+            .where('c.activo = true')
+            .andWhere('c.anio = :anio', { anio: anioActual });
 
         if (seccionId) query.andWhere('c.seccion_id = :seccionId', { seccionId });
-        if (periodoId) query.andWhere('c.periodo_id = :periodoId', { periodoId });
 
         return query.orderBy('c.nombre', 'ASC').getMany();
     }
@@ -83,36 +117,40 @@ export class CoursesService {
     async findOne(id: string) {
         const course = await this.courseRepo.findOne({
             where: { id, activo: true },
-            relations: ['seccion', 'seccion.grado', 'periodo', 'docente'],
+            relations: ['seccion', 'seccion.grado', 'catalogo', 'docente'],
         });
         if (!course) throw new NotFoundException(`Curso ${id} no encontrado`);
         return course;
     }
 
-    // ── CRUD ──────────────────────────────────────────────────
-
     async create(dto: {
-        nombre: string;
+        catalogo_id: string;
         descripcion?: string;
         docente_id?: string;
         seccion_id: string;
-        periodo_id: string;
+        anio: number;
         color?: string;
     }) {
+        const catalogo = await this.catalogRepo.findOne({
+            where: { id: dto.catalogo_id, activo: true },
+        });
+        if (!catalogo) throw new NotFoundException(`Curso de catálogo ${dto.catalogo_id} no encontrado`);
+
         const course = this.courseRepo.create({
-            nombre: dto.nombre.trim(),
+            nombre: catalogo.nombre,
+            catalogo_id: dto.catalogo_id,
             descripcion: dto.descripcion ?? null,
             docente_id: dto.docente_id ?? null,
             seccion_id: dto.seccion_id,
-            periodo_id: dto.periodo_id,
-            color: dto.color ?? '#6B7280',
+            anio: dto.anio,
+            color: dto.color ?? catalogo.color,
         });
         return this.courseRepo.save(course);
     }
 
     async update(
         id: string, docenteId: string, rol: string,
-        dto: Partial<{ nombre: string; descripcion: string; activo: boolean }>,
+        dto: Partial<{ descripcion: string; activo: boolean; color: string }>,
     ) {
         const course = await this.courseRepo.findOne({ where: { id } });
         if (!course) throw new NotFoundException(`Curso ${id} no encontrado`);
@@ -146,63 +184,10 @@ export class CoursesService {
         };
     }
 
-    // ── Generador desde plantilla CNEB ────────────────────────
-
-    async generateCoursesFromTemplate(seccionId: string, periodoId: string) {
-        const [seccion] = await this.dataSource.query(
-            `SELECT s.id, s.nombre, g.nombre AS grado, g.orden
-               FROM secciones s
-               JOIN grados g ON g.id = s.grado_id
-              WHERE s.id = $1`,
-            [seccionId],
-        );
-        if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
-
-        const plantilla = CURSOS_POR_GRADO[seccion.orden] ?? Object.values(CURSOS_POR_GRADO)[0];
-        const existentes = await this.dataSource.query(
-            `SELECT nombre FROM cursos WHERE seccion_id = $1 AND periodo_id = $2`,
-            [seccionId, periodoId],
-        );
-        const nombresExistentes = new Set(existentes.map((c: { nombre: string }) => c.nombre));
-
-        let creados = 0, omitidos = 0;
-        for (const nombreCurso of plantilla) {
-            if (nombresExistentes.has(nombreCurso)) { omitidos++; continue; }
-            await this.dataSource.query(
-                `INSERT INTO cursos (nombre, seccion_id, periodo_id, color, activo, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, true, NOW(), NOW())`,
-                [nombreCurso, seccionId, periodoId, COLORES_CURSOS[nombreCurso] ?? '#6B7280'],
-            );
-            creados++;
-        }
-
-        return {
-            grado: seccion.grado,
-            seccion: seccion.nombre,
-            total_plantilla: plantilla.length,
-            creados, omitidos,
-            mensaje: `${creados} cursos creados, ${omitidos} ya existían`,
-        };
-    }
-
     // ── Matrículas ────────────────────────────────────────────
 
-    /**
-     * Matricula a un alumno en una sección para un AÑO dado.
-     * La matrícula es anual — un alumno solo puede estar en una sección por año.
-     * El periodoId recibido es el UUID del periodo activo, del cual extraemos el año.
-     */
-    async enrollStudent(alumnoId: string, seccionId: string, periodoId: string) {
-        // Obtener el año del periodo
-        const [periodo] = await this.dataSource.query<{ anio: number }[]>(
-            `SELECT anio FROM periodos WHERE id = $1`,
-            [periodoId],
-        );
-        if (!periodo) throw new NotFoundException(`Periodo ${periodoId} no encontrado`);
-        const anio = periodo.anio;
-
+    async enrollStudent(alumnoId: string, seccionId: string, anio: number) {
         return this.dataSource.transaction(async (manager) => {
-            // 1) Desactivar matrículas del alumno en otras secciones del mismo año
             await manager.query(
                 `UPDATE matriculas
                  SET activo = FALSE
@@ -210,18 +195,17 @@ export class CoursesService {
                 [alumnoId, anio, seccionId],
             );
 
-            // 2) Buscar matrícula existente en esta sección/año
             const [existing] = await manager.query<{ id: string; activo: boolean }[]>(
                 `SELECT id, activo FROM matriculas
-                 WHERE alumno_id = $1 AND seccion_id = $2 AND anio = $3`,
-                [alumnoId, seccionId, anio],
+                 WHERE alumno_id = $1 AND anio = $2`,
+                [alumnoId, anio],
             );
 
             if (existing) {
                 if (!existing.activo) {
                     await manager.query(
-                        `UPDATE matriculas SET activo = TRUE WHERE id = $1`,
-                        [existing.id],
+                        `UPDATE matriculas SET activo = TRUE, seccion_id = $1 WHERE id = $2`,
+                        [seccionId, existing.id],
                     );
                 }
                 const [row] = await manager.query(
@@ -230,7 +214,6 @@ export class CoursesService {
                 return row;
             }
 
-            // 3) Crear nueva matrícula
             const [created] = await manager.query(
                 `INSERT INTO matriculas (alumno_id, seccion_id, anio, activo, fecha_matricula)
                  VALUES ($1, $2, $3, TRUE, CURRENT_DATE)
@@ -242,8 +225,8 @@ export class CoursesService {
     }
 
     async unenrollStudent(enrollmentId: string) {
-        const [enrollment] = await this.dataSource.query<{ id: string; activo: boolean }[]>(
-            `SELECT id, activo FROM matriculas WHERE id = $1 AND activo = TRUE`,
+        const [enrollment] = await this.dataSource.query<{ id: string }[]>(
+            `SELECT id FROM matriculas WHERE id = $1 AND activo = TRUE`,
             [enrollmentId],
         );
         if (!enrollment) throw new NotFoundException(`Matrícula ${enrollmentId} no encontrada`);
@@ -255,14 +238,7 @@ export class CoursesService {
         return { message: 'Alumno retirado de la sección' };
     }
 
-    /**
-     * Lista los alumnos matriculados activos en una sección (año actual o del periodo activo).
-     */
-    async getEnrollmentsBySeccion(
-        seccionId: string,
-        caller?: { id: string; rol: string },
-    ) {
-        // Verificar que el alumno esté en esta sección si el caller es alumno
+    async getEnrollmentsBySeccion(seccionId: string, caller?: { id: string; rol: string }) {
         if (caller?.rol === 'alumno') {
             const anioActual = new Date().getFullYear();
             const [matriculado] = await this.dataSource.query(
@@ -270,17 +246,10 @@ export class CoursesService {
                  WHERE seccion_id = $1 AND alumno_id = $2 AND anio = $3 AND activo = TRUE`,
                 [seccionId, caller.id, anioActual],
             );
-            if (!matriculado) {
-                throw new ForbiddenException('No estás matriculado en esta sección');
-            }
+            if (!matriculado) throw new ForbiddenException('No estás matriculado en esta sección');
         }
 
-        // Obtener año del periodo activo
-        const [periodoActivo] = await this.dataSource.query<{ anio: number }[]>(
-            `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
-        );
-        const anio = periodoActivo?.anio ?? new Date().getFullYear();
-
+        const anio = new Date().getFullYear();
         const rows = await this.dataSource.query(
             `SELECT
                 m.id, m.activo, m.fecha_matricula, m.anio,
@@ -294,10 +263,7 @@ export class CoursesService {
             [seccionId, anio],
         );
 
-        if (caller?.rol === 'alumno') {
-            return rows.map((r: any) => ({ ...r, email: null }));
-        }
-
+        if (caller?.rol === 'alumno') return rows.map((r: any) => ({ ...r, email: null }));
         return rows;
     }
 }

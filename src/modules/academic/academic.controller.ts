@@ -56,6 +56,14 @@ export class AcademicController {
             body.capacidad,
         );
     }
+    @Patch('secciones/:id')
+    @Roles('admin')
+    updateSeccion(
+        @Param('id', ParseUUIDPipe) seccionId: string,
+        @Body() body: { nombre?: string; capacidad?: number },
+    ) {
+        return this.academicService.updateSeccion(seccionId, body.nombre, body.capacidad);
+    }
 
     @Patch('secciones/:id/tutor')
     @Roles('admin')

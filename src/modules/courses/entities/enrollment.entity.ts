@@ -4,7 +4,6 @@ import {
 } from 'typeorm';
 import { Alumno } from '../../users/entities/alumno.entity.js';
 import { Section } from '../../academic/entities/section.entity.js';
-import { Period } from '../../academic/entities/period.entity.js';
 
 @Entity('matriculas')
 export class Enrollment {
@@ -25,12 +24,8 @@ export class Enrollment {
     @JoinColumn({ name: 'seccion_id' })
     seccion: Section;
 
-    @Column({ name: 'periodo_id', type: 'uuid' })
-    periodo_id: string;
-
-    @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
-    @JoinColumn({ name: 'periodo_id' })
-    periodo: Period;
+    @Column({ type: 'smallint' })
+    anio: number;
 
     @Column({ default: true })
     activo: boolean;

@@ -9,12 +9,6 @@ import { CreateGradeDto } from './dto/create-grade.dto.js';
 import { UpdateGradeDto } from './dto/update-grade.dto.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 
-/**
- * Guard para parámetros que deben ser UUID. El frontend a veces manda
- * periodos legacy con `"1"` (de cuando periodo era integer) y al pasarlos
- * crudos a Postgres tira `invalid input syntax for type uuid`. En esos
- * casos preferimos caer al valor por defecto en vez de devolver 500.
- */
 const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value: unknown): value is string {
@@ -28,10 +22,6 @@ export class GradesService {
         private readonly gradeRepo: Repository<Grade>,
         private readonly dataSource: DataSource,
     ) { }
-
-    // ── Auth helpers ──────────────────────────────────
-
-    /** El docente sólo escribe en cursos suyos. Admin puede todo. */
     private async assertCanWriteCurso(
         cursoId: string,
         user: AuthUser,
@@ -221,60 +211,76 @@ export class GradesService {
         cursoId: string, user: AuthUser, periodoId?: string,
     ) {
         const [curso] = await this.dataSource.query(
-            `SELECT id, periodo_id, docente_id FROM cursos WHERE id = $1`,
+            `SELECT id, anio, docente_id FROM cursos WHERE id = $1`,
             [cursoId],
         );
         if (!curso) throw new NotFoundException('Curso no encontrado');
         if (user.rol === 'docente' && curso.docente_id !== user.id) {
             throw new ForbiddenException('No eres el docente de este curso');
         }
-        // periodoId es UUID en BD. Si el frontend manda un "1" legacy o
-        // cualquier string no-UUID, en vez de explotar caemos al período
-        // del propio curso.
-        const resolvedPeriodoId = isUuid(periodoId) ? periodoId : curso.periodo_id;
+
+        // Si no viene periodoId válido, usamos el periodo activo del año del curso
+        let resolvedPeriodoId = isUuid(periodoId) ? periodoId : null;
+        if (!resolvedPeriodoId) {
+            const [periodo] = await this.dataSource.query(
+                `SELECT id FROM periodos WHERE anio = $1 AND activo = TRUE LIMIT 1`,
+                [curso.anio],
+            );
+            resolvedPeriodoId = periodo?.id ?? null;
+        }
+        if (!resolvedPeriodoId) throw new NotFoundException('No hay periodo activo para este curso');
+
         const actividades = await this.dataSource.query(`
-            SELECT
-                titulo, tipo,
-                COUNT(*)              AS total_alumnos,
-                COUNT(nota)           AS con_nota,
-                AVG(nota)::numeric(4,2) AS promedio,
-                MIN(fecha)            AS fecha,
-                MIN(created_at)       AS created_at
-            FROM notas
-            WHERE curso_id = $1 AND periodo_id = $2
-            GROUP BY titulo, tipo
-            ORDER BY MIN(created_at) ASC
-        `, [cursoId, resolvedPeriodoId]);
+        SELECT
+            titulo, tipo,
+            COUNT(*)                AS total_alumnos,
+            COUNT(nota)             AS con_nota,
+            AVG(nota)::numeric(4,2) AS promedio,
+            MIN(fecha)              AS fecha,
+            MIN(created_at)         AS created_at
+        FROM notas
+        WHERE curso_id = $1 AND periodo_id = $2
+        GROUP BY titulo, tipo
+        ORDER BY MIN(created_at) ASC
+    `, [cursoId, resolvedPeriodoId]);
+
         return { curso_id: cursoId, periodo_id: resolvedPeriodoId, actividades };
     }
 
     /** Planilla del docente: alumnos × actividades del periodo. */
     async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: string) {
         const [curso] = await this.dataSource.query(
-            `SELECT id, seccion_id, periodo_id, docente_id
-               FROM cursos WHERE id = $1`,
+            `SELECT id, seccion_id, anio, docente_id FROM cursos WHERE id = $1`,
             [cursoId],
         );
         if (!curso) throw new NotFoundException('Curso no encontrado');
         if (user.rol === 'docente' && curso.docente_id !== user.id) {
             throw new ForbiddenException('No eres el docente de este curso');
         }
-        // Mismo guard que en getActividadesByCourse: si no es UUID válido
-        // (típicamente el frontend manda "1" legacy), usamos el período del
-        // curso en vez de tirar 500.
-        const resolvedPeriodoId = isUuid(periodoId) ? periodoId : curso.periodo_id;
 
+        // Resolver periodo — fallback al activo del año del curso
+        let resolvedPeriodoId = isUuid(periodoId) ? periodoId : null;
+        if (!resolvedPeriodoId) {
+            const [periodo] = await this.dataSource.query(
+                `SELECT id FROM periodos WHERE anio = $1 AND activo = TRUE LIMIT 1`,
+                [curso.anio],
+            );
+            resolvedPeriodoId = periodo?.id ?? null;
+        }
+        if (!resolvedPeriodoId) throw new NotFoundException('No hay periodo activo para este curso');
+
+        // Alumnos matriculados — usa anio (matriculas no tiene periodo_id)
         const alumnos = await this.dataSource.query(`
-            SELECT a.id AS alumno_id, a.codigo_estudiante,
-                   a.nombre, a.apellido_paterno, a.apellido_materno
-            FROM matriculas m
-            JOIN alumnos a  ON a.id  = m.alumno_id
-            JOIN cuentas ct ON ct.id = a.id AND ct.activo = true
-            WHERE m.seccion_id = $1
-              AND m.periodo_id = $2
-              AND m.activo     = true
-            ORDER BY a.apellido_paterno, a.apellido_materno NULLS LAST, a.nombre
-        `, [curso.seccion_id, resolvedPeriodoId]);
+        SELECT a.id AS alumno_id, a.codigo_estudiante,
+               a.nombre, a.apellido_paterno, a.apellido_materno
+        FROM matriculas m
+        JOIN alumnos  a  ON a.id  = m.alumno_id
+        JOIN cuentas  ct ON ct.id = a.id AND ct.activo = true
+        WHERE m.seccion_id = $1
+          AND m.anio       = $2
+          AND m.activo     = true
+        ORDER BY a.apellido_paterno, a.apellido_materno NULLS LAST, a.nombre
+    `, [curso.seccion_id, curso.anio]);
 
         const notas = await this.gradeRepo
             .createQueryBuilder('n')
@@ -295,10 +301,10 @@ export class GradesService {
         const actividades = [...actividadesMap.values()];
 
         const filas = alumnos.map((a: any) => {
-            const notasAlumno = notas.filter((n) => n.alumno_id === a.alumno_id);
+            const notasAlumno = notas.filter(n => n.alumno_id === a.alumno_id);
             const porActividad: Record<string, any> = {};
             for (const act of actividades) {
-                const n = notasAlumno.find((x) => x.titulo === act.titulo);
+                const n = notasAlumno.find(x => x.titulo === act.titulo);
                 porActividad[act.titulo] = n
                     ? { id: n.id, nota: n.nota, observaciones: n.observaciones, fecha: n.fecha }
                     : null;
@@ -312,13 +318,12 @@ export class GradesService {
                     apellido_materno: a.apellido_materno,
                 },
                 notas: porActividad,
-                promedio: this.promedio(notasAlumno.map((n) => n.nota)),
+                promedio: this.promedio(notasAlumno.map(n => n.nota)),
             };
         });
 
         return { curso_id: cursoId, periodo_id: resolvedPeriodoId, actividades, filas };
     }
-
     private promedio(valores: (number | null)[]): number | null {
         const limpios = valores.filter((v): v is number => v != null);
         if (limpios.length === 0) return null;

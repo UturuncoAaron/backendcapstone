@@ -118,9 +118,11 @@ export class UsersController {
     // ══════════════════════════════════════════════════════════════
 
     @Get('alumnos/search')
-    @Roles('admin', 'auxiliar')   // ← auxiliar puede buscar alumnos
-    searchAlumnos(@Query('q') q: string) {
-        return this.usersService.searchAlumnos(q);
+    searchAlumnos(
+        @Query('q') q: string,
+        @Query('anio') anio?: string,
+    ) {
+        return this.usersService.searchAlumnos(q, anio ? parseInt(anio, 10) : undefined);
     }
 
     @Get('padres/search')

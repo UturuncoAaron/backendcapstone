@@ -15,7 +15,7 @@ export type InformeTipo = typeof INFORME_TIPOS[number];
 export const INFORME_ESTADOS = ['borrador', 'finalizado'] as const;
 export type InformeEstado = typeof INFORME_ESTADOS[number];
 
-export const ARCHIVO_CATEGORIAS = ['ficha', 'test'] as const;
+export const ARCHIVO_CATEGORIAS = ['ficha', 'test', 'informe'] as const;
 export type ArchivoCategoria = typeof ARCHIVO_CATEGORIAS[number];
 
 export const WEEK_DAYS = [

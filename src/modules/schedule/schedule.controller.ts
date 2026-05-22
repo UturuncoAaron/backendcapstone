@@ -16,21 +16,12 @@ import type { AuthUser } from '../auth/types/auth-user.js';
 export class ScheduleController {
     constructor(private readonly scheduleService: ScheduleService) { }
 
-    /**
-     * GET /api/schedule/me
-     * Horario del usuario autenticado (alumno: sección matriculada
-     * en el periodo activo).
-     */
     @Get('me')
     @Roles('alumno')
     getMyHorario(@CurrentUser() user: AuthUser) {
         return this.scheduleService.getHorarioForAlumno(user.id);
     }
 
-    /**
-     * GET /api/schedule/alumno/:alumnoId
-     * Padre/admin consultan el horario del alumno por ID (con verificación de vínculo).
-     */
     @Get('alumno/:alumnoId')
     @Roles('padre', 'admin')
     async getHorarioAlumno(
@@ -44,25 +35,15 @@ export class ScheduleController {
         return this.scheduleService.getHorarioForAlumno(alumnoId);
     }
 
-    /**
-     * GET /api/schedule/section/:seccionId/period/:periodoId
-     * Returns all courses of a section with their time slots.
-     */
-    @Get('section/:seccionId/period/:periodoId')
+    @Get('section/:seccionId')
     @Roles('admin', 'docente')
     getBySection(
         @Param('seccionId', ParseUUIDPipe) seccionId: string,
-        @Param('periodoId', ParseUUIDPipe) periodoId: string,
+        @Query('anio') anio?: string,
     ) {
-        return this.scheduleService.getHorarioBySeccion(seccionId, periodoId);
+        const anioFinal = anio ? +anio : new Date().getFullYear();
+        return this.scheduleService.getHorarioBySeccion(seccionId, anioFinal);
     }
-
-    /**
-     * GET /api/schedule/hoy?dia=lunes
-     * Devuelve los horarios del día con info de docente y curso.
-     * Usado por el auxiliar para registrar asistencia de docentes.
-     * Si no se envía ?dia=, se infiere automáticamente el día actual del servidor.
-     */
     @Get('hoy')
     @Roles('auxiliar', 'admin')
     getHorarioHoy(@Query('dia') dia?: string) {

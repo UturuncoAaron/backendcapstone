@@ -401,7 +401,7 @@ export class AcademicYearService {
         await em.query(
           `INSERT INTO matriculas (alumno_id, seccion_id, anio, activo, condicion_final)
          VALUES ($1, $2, $3, TRUE, 'pendiente')
-         ON CONFLICT (alumno_id, seccion_id, anio) DO NOTHING`,
+         ON CONFLICT (alumno_id, anio) DO NOTHING`,
           [r.alumno_id, r.seccion_id, anio + 1],
         );
         await em.query(`UPDATE matriculas SET activo = FALSE WHERE id = $1`, [r.matricula_id]);
@@ -496,7 +496,7 @@ export class AcademicYearService {
       const result = await em.query<{ id: string }[]>(
         `INSERT INTO matriculas (alumno_id, seccion_id, anio, activo, condicion_final)
          VALUES ($1, $2, $3, TRUE, 'pendiente')
-         ON CONFLICT (alumno_id, seccion_id, anio) DO NOTHING
+         ON CONFLICT (alumno_id, anio) DO NOTHING
          RETURNING id`,
         [m.alumno_id, destRows[0].id, anio + 1],
       );

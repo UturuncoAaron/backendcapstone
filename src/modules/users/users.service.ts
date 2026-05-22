@@ -811,29 +811,21 @@ export class UsersService {
       return item;
     });
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // BÚSQUEDAS (autocomplete)
-  // ══════════════════════════════════════════════════════════════════════════
-
-  async searchAlumnos(query: string): Promise<AlumnoSearchResult[]> {
+  async searchAlumnos(query: string, anio?: number): Promise<AlumnoSearchResult[]> {
     if (!query || query.trim().length < 2) return [];
 
-    const SUB_MATRICULA = `(
-    SELECT DISTINCT ON (mm.alumno_id)
-           mm.alumno_id,
-           mm.seccion_id
-      FROM matriculas mm
-     WHERE mm.activo = true
-     ORDER BY mm.alumno_id, mm.created_at DESC
-  )`;
+    // Año a usar para el filtro de matrícula — si no viene, usa el periodo activo
+    let anioFinal = anio;
+    if (!anioFinal) {
+      const [periodo] = await this.dataSource.query<{ anio: number }[]>(
+        `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
+      );
+      anioFinal = periodo?.anio ?? new Date().getFullYear();
+    }
 
     const rows: AlumnoSearchRow[] = await this.alumnoRepo
       .createQueryBuilder('a')
-      .innerJoin('cuentas', 'c', 'c.id = a.id')
-      .leftJoin(SUB_MATRICULA, 'm', 'm.alumno_id = a.id')
-      .leftJoin('secciones', 's', 's.id = m.seccion_id')
-      .leftJoin('grados', 'g', 'g.id = s.grado_id')
+      .innerJoin('cuentas', 'c', 'c.id = a.id AND c.activo = TRUE')
       .leftJoin(
         (qb) =>
           qb
@@ -866,10 +858,25 @@ export class UsersService {
         'a.inclusivo         AS inclusivo',
         'c.numero_documento  AS numero_documento',
         'c.codigo_acceso     AS codigo_acceso',
-        'g.nombre            AS grado',
-        'g.id                AS grado_id',
-        's.nombre            AS seccion',
-        's.id                AS seccion_id',
+        // Grado/sección actuales (año corriente, no el que se busca matricular)
+        // Solo informativo para que el admin sepa dónde está el alumno hoy
+        `(SELECT g.nombre FROM matriculas mx
+          JOIN secciones sx ON sx.id = mx.seccion_id
+          JOIN grados    g  ON g.id  = sx.grado_id
+         WHERE mx.alumno_id = a.id AND mx.activo = TRUE
+         ORDER BY mx.created_at DESC LIMIT 1) AS grado`,
+        `(SELECT gx.id FROM matriculas mx
+          JOIN secciones sx ON sx.id = mx.seccion_id
+          JOIN grados    gx ON gx.id = sx.grado_id
+         WHERE mx.alumno_id = a.id AND mx.activo = TRUE
+         ORDER BY mx.created_at DESC LIMIT 1) AS grado_id`,
+        `(SELECT sx.nombre FROM matriculas mx
+          JOIN secciones sx ON sx.id = mx.seccion_id
+         WHERE mx.alumno_id = a.id AND mx.activo = TRUE
+         ORDER BY mx.created_at DESC LIMIT 1) AS seccion`,
+        `(SELECT mx.seccion_id FROM matriculas mx
+         WHERE mx.alumno_id = a.id AND mx.activo = TRUE
+         ORDER BY mx.created_at DESC LIMIT 1) AS seccion_id`,
         'padre.padre_id               AS padre_id',
         'padre.padre_nombre           AS padre_nombre',
         'padre.padre_apellido_paterno AS padre_apellido_paterno',
@@ -877,16 +884,26 @@ export class UsersService {
         'padre.padre_relacion         AS padre_relacion',
       ])
       .where(
-        `a.nombre ILIKE :q
+        `(a.nombre           ILIKE :q
         OR a.apellido_paterno ILIKE :q
         OR c.numero_documento ILIKE :q
         OR a.codigo_estudiante ILIKE :q
-        OR c.codigo_acceso ILIKE :q`,
+        OR c.codigo_acceso ILIKE :q)`,
         { q: `%${query.trim()}%` },
+      )
+      // Excluir alumnos que ya tienen matrícula activa en el año solicitado
+      .andWhere(
+        `NOT EXISTS (
+        SELECT 1 FROM matriculas mx
+        WHERE mx.alumno_id = a.id
+          AND mx.anio      = :anio
+          AND mx.activo    = TRUE
+      )`,
+        { anio: anioFinal },
       )
       .orderBy('a.apellido_paterno', 'ASC')
       .addOrderBy('a.nombre', 'ASC')
-      .limit(10)
+      .limit(20)
       .getRawMany();
 
     return rows.map(
@@ -900,10 +917,10 @@ export class UsersService {
         numero_documento: r.numero_documento,
         codigo_acceso: r.codigo_acceso,
         inclusivo: r.inclusivo === true,
-        grado: r.grado,
-        grado_id: r.grado_id,
-        seccion: r.seccion,
-        seccion_id: r.seccion_id,
+        grado: r.grado ?? null,
+        grado_id: r.grado_id ?? null,
+        seccion: r.seccion ?? null,
+        seccion_id: r.seccion_id ?? null,
         padre:
           r.padre_id && r.padre_nombre && r.padre_apellido_paterno
             ? {

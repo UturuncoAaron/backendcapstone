@@ -83,23 +83,7 @@ export class AcademicService {
         if (exists) throw new ConflictException(`Sección ${nombre} ya existe en ese grado`);
 
         const seccion = this.seccionRepo.create({ grado_id: gradoId, nombre, capacidad });
-        const saved = await this.seccionRepo.save(seccion);
-
-        const periodoActivo = await this.periodoRepo.findOne({ where: { activo: true } });
-
-        const cursosGenerados = periodoActivo
-            ? await this.coursesService.generateCoursesFromTemplate(
-                saved.id as any,
-                periodoActivo.id as any,
-            )
-            : null;
-
-        return {
-            seccion: saved,
-            cursos: cursosGenerados ?? {
-                mensaje: 'No hay periodo activo — cursos no generados.',
-            },
-        };
+        return this.seccionRepo.save(seccion);
     }
 
     async asignarTutor(seccionId: string, docenteId: string | null, force = false) {
@@ -342,4 +326,35 @@ export class AcademicService {
             grado_orden: r.grado_orden,
         }));
     }
+    async updateSeccion(seccionId: string, nombre?: string, capacidad?: number) {
+        const seccion = await this.seccionRepo.findOne({ where: { id: seccionId } });
+        if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+
+        if (nombre !== undefined) {
+            const existe = await this.seccionRepo.findOne({
+                where: { grado_id: seccion.grado_id, nombre },
+            });
+            if (existe && existe.id !== seccionId)
+                throw new ConflictException(`Ya existe una sección "${nombre}" en ese grado`);
+            seccion.nombre = nombre;
+        }
+
+        if (capacidad !== undefined) {
+            const ocupacion = await this.dataSource.query<{ count: string }[]>(
+                `SELECT COUNT(*)::text AS count FROM matriculas
+             WHERE seccion_id = $1 AND activo = TRUE`,
+                [seccionId],
+            );
+            if (capacidad < Number(ocupacion[0].count))
+                throw new BadRequestException(
+                    `La capacidad no puede ser menor a los alumnos matriculados (${ocupacion[0].count})`,
+                );
+            seccion.capacidad = capacidad;
+        }
+
+        await this.seccionRepo.save(seccion);
+        return this.seccionRepo.findOne({ where: { id: seccionId }, relations: ['grado', 'tutor'] });
+    }
+
+
 }

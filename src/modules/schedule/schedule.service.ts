@@ -13,16 +13,16 @@ export class ScheduleService {
     ) { }
 
     // ── GET schedule for a section ────────────────────────────────
-    async getHorarioBySeccion(seccionId: string, periodoId: string) {
+    async getHorarioBySeccion(seccionId: string, anio: number) {
         const courses = await this.db.query<{ id: string; nombre: string; color: string }[]>(
             `SELECT id, nombre, color
-             FROM cursos
-             WHERE seccion_id = $1
-               AND periodo_id = $2
-               AND activo = TRUE
-               AND docente_id IS NOT NULL
-             ORDER BY nombre`,
-            [seccionId, periodoId],
+         FROM cursos
+         WHERE seccion_id = $1
+           AND anio = $2
+           AND activo = TRUE
+           AND docente_id IS NOT NULL
+         ORDER BY nombre`,
+            [seccionId, anio],
         );
         if (!courses.length) return [];
 
@@ -51,12 +51,46 @@ export class ScheduleService {
     // ── UPSERT slots for a course (replace all) ───────────────────
     async upsertFranjasCurso(cursoId: string, slots: UpsertFranjaDto[]) {
         const [course] = await this.db.query(
-            `SELECT id, nombre FROM cursos WHERE id = $1 AND activo = TRUE`,
+            `SELECT c.id, c.nombre, c.seccion_id FROM cursos WHERE id = $1 AND activo = TRUE`,
             [cursoId],
         );
         if (!course) throw new NotFoundException(`Curso ${cursoId} no encontrado`);
 
+        // Validación interna del curso (hora_inicio < hora_fin + solapamiento propio)
         this.validateOverlap(slots);
+
+        // Validación cruzada: otros cursos de la misma sección
+        if (slots.length > 0) {
+            const diasUsados = [...new Set(slots.map(s => s.dia_semana))];
+            const otrosSlots = await this.db.query<{
+                dia_semana: string; hora_inicio: string; hora_fin: string; curso_nombre: string;
+            }[]>(
+                `SELECT h.dia_semana, h.hora_inicio, h.hora_fin, c.nombre AS curso_nombre
+               FROM horarios h
+               JOIN cursos c ON c.id = h.curso_id
+              WHERE c.seccion_id = $1
+                AND c.id <> $2
+                AND h.dia_semana = ANY($3::text[])`,
+                [course.seccion_id, cursoId, diasUsados],
+            );
+
+            for (const newSlot of slots) {
+                for (const other of otrosSlots) {
+                    if (other.dia_semana !== newSlot.dia_semana) continue;
+                    const newStart = newSlot.hora_inicio;
+                    const newEnd = newSlot.hora_fin;
+                    const othStart = other.hora_inicio.slice(0, 5);
+                    const othEnd = other.hora_fin.slice(0, 5);
+                    if (newStart < othEnd && newEnd > othStart) {
+                        throw new BadRequestException(
+                            `Solapamiento el ${newSlot.dia_semana}: ` +
+                            `"${course.nombre}" (${newStart}–${newEnd}) ` +
+                            `choca con "${other.curso_nombre}" (${othStart}–${othEnd})`,
+                        );
+                    }
+                }
+            }
+        }
 
         await this.db.transaction(async manager => {
             await manager.delete(Schedule, { curso_id: cursoId });
@@ -79,22 +113,21 @@ export class ScheduleService {
 
     // ── Horario para un alumno ────────────────────────────────────
     async getHorarioForAlumno(alumnoId: string) {
-        const periodoActivo = await this.db.query<{ id: string; anio: number }[]>(
-            `SELECT id, anio FROM periodos WHERE activo = TRUE LIMIT 1`,
+        const [periodoActivo] = await this.db.query<{ anio: number }[]>(
+            `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
         );
-        if (!periodoActivo.length) return [];
+        if (!periodoActivo) return [];
 
-        const enrollment = await this.db.query<{ seccion_id: string }[]>(
+        const [enrollment] = await this.db.query<{ seccion_id: string }[]>(
             `SELECT seccion_id FROM matriculas
-             WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE
-             LIMIT 1`,
-            [alumnoId, periodoActivo[0].anio],
+         WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE
+         LIMIT 1`,
+            [alumnoId, periodoActivo.anio],
         );
-        if (!enrollment.length) return [];
+        if (!enrollment) return [];
 
-        return this.getHorarioBySeccion(enrollment[0].seccion_id, periodoActivo[0].id);
+        return this.getHorarioBySeccion(enrollment.seccion_id, periodoActivo.anio);
     }
-
     // ── Verificación de vínculo padre-alumno ──────────────────────
     async isPadreDeAlumno(padreId: string, alumnoId: string): Promise<boolean> {
         const rows = await this.db.query(

@@ -14,7 +14,7 @@ export class PsychologyArchivo {
     studentId!: string;
 
     @Column({ type: 'varchar', length: 16 })
-    categoria!: 'ficha' | 'test';
+    categoria!: 'ficha' | 'test' | 'informe';   // ← 'informe' agregado
 
     @Column({ type: 'varchar', length: 255 })
     nombre!: string;
@@ -38,7 +38,7 @@ export class PsychologyArchivo {
     sizeBytes!: number | null;
 
     @Column({ name: 'cita_id', type: 'uuid', nullable: true, default: null })
-    citaId: string | null;
+    citaId!: string | null;
 
     @CreateDateColumn({ name: 'created_at' })
     createdAt!: Date;

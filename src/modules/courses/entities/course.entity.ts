@@ -5,7 +5,7 @@ import {
 } from 'typeorm';
 import { Docente } from '../../users/entities/docente.entity.js';
 import { Section } from '../../academic/entities/section.entity.js';
-import { Period } from '../../academic/entities/period.entity.js';
+import { CourseCatalog } from './course-catalog.entity.js';
 
 @Entity('cursos')
 export class Course {
@@ -17,6 +17,13 @@ export class Course {
 
     @Column({ type: 'text', nullable: true })
     descripcion: string | null;
+
+    @Column({ name: 'catalogo_id' })
+    catalogo_id: string;
+
+    @ManyToOne(() => CourseCatalog, { onDelete: 'RESTRICT', eager: false })
+    @JoinColumn({ name: 'catalogo_id' })
+    catalogo: CourseCatalog;
 
     @Column({ name: 'docente_id', nullable: true })
     docente_id: string | null;
@@ -32,12 +39,8 @@ export class Course {
     @JoinColumn({ name: 'seccion_id' })
     seccion: Section;
 
-    @Column({ name: 'periodo_id', type: 'uuid' })
-    periodo_id: string;
-
-    @ManyToOne(() => Period, { onDelete: 'RESTRICT' })
-    @JoinColumn({ name: 'periodo_id' })
-    periodo: Period;
+    @Column({ type: 'smallint' })
+    anio: number;
 
     @Column({ length: 7, default: '#1976d2' })
     color: string;

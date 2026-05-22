@@ -1,7 +1,6 @@
 import {
     Controller, Get, Post, Patch, Delete,
-    Body, Param, Query, ParseUUIDPipe,
-    UseGuards,
+    Body, Param, Query, ParseUUIDPipe, UseGuards,
 } from '@nestjs/common';
 import { CoursesService } from './courses.service.js';
 import { MaterialsService } from '../materials/materials.service.js';
@@ -20,28 +19,59 @@ export class CoursesController {
         private readonly materialsService: MaterialsService,
     ) { }
 
+    // GET /api/courses/colors
+    @Get('colors')
+    @Roles('admin', 'docente')
+    getCourseColors() {
+        return this.coursesService.getAvailableColors();
+    }
+
+    // GET /api/courses/catalog
+    @Get('catalog')
+    @Roles('admin', 'docente')
+    getCatalog() {
+        return this.coursesService.findCatalog();
+    }
+
+    // POST /api/courses/catalog
+    @Post('catalog')
+    @Roles('admin')
+    createCatalogItem(@Body() dto: { nombre: string; area?: string; color?: string }) {
+        return this.coursesService.createCatalogItem(dto);
+    }
+
+    // PATCH /api/courses/catalog/:id
+    @Patch('catalog/:id')
+    @Roles('admin')
+    updateCatalogItem(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: { nombre?: string; area?: string; color?: string; activo?: boolean },
+    ) {
+        return this.coursesService.updateCatalogItem(id, dto);
+    }
+
     // GET /api/courses
     @Get()
     @Roles('alumno', 'docente', 'admin')
     findMyCourses(
         @CurrentUser() user: AuthUser,
         @Query('seccion_id') seccionId?: string,
-        @Query('periodo_id') periodoId?: string,
+        @Query('anio') anio?: string,
     ) {
-        return this.coursesService.findMyCourses(user.id, user.rol, seccionId, periodoId);
+        return this.coursesService.findMyCourses(
+            user.id, user.rol, seccionId, anio ? +anio : undefined,
+        );
     }
 
     // POST /api/courses
-    // periodo_id es UUID (ver schema), no entero. La firma anterior decía `number`
-    // pero Postgres lo recibía como string y funcionaba por coerción del driver.
     @Post()
     @Roles('admin')
     create(@Body() dto: {
-        nombre: string;
+        catalogo_id: string;
         descripcion?: string;
         docente_id?: string;
         seccion_id: string;
-        periodo_id: string;
+        anio: number;
         color?: string;
     }) {
         return this.coursesService.create(dto);
@@ -50,33 +80,18 @@ export class CoursesController {
     // POST /api/courses/enroll
     @Post('enroll')
     @Roles('admin')
-    enroll(@Body() dto: { alumnoId: string; seccionId: string; periodoId: string }) {
-        return this.coursesService.enrollStudent(dto.alumnoId, dto.seccionId, dto.periodoId);
+    enroll(@Body() dto: { alumnoId: string; seccionId: string; anio: number }) {
+        return this.coursesService.enrollStudent(dto.alumnoId, dto.seccionId, dto.anio);
     }
 
-    // DELETE /api/courses/enroll/:id — retirar alumno de sección
+    // DELETE /api/courses/enroll/:id
     @Delete('enroll/:id')
     @Roles('admin')
     unenroll(@Param('id', ParseUUIDPipe) id: string) {
         return this.coursesService.unenrollStudent(id);
     }
 
-    // POST /api/courses/generate/:seccionId/:periodoId
-    // periodoId es UUID. Antes usaba ParseIntPipe → 400 desde el frontend
-    // ("Validation failed (numeric string is expected)") y por eso el editor
-    // de horario reportaba "no deja agregar/generar cursos".
-    @Post('generate/:seccionId/:periodoId')
-    @Roles('admin')
-    generateFromTemplate(
-        @Param('seccionId', ParseUUIDPipe) seccionId: string,
-        @Param('periodoId', ParseUUIDPipe) periodoId: string,
-    ) {
-        return this.coursesService.generateCoursesFromTemplate(seccionId, periodoId);
-    }
-
     // GET /api/courses/seccion/:id/students
-    // Alumnos pueden ver compañeros de su propia sección (sin email, lo redacta el service).
-    // El service valida que el alumno esté matriculado antes de devolver datos.
     @Get('seccion/:id/students')
     @Roles('alumno', 'docente', 'admin')
     getStudents(
@@ -93,7 +108,7 @@ export class CoursesController {
         return this.coursesService.findOne(id);
     }
 
-    // GET /api/courses/:id/progress (alumno)
+    // GET /api/courses/:id/progress
     @Get(':id/progress')
     @Roles('alumno')
     getProgress(
@@ -109,7 +124,7 @@ export class CoursesController {
     update(
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: AuthUser,
-        @Body() dto: { nombre?: string; descripcion?: string; activo?: boolean },
+        @Body() dto: { descripcion?: string; activo?: boolean; color?: string },
     ) {
         return this.coursesService.update(id, user.id, user.rol, dto);
     }
