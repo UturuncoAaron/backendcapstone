@@ -1,13 +1,6 @@
 import {
-    Controller,
-    Get,
-    Post,
-    Body,
-    Query,
-    Res,
-    UseGuards,
-    HttpCode,
-    HttpStatus,
+    Controller, Get, Post, Body, Query,
+    Res, UseGuards, HttpCode, HttpStatus,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { TeacherAttendanceService } from './teacher-attendance.service.js';
@@ -19,6 +12,7 @@ import type { AuthUser } from '../../auth/types/auth-user.js';
 import {
     RegistrarAsistenciaDocenteDto,
     RegistrarAsistenciaDocenteBulkDto,
+    RegistrarAsistenciaDiariaBulkDto,
     ReporteDiarioDocenteQueryDto,
     ReporteRangoDocenteQueryDto,
     AlertasAusenciaDocenteQueryDto,
@@ -32,7 +26,38 @@ import { buildXlsx, workbookToBuffer, buildFilename } from '../excel/excel.helpe
 export class TeacherAttendanceController {
     constructor(private readonly svc: TeacherAttendanceService) { }
 
-    // ─── Lectura previa para el auxiliar ─────────────────────────────────
+    // ─── NUEVA: Lista de docentes del día (1 fila por docente) ───────────
+
+    /**
+     * GET /reports/docentes/docentes-dia?fecha=YYYY-MM-DD
+     * Devuelve docentes con clase hoy, con primera/última clase y estado actual.
+     * Este es el endpoint que usa la nueva UI del auxiliar.
+     */
+    @Get('docentes-dia')
+    getDocentesDelDia(
+        @CurrentUser() user: AuthUser,
+        @Query() q: HorariosDiaQueryDto,
+    ) {
+        return this.svc.getDocentesDelDia(user, q.fecha);
+    }
+
+    // ─── NUEVA: Registro diario por docente ──────────────────────────────
+
+    /**
+     * POST /reports/docentes/registrar-diario
+     * Recibe el estado de cada docente UNA VEZ.
+     * El servicio distribuye automáticamente a todos sus bloques.
+     */
+    @Post('registrar-diario')
+    @HttpCode(HttpStatus.OK)
+    registrarDiario(
+        @CurrentUser() user: AuthUser,
+        @Body() dto: RegistrarAsistenciaDiariaBulkDto,
+    ) {
+        return this.svc.registrarAsistenciaDiariaBulk(user, dto);
+    }
+
+    // ─── LEGACY: endpoints anteriores (mantener para compatibilidad) ─────
 
     @Get('horarios-dia')
     getHorariosDia(
@@ -41,8 +66,6 @@ export class TeacherAttendanceController {
     ) {
         return this.svc.getHorariosDia(user, q.fecha);
     }
-
-    // ─── Escritura ────────────────────────────────────────────────────────
 
     @Post('registrar')
     @HttpCode(HttpStatus.OK)
@@ -62,7 +85,7 @@ export class TeacherAttendanceController {
         return this.svc.registrarAsistenciaBulk(user, dto);
     }
 
-    // ─── Reportes ─────────────────────────────────────────────────────────
+    // ─── REPORTES ─────────────────────────────────────────────────────────
 
     @Get('diario')
     async diario(
@@ -85,6 +108,7 @@ export class TeacherAttendanceController {
             aula: 'Aula',
             estado: 'Estado',
             hora_llegada: 'Hora llegada',
+            hora_salida_anticipada: 'Hora salida anticipada',
             tiene_justificacion: 'Justificado',
             motivo_justificacion: 'Motivo',
             hubo_reemplazo: 'Con reemplazo',
@@ -111,6 +135,7 @@ export class TeacherAttendanceController {
             tardanzas: 'Tardanzas',
             ausentes: 'Ausentes',
             justificadas: 'Justificadas',
+            salidas_anticipadas: 'Salidas anticipadas',
             porcentaje_asistencia: '% Asistencia',
         });
         return this.sendXlsx(res, wb, `resumen_docentes_${q.fecha_inicio}_${q.fecha_fin}`);
@@ -124,8 +149,6 @@ export class TeacherAttendanceController {
         return this.svc.getAlertas(user, q.fecha_inicio, q.fecha_fin, q.limit);
     }
 
-    // ─── Privado ─────────────────────────────────────────────────────────
-
     private async sendXlsx(
         res: Response,
         wb: ReturnType<typeof buildXlsx>,
@@ -133,10 +156,7 @@ export class TeacherAttendanceController {
     ): Promise<Buffer> {
         const buf = await workbookToBuffer(wb);
         const filename = buildFilename(baseName);
-        res.setHeader(
-            'Content-Type',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        );
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         return buf;
     }
