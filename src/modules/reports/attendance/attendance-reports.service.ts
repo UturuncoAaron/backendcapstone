@@ -18,6 +18,8 @@ export class AttendanceReportsService {
   ): Promise<AsistenciaDiariaRow[]> {
     await this.assertCanViewSeccion(user, seccionId);
 
+    // matriculas ya no tiene periodo_id. Se une a periodos por año (m.anio = p.anio)
+    // y se exige que la fecha caiga dentro del rango del periodo (con su año).
     const sql = `
             SELECT
                 a.id                                AS alumno_id,
@@ -31,15 +33,15 @@ export class AttendanceReportsService {
             FROM matriculas m
             JOIN alumnos    a  ON a.id = m.alumno_id
             JOIN cuentas    cu ON cu.id = a.id
-            JOIN periodos   p  ON p.id = m.periodo_id
+            JOIN periodos   p  ON p.anio = m.anio
+                              AND p.fecha_inicio <= $2::date
+                              AND p.fecha_fin    >= $2::date
             LEFT JOIN asistencias_generales ag
                    ON ag.alumno_id = a.id
                   AND ag.seccion_id = m.seccion_id
                   AND ag.fecha = $2
             WHERE m.seccion_id = $1
               AND m.activo = true
-              AND p.fecha_inicio <= $2::date
-              AND p.fecha_fin    >= $2::date
             ORDER BY a.apellido_paterno, a.nombre
         `;
     return this.ds.query(sql, [seccionId, fecha]);
@@ -77,14 +79,14 @@ export class AttendanceReportsService {
                     )
                 END                                                 AS porcentaje_asistencia
             FROM matriculas m
+            JOIN periodos   p  ON p.id = $2 AND p.anio = m.anio
             JOIN alumnos    a  ON a.id = m.alumno_id
             JOIN cuentas    cu ON cu.id = a.id
             LEFT JOIN asistencias_generales ag
                    ON ag.alumno_id  = a.id
                   AND ag.seccion_id = m.seccion_id
-                  AND ag.periodo_id = m.periodo_id
+                  AND ag.periodo_id = $2
             WHERE m.seccion_id = $1
-              AND m.periodo_id = $2
               AND m.activo = true
             GROUP BY a.id, cu.numero_documento, a.apellido_paterno,
                      a.apellido_materno, a.nombre
@@ -118,14 +120,14 @@ export class AttendanceReportsService {
                 COUNT(*) FILTER (WHERE ag.estado = 'justificado')::int
                                                                     AS justificadas
             FROM matriculas m
+            JOIN periodos   p  ON p.id = $2 AND p.anio = m.anio
             JOIN alumnos    a  ON a.id = m.alumno_id
             JOIN cuentas    cu ON cu.id = a.id
             LEFT JOIN asistencias_generales ag
                    ON ag.alumno_id  = a.id
                   AND ag.seccion_id = m.seccion_id
-                  AND ag.periodo_id = m.periodo_id
+                  AND ag.periodo_id = $2
             WHERE m.seccion_id = $1
-              AND m.periodo_id = $2
               AND m.activo = true
             GROUP BY a.id, cu.numero_documento, a.apellido_paterno,
                      a.apellido_materno, a.nombre

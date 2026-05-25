@@ -27,6 +27,10 @@ export class ReportsService {
 
     // GET /api/admin/reports/grades — datos en JSON (para preview)
     async getGradesReport(query: QueryReportDto): Promise<GradeRow[]> {
+        // matriculas ya no tiene periodo_id (es anual). El cruce alumno×bimestre
+        // se construye partiendo de `periodos` y uniendo matrículas por año.
+        // Si no se especifica periodo ni bimestre, se asume el periodo activo
+        // para evitar producir filas de TODOS los bimestres de TODOS los años.
         const conditions: string[] = ['m.activo = true'];
         const params: any[] = [];
         let paramIndex = 1;
@@ -35,11 +39,12 @@ export class ReportsService {
             conditions.push(`p.id = $${paramIndex++}`);
             params.push(query.periodo_id);
         }
-
-        // Ahora filtramos por el bimestre del periodo, ya que notas no lo tiene
         if (query.bimestre) {
             conditions.push(`p.bimestre = $${paramIndex++}`);
             params.push(query.bimestre);
+        }
+        if (!query.periodo_id && !query.bimestre) {
+            conditions.push(`p.activo = TRUE`);
         }
 
         if (query.grado_id) {
@@ -54,7 +59,6 @@ export class ReportsService {
 
         const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-        // reports.service.ts — reemplazar el SELECT de getGradesReport
         const sql = `
             SELECT
                 a.id                    AS alumno_id,
@@ -76,21 +80,21 @@ export class ReportsService {
                     WHEN n.nota >= 11   THEN 'B'
                     ELSE                     'C'
                 END                     AS escala
-            FROM matriculas m
-            JOIN alumnos a    ON a.id = m.alumno_id
-            JOIN cuentas cu   ON cu.id = a.id
-            JOIN secciones s  ON s.id = m.seccion_id
-            JOIN grados g     ON g.id = s.grado_id
-            JOIN periodos p   ON p.id = m.periodo_id
-            LEFT JOIN cursos c ON c.seccion_id = m.seccion_id
-                            AND c.periodo_id = m.periodo_id
-                            AND c.activo = true
-            LEFT JOIN notas n  ON n.alumno_id = m.alumno_id
-                            AND n.curso_id = c.id
-                            AND n.periodo_id = m.periodo_id
+            FROM   periodos    p
+            JOIN   matriculas  m  ON m.anio = p.anio
+            JOIN   alumnos     a  ON a.id   = m.alumno_id
+            JOIN   cuentas     cu ON cu.id  = a.id
+            JOIN   secciones   s  ON s.id   = m.seccion_id
+            JOIN   grados      g  ON g.id   = s.grado_id
+            LEFT JOIN cursos   c  ON c.seccion_id = m.seccion_id
+                                 AND c.periodo_id = p.id
+                                 AND c.activo     = TRUE
+            LEFT JOIN notas    n  ON n.alumno_id  = m.alumno_id
+                                 AND n.curso_id   = c.id
+                                 AND n.periodo_id = p.id
             ${whereClause}
             ORDER BY g.orden, s.nombre, a.apellido_paterno, a.nombre, c.nombre
-                `;
+        `;
 
         return this.dataSource.query(sql, params);
     }

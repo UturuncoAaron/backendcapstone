@@ -38,10 +38,11 @@ export class ForumService {
         let params: unknown[] = [];
 
         if (rol === 'alumno') {
+            // matriculas es anual (no tiene periodo_id). Se une a periodos por año.
             courseFilter = `c.seccion_id IN (
                 SELECT m.seccion_id FROM matriculas m
-                JOIN periodos p ON p.id = m.periodo_id
-                WHERE m.alumno_id = $1 AND m.activo = TRUE AND p.activo = TRUE
+                JOIN periodos p ON p.anio = m.anio AND p.activo = TRUE
+                WHERE m.alumno_id = $1 AND m.activo = TRUE
             ) AND c.periodo_id IN (SELECT id FROM periodos WHERE activo = TRUE)`;
             params = [userId];
         } else if (rol === 'docente') {

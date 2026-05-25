@@ -32,6 +32,15 @@ export class LibretaLectura {
     @JoinColumn({ name: 'lector_id' })
     lector: Cuenta;
 
+    /** Timestamp de la PRIMERA vez que se abrió la libreta. Inmutable. */
     @CreateDateColumn({ name: 'vista_en' })
     vista_en: Date;
+
+    /** Cantidad de aperturas distintas registradas (auditoría). */
+    @Column({ name: 'veces_vista', type: 'int', default: 1 })
+    veces_vista: number;
+
+    /** Timestamp de la última apertura (se actualiza en cada `marcar-vista`). */
+    @Column({ name: 'ultima_apertura_en', type: 'timestamptz', default: () => 'NOW()' })
+    ultima_apertura_en: Date;
 }

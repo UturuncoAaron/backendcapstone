@@ -47,16 +47,16 @@ export class AcademicReportsService {
                 MIN(n.nota)                                 AS nota_min,
                 MAX(n.nota)                                 AS nota_max
             FROM matriculas m
+            JOIN periodos    p ON p.id = $2 AND p.anio = m.anio
             JOIN cursos      c ON c.seccion_id = m.seccion_id
-                              AND c.periodo_id = m.periodo_id
+                              AND c.periodo_id = $2
                               AND c.activo = true
             LEFT JOIN docentes d ON d.id = c.docente_id
             LEFT JOIN notas    n ON n.alumno_id = m.alumno_id
                                 AND n.curso_id  = c.id
-                                AND n.periodo_id = m.periodo_id
+                                AND n.periodo_id = $2
                                 AND n.nota IS NOT NULL
             WHERE m.alumno_id = $1
-              AND m.periodo_id = $2
               AND m.activo = true
             GROUP BY c.id, c.nombre, d.nombre, d.apellido_paterno
             ORDER BY c.nombre ASC
@@ -93,15 +93,15 @@ export class AcademicReportsService {
                 n.nota                              AS nota,
                 n.fecha                             AS fecha
             FROM matriculas m
+            JOIN periodos   p  ON p.id = $2 AND p.anio = m.anio
             JOIN cursos     c  ON c.id = $1 AND c.periodo_id = $2
                                AND c.seccion_id = m.seccion_id
             JOIN alumnos    a  ON a.id = m.alumno_id
             JOIN cuentas    cu ON cu.id = a.id
             LEFT JOIN notas n  ON n.alumno_id = a.id
                               AND n.curso_id  = c.id
-                              AND n.periodo_id = c.periodo_id
-            WHERE m.periodo_id = $2
-              AND m.activo = true
+                              AND n.periodo_id = $2
+            WHERE m.activo = true
             ORDER BY a.apellido_paterno, a.nombre, n.fecha NULLS LAST, n.titulo
         `;
     return this.ds.query(sql, [cursoId, periodoId]);
@@ -135,16 +135,16 @@ export class AcademicReportsService {
                     ELSE                                       'C'
                 END                                           AS escala
             FROM matriculas m
+            JOIN periodos   p  ON p.id = $2 AND p.anio = m.anio
             JOIN cursos     c  ON c.id = $1 AND c.periodo_id = $2
                                AND c.seccion_id = m.seccion_id
             JOIN alumnos    a  ON a.id = m.alumno_id
             JOIN cuentas    cu ON cu.id = a.id
             LEFT JOIN notas n  ON n.alumno_id = a.id
                               AND n.curso_id  = c.id
-                              AND n.periodo_id = c.periodo_id
+                              AND n.periodo_id = $2
                               AND n.nota IS NOT NULL
-            WHERE m.periodo_id = $2
-              AND m.activo = true
+            WHERE m.activo = true
             GROUP BY a.id, cu.numero_documento, a.apellido_paterno,
                      a.apellido_materno, a.nombre
             ORDER BY promedio DESC NULLS LAST,
@@ -178,16 +178,16 @@ export class AcademicReportsService {
                     c.id            AS curso_id,
                     AVG(n.nota)     AS promedio_curso
                 FROM matriculas m
+                JOIN periodos   p ON p.id = $2 AND p.anio = m.anio
                 JOIN alumnos    a ON a.id = m.alumno_id
                 JOIN cursos     c ON c.seccion_id = m.seccion_id
-                                 AND c.periodo_id = m.periodo_id
+                                 AND c.periodo_id = $2
                                  AND c.activo = true
                 LEFT JOIN notas n ON n.alumno_id = a.id
                                  AND n.curso_id  = c.id
-                                 AND n.periodo_id = c.periodo_id
+                                 AND n.periodo_id = $2
                                  AND n.nota IS NOT NULL
                 WHERE m.seccion_id = $1
-                  AND m.periodo_id = $2
                   AND m.activo = true
                 GROUP BY a.id, c.id
             )

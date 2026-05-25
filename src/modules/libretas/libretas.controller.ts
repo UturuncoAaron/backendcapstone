@@ -34,6 +34,16 @@ export class LibretasController {
         return this.libretasService.findByCuenta(user.id, tipo, user.id);
     }
 
+    /**
+     * Vista unificada para el padre: incluye sus propias libretas y las
+     * libretas de cada hijo vinculado, con estado de lectura por libreta.
+     */
+    @Get('padre/me/full')
+    @Roles('padre')
+    findMineFull(@CurrentUser() user: AuthUser) {
+        return this.libretasService.findPadreCompleto(user.id);
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // TRACKING DE LECTURA
     // ══════════════════════════════════════════════════════════════════════════
