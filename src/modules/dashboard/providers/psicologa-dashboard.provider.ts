@@ -32,39 +32,40 @@ export class PsicologaDashboardProvider {
     private getCitasHoy(psicologaId: string): Promise<CitaHoyItem[]> {
         return this.db.query<CitaHoyItem[]>(
             `SELECT ci.id,
-              ci.tipo,
-              ci.modalidad,
-              ci.fecha_hora    AS "fechaHora",
-              ci.duracion_min  AS "duracionMin",
-              ci.estado,
-              CONCAT(a.nombre, ' ', a.apellido_paterno) AS "alumnoNombre",
-              a.id                                       AS "alumnoId"
-       FROM   citas  ci
-       JOIN   alumnos a ON a.id = ci.alumno_id
-       WHERE  ci.convocado_por_id = $1
-         AND  ci.estado IN ('pendiente', 'confirmada')
-         AND  DATE(ci.fecha_hora AT TIME ZONE 'America/Lima') = CURRENT_DATE
-       ORDER  BY ci.fecha_hora ASC`,
+                    ci.tipo,
+                    ci.modalidad,
+                    ci.fecha_hora   AS "fechaHora",
+                    ci.duracion_min AS "duracionMin",
+                    ci.estado,
+                    CONCAT(a.nombre, ' ', a.apellido_paterno) AS "alumnoNombre",
+                    a.id                                       AS "alumnoId"
+             FROM   citas   ci
+             LEFT JOIN alumnos a ON a.id = ci.alumno_id
+             WHERE  ci.convocado_por_id = $1
+               AND  ci.estado IN ('pendiente', 'confirmada')
+               AND  DATE(ci.fecha_hora AT TIME ZONE 'America/Lima') = CURRENT_DATE
+             ORDER  BY ci.fecha_hora ASC`,
             [psicologaId],
         );
     }
 
     private getAlumnosSeguimiento(psicologaId: string): Promise<AlumnoSeguimientoItem[]> {
         return this.db.query<AlumnoSeguimientoItem[]>(
-            `SELECT a.id               AS "alumnoId",
-          a.nombre,
-          a.apellido_paterno AS "apellidoPaterno",
-          g.nombre           AS grado,
-          s.nombre           AS seccion,
-          pa_rel.desde
-   FROM   psicologa_alumno pa_rel
-   JOIN   alumnos   a ON a.id  = pa_rel.alumno_id
-   JOIN   matriculas m ON m.alumno_id = a.id AND m.activo = TRUE
-   JOIN   secciones  s ON s.id = m.seccion_id
-   JOIN   grados     g ON g.id = s.grado_id
-   WHERE  pa_rel.psicologa_id = $1
-     AND  pa_rel.activo       = TRUE
-   ORDER  BY a.apellido_paterno, a.nombre`,
+            `SELECT DISTINCT ON (a.id)
+                    a.id               AS "alumnoId",
+                    a.nombre,
+                    a.apellido_paterno AS "apellidoPaterno",
+                    g.nombre           AS grado,
+                    s.nombre           AS seccion,
+                    pa_rel.desde
+             FROM   psicologa_alumno pa_rel
+             JOIN   alumnos    a ON a.id        = pa_rel.alumno_id
+             JOIN   matriculas m ON m.alumno_id = a.id AND m.activo = TRUE
+             JOIN   secciones  s ON s.id        = m.seccion_id
+             JOIN   grados     g ON g.id        = s.grado_id
+             WHERE  pa_rel.psicologa_id = $1
+               AND  pa_rel.activo       = TRUE
+             ORDER  BY a.id, m.anio DESC`,
             [psicologaId],
         );
     }
