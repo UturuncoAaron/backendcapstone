@@ -87,6 +87,31 @@ export class LibretasController {
             seccionId, periodoId, user.id, user.rol,
         );
     }
+
+    /**
+     * Listado paginado de TODOS los padres con su libreta del periodo (admin).
+     * Filtros opcionales: sección, búsqueda libre.
+     * Para docente sigue usándose `padre/seccion/:seccionId`.
+     */
+    @Get('padre/admin/listado')
+    @Roles('admin')
+    findPadresAdminPaginated(
+        @Query('periodo_id', ParseUUIDPipe) periodoId: string,
+        @Query('seccion_id') seccionId?: string,
+        @Query('search') search?: string,
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+    ) {
+        const pageNum = Math.max(1, parseInt(page ?? '1', 10) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit ?? '20', 10) || 20));
+        return this.libretasService.findPadresAdminPaginated({
+            periodoId,
+            seccionId: seccionId?.trim() ? seccionId.trim() : null,
+            search: search?.trim() ? search.trim() : null,
+            page: pageNum,
+            limit: limitNum,
+        });
+    }
     // ══════════════════════════════════════════════════════════════════════════
     // SUBIDA INDIVIDUAL
     // ══════════════════════════════════════════════════════════════════════════

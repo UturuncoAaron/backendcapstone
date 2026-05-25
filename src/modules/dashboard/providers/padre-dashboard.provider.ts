@@ -5,12 +5,23 @@ import { SharedDashboardQueries } from '../shared/shared-dashboard.queries';
 import {
     PadreDashboardDto, HijoItem, CitaItem, LibretaItem,
 } from '../dto/padre-dashboard.dto';
+import { StorageService } from '../../storage/storage.service';
+
+interface LibretaRow {
+    id: string;
+    periodoNombre: string;
+    storageKey: string;
+    creadaEn: Date;
+    alumnoNombre: string;
+    tipo: 'alumno' | 'padre';
+}
 
 @Injectable()
 export class PadreDashboardProvider {
     constructor(
         @InjectDataSource() private readonly db: DataSource,
         private readonly shared: SharedDashboardQueries,
+        private readonly storage: StorageService,
     ) { }
 
     async getResumen(padreId: string): Promise<PadreDashboardDto> {
@@ -148,23 +159,45 @@ export class PadreDashboardProvider {
         );
     }
 
-    // ─── Libretas recientes ─────────────────────────────────────────────────
-    private getLibretas(padreId: string): Promise<LibretaItem[]> {
-        return this.db.query<LibretaItem[]>(
+    // ─── Libretas recientes (propias + de los hijos) ────────────────────────
+    private async getLibretas(padreId: string): Promise<LibretaItem[]> {
+        const rows = await this.db.query<LibretaRow[]>(
             `SELECT l.id,
-              p.nombre                             AS "periodoNombre",
-              l.storage_key                        AS "storageKey",
-              l.created_at                         AS "creadaEn",
-              CONCAT(a.nombre, ' ', a.apellido_paterno) AS "alumnoNombre"
-       FROM   libretas      l
-       JOIN   periodos       p  ON p.id      = l.periodo_id
-       JOIN   padre_alumno   pa ON pa.alumno_id = l.cuenta_id
-       JOIN   alumnos        a  ON a.id = l.cuenta_id
-       WHERE  pa.padre_id = $1
-         AND  l.tipo      = 'alumno'
-       ORDER  BY l.created_at DESC
-       LIMIT  5`,
+                    p.nombre                                  AS "periodoNombre",
+                    l.storage_key                             AS "storageKey",
+                    l.created_at                              AS "creadaEn",
+                    CONCAT(a.nombre, ' ', a.apellido_paterno) AS "alumnoNombre",
+                    'alumno'::text                            AS "tipo"
+             FROM   libretas      l
+             JOIN   periodos       p  ON p.id          = l.periodo_id
+             JOIN   padre_alumno   pa ON pa.alumno_id  = l.cuenta_id
+             JOIN   alumnos        a  ON a.id          = l.cuenta_id
+             WHERE  pa.padre_id = $1
+               AND  l.tipo      = 'alumno'
+
+             UNION ALL
+
+             SELECT l.id,
+                    p.nombre        AS "periodoNombre",
+                    l.storage_key   AS "storageKey",
+                    l.created_at    AS "creadaEn",
+                    'Mi libreta'    AS "alumnoNombre",
+                    'padre'::text   AS "tipo"
+             FROM   libretas l
+             JOIN   periodos p ON p.id = l.periodo_id
+             WHERE  l.cuenta_id = $1
+               AND  l.tipo      = 'padre'
+
+             ORDER BY "creadaEn" DESC
+             LIMIT 5`,
             [padreId],
+        );
+
+        return Promise.all(
+            rows.map(async (r): Promise<LibretaItem> => ({
+                ...r,
+                url: await this.storage.getSignedUrl(r.storageKey).catch(() => null),
+            })),
         );
     }
 }

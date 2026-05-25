@@ -121,8 +121,16 @@ export class UsersController {
     searchAlumnos(
         @Query('q') q: string,
         @Query('anio') anio?: string,
+        // `incluir_matriculados=true` → no filtra por matrícula del año (lo usa
+        // el flujo de "Vínculo Padre-Hijo", que precisamente busca alumnos ya
+        // matriculados). Por defecto se excluye matriculados (caso Matricular).
+        @Query('incluir_matriculados') incluirMatriculados?: string,
     ) {
-        return this.usersService.searchAlumnos(q, anio ? parseInt(anio, 10) : undefined);
+        return this.usersService.searchAlumnos(
+            q,
+            anio ? parseInt(anio, 10) : undefined,
+            incluirMatriculados === 'true' || incluirMatriculados === '1',
+        );
     }
 
     @Get('padres/search')

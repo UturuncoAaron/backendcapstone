@@ -34,6 +34,7 @@ export const MODULOS = {
     // ── Padre
     HIJOS: 'hijos',
     LIBRETAS_HIJOS: 'libretas_hijos',
+    MIS_LIBRETAS_PADRE: 'mis_libretas_padre',
     CITAS_AGENDADAS: 'citas_agendadas',
     CITAS_PADRE: 'citas_padre',
 
@@ -106,7 +107,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         ...COMUNES,
     ],
     padre: [
-        MODULOS.HIJOS, MODULOS.LIBRETAS_HIJOS,
+        MODULOS.HIJOS, MODULOS.LIBRETAS_HIJOS, MODULOS.MIS_LIBRETAS_PADRE,
         MODULOS.CITAS_AGENDADAS, MODULOS.CITAS_PADRE,
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,

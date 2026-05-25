@@ -811,7 +811,19 @@ export class UsersService {
       return item;
     });
   }
-  async searchAlumnos(query: string, anio?: number): Promise<AlumnoSearchResult[]> {
+  /**
+   * @param incluirMatriculados
+   *   - `false` (default): excluye alumnos que ya tienen matrícula activa en el año.
+   *     Es el comportamiento que necesita el flujo de "Matricular".
+   *   - `true`: incluye TODOS los alumnos (sin filtro de matrícula).
+   *     Lo necesita el flujo de "Vínculo Padre-Hijo" porque ahí precisamente se
+   *     vincula a un alumno ya matriculado.
+   */
+  async searchAlumnos(
+    query: string,
+    anio?: number,
+    incluirMatriculados = false,
+  ): Promise<AlumnoSearchResult[]> {
     if (!query || query.trim().length < 2) return [];
 
     // Año a usar para el filtro de matrícula — si no viene, usa el periodo activo
@@ -823,7 +835,7 @@ export class UsersService {
       anioFinal = periodo?.anio ?? new Date().getFullYear();
     }
 
-    const rows: AlumnoSearchRow[] = await this.alumnoRepo
+    const rowsQb = this.alumnoRepo
       .createQueryBuilder('a')
       .innerJoin('cuentas', 'c', 'c.id = a.id AND c.activo = TRUE')
       .leftJoin(
@@ -890,17 +902,23 @@ export class UsersService {
         OR a.codigo_estudiante ILIKE :q
         OR c.codigo_acceso ILIKE :q)`,
         { q: `%${query.trim()}%` },
-      )
-      // Excluir alumnos que ya tienen matrícula activa en el año solicitado
-      .andWhere(
+      );
+
+    // Sólo aplicar el filtro de "no matriculado en este año" cuando el caller
+    // está buscando candidatos para una nueva matrícula.
+    if (!incluirMatriculados) {
+      rowsQb.andWhere(
         `NOT EXISTS (
-        SELECT 1 FROM matriculas mx
-        WHERE mx.alumno_id = a.id
-          AND mx.anio      = :anio
-          AND mx.activo    = TRUE
-      )`,
+          SELECT 1 FROM matriculas mx
+          WHERE mx.alumno_id = a.id
+            AND mx.anio      = :anio
+            AND mx.activo    = TRUE
+        )`,
         { anio: anioFinal },
-      )
+      );
+    }
+
+    const rows: AlumnoSearchRow[] = await rowsQb
       .orderBy('a.apellido_paterno', 'ASC')
       .addOrderBy('a.nombre', 'ASC')
       .limit(20)

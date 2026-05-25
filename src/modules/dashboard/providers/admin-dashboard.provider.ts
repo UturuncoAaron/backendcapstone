@@ -27,34 +27,31 @@ export class AdminDashboardProvider {
     }
 
     private async getAlertas(): Promise<AlertaOperativaItem[]> {
-    const [sinDocente, sinHorario, contratosVencer] = await Promise.all([
-
-        this.db.query<{ total: number }[]>(
-            `SELECT COUNT(*)::int AS total
-             FROM   cursos c
-             WHERE  c.activo = TRUE
-               AND  c.anio = EXTRACT(YEAR FROM CURRENT_DATE)::int
-               AND  c.docente_id IS NULL`,
-        ),
-
-        this.db.query<{ total: number }[]>(
-            `SELECT COUNT(*)::int AS total
-             FROM   cursos c
-             WHERE  c.activo = TRUE
-               AND  c.anio = EXTRACT(YEAR FROM CURRENT_DATE)::int
-               AND  NOT EXISTS (
-                   SELECT 1 FROM horarios h WHERE h.curso_id = c.id
-               )`,
-        ),
-
-        this.db.query<{ total: number }[]>(
-            `SELECT COUNT(*)::int AS total
-             FROM   docentes d
-             WHERE  d.tipo_contrato   = 'contratado'
-               AND  d.estado_contrato = 'activo'
-               AND  d.fecha_fin_contrato BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'`,
-        ),
-    ]);
+        const [sinDocente, sinHorario, contratosVencer] = await Promise.all([
+            // Cursos activos del año actual sin docente
+            this.db.query<{ total: number }[]>(
+                `SELECT COUNT(*)::int AS total
+       FROM   cursos c
+       WHERE  c.activo = TRUE
+         AND  c.anio = EXTRACT(YEAR FROM CURRENT_DATE)::int
+         AND  c.docente_id IS NULL`,
+            ),
+            // Cursos activos del año actual sin horario
+            this.db.query<{ total: number }[]>(
+                `SELECT COUNT(*)::int AS total
+       FROM   cursos c
+       WHERE  c.activo = TRUE
+         AND  c.anio = EXTRACT(YEAR FROM CURRENT_DATE)::int
+         AND  NOT EXISTS (SELECT 1 FROM horarios h WHERE h.curso_id = c.id)`,
+            ),
+            this.db.query<{ total: number }[]>(
+                `SELECT COUNT(*)::int AS total
+       FROM   docentes d
+       WHERE  d.tipo_contrato   = 'contratado'
+         AND  d.estado_contrato = 'activo'
+         AND  d.fecha_fin_contrato BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'`,
+            ),
+        ]);
 
         const alertas: AlertaOperativaItem[] = [];
 

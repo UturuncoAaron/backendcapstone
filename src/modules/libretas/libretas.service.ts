@@ -153,6 +153,140 @@ export class LibretasService {
                 : null,
         })));
     }
+
+    /**
+     * Para admin: lista PAGINADA de todos los padres con su libreta del periodo.
+     * Filtros opcionales: sección, búsqueda libre por nombre/apellidos.
+     *
+     * Se construyen dos queries (count + page) con sus propios placeholders
+     * porque pg rechaza queries con menos `$N` de los parámetros enviados.
+     */
+    async findPadresAdminPaginated(opts: {
+        periodoId: string;
+        seccionId: string | null;
+        search: string | null;
+        page: number;
+        limit: number;
+    }): Promise<{
+        items: Array<{
+            id: string;
+            nombre: string;
+            apellido_paterno: string;
+            apellido_materno: string | null;
+            relacion: string;
+            libreta: { id: string; url: string; nombre_archivo: string | null } | null;
+        }>;
+        total: number;
+        page: number;
+        limit: number;
+    }> {
+        const { periodoId, seccionId, search, page, limit } = opts;
+        const offset = (page - 1) * limit;
+
+        // ──────────────────────────────────────────────────────────────
+        // Helper que arma WHERE + params para un query base.
+        // Devuelve la lista de placeholders propios de cada query.
+        // ──────────────────────────────────────────────────────────────
+        const buildWhere = (paramsOut: unknown[]) => {
+            const parts: string[] = [];
+
+            // hijo con matrícula activa (opcional: filtrar por sección)
+            if (seccionId) {
+                paramsOut.push(seccionId);
+                const sIdx = paramsOut.length;
+                parts.push(`EXISTS (
+                    SELECT 1
+                    FROM   padre_alumno pa
+                    JOIN   matriculas   m  ON m.alumno_id = pa.alumno_id AND m.activo = TRUE
+                    WHERE  pa.padre_id = p.id AND m.seccion_id = $${sIdx}::uuid
+                )`);
+            } else {
+                parts.push(`EXISTS (
+                    SELECT 1
+                    FROM   padre_alumno pa
+                    JOIN   matriculas   m  ON m.alumno_id = pa.alumno_id AND m.activo = TRUE
+                    WHERE  pa.padre_id = p.id
+                )`);
+            }
+
+            // búsqueda libre por nombre/apellidos
+            if (search && search.trim().length > 0) {
+                paramsOut.push(`%${search.trim()}%`);
+                const qIdx = paramsOut.length;
+                parts.push(`(
+                    p.nombre            ILIKE $${qIdx} OR
+                    p.apellido_paterno  ILIKE $${qIdx} OR
+                    COALESCE(p.apellido_materno, '') ILIKE $${qIdx}
+                )`);
+            }
+
+            // sólo padres con cuenta activa
+            parts.push(`EXISTS (SELECT 1 FROM cuentas c WHERE c.id = p.id AND c.activo = TRUE)`);
+
+            return `WHERE ${parts.join(' AND ')}`;
+        };
+
+        // ── COUNT ──
+        const countParams: unknown[] = [];
+        const countWhere = buildWhere(countParams);
+        const countRows = await this.dataSource.query<{ total: number | string }[]>(
+            `SELECT COUNT(*)::int AS total FROM padres p ${countWhere}`,
+            countParams,
+        );
+        const total = Number(countRows[0]?.total ?? 0);
+        if (total === 0) return { items: [], total: 0, page, limit };
+
+        // ── PAGE ── ($1 = periodoId para el LEFT JOIN libretas)
+        const pageParams: unknown[] = [periodoId];
+        const pageWhere = buildWhere(pageParams);
+        pageParams.push(limit);
+        const limitIdx = pageParams.length;
+        pageParams.push(offset);
+        const offsetIdx = pageParams.length;
+
+        const rows = await this.dataSource.query<Array<{
+            id: string;
+            nombre: string;
+            apellido_paterno: string;
+            apellido_materno: string | null;
+            relacion: string | null;
+            libreta_id: string | null;
+            libreta_storage_key: string | null;
+            libreta_nombre_archivo: string | null;
+        }>>(
+            `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno, p.relacion,
+                    l.id              AS libreta_id,
+                    l.storage_key     AS libreta_storage_key,
+                    l.nombre_archivo  AS libreta_nombre_archivo
+             FROM   padres p
+             LEFT   JOIN libretas l
+                    ON l.cuenta_id = p.id
+                   AND l.tipo      = 'padre'
+                   AND l.periodo_id = $1::uuid
+             ${pageWhere}
+             ORDER BY p.apellido_paterno NULLS LAST, p.nombre
+             LIMIT  $${limitIdx} OFFSET $${offsetIdx}`,
+            pageParams,
+        );
+
+        const items = await Promise.all(rows.map(async r => ({
+            id: r.id,
+            nombre: r.nombre,
+            apellido_paterno: r.apellido_paterno,
+            apellido_materno: r.apellido_materno,
+            relacion: r.relacion ?? 'padre',
+            libreta: r.libreta_id && r.libreta_storage_key
+                ? {
+                    id: r.libreta_id,
+                    url: await this.storageService.getSignedUrl(r.libreta_storage_key),
+                    nombre_archivo: r.libreta_nombre_archivo,
+                }
+                : null,
+        })));
+
+        return { items, total, page, limit };
+    }
+
     /** Para admin/docente: lista de lectores con la fecha en que vieron la libreta. */
     async listLecturas(libretaId: string) {
         return this.dataSource.query<{
@@ -264,12 +398,14 @@ export class LibretasService {
     }
 
     async bulkUpsert(params: BulkUpsertParams): Promise<BulkUploadResult> {
+        // matriculas ya no tiene periodo_id. Se obtiene el año del periodo
+        // y se filtran las matrículas activas de la sección con ese año.
         const alumnos: AlumnoCandidate[] = await this.dataSource.query(
             `SELECT a.id, a.nombre, a.apellido_paterno, a.apellido_materno
              FROM matriculas m
-             JOIN alumnos a ON a.id = m.alumno_id
+             JOIN alumnos  a ON a.id = m.alumno_id
+             JOIN periodos p ON p.id = $2::uuid AND p.anio = m.anio
              WHERE m.seccion_id = $1::uuid
-               AND m.periodo_id = $2::uuid
                AND m.activo = TRUE`,
             [params.seccionId, params.periodoId],
         );
@@ -366,11 +502,13 @@ export class LibretasService {
         }
 
         if (rol !== 'docente') throw new ForbiddenException('No tienes permiso para gestionar libretas');
+        // matriculas ya no tiene periodo_id. Se une a periodos por año (m.anio = p.anio)
+        // filtrando por el periodo activo.
         const ok = await this.dataSource.query(
             `SELECT 1 FROM matriculas m
              JOIN secciones s ON s.id = m.seccion_id
-             JOIN periodos  p ON p.id = m.periodo_id
-             WHERE m.alumno_id = $1 AND s.tutor_id = $2 AND m.activo = TRUE AND p.activo = TRUE LIMIT 1`,
+             JOIN periodos  p ON p.anio = m.anio AND p.activo = TRUE
+             WHERE m.alumno_id = $1 AND s.tutor_id = $2 AND m.activo = TRUE LIMIT 1`,
             [cuentaId, userId],
         );
         if (!ok.length) throw new ForbiddenException('Solo el tutor de su sección o dirección puede gestionar esta libreta');

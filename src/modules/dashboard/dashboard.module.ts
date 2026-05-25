@@ -8,8 +8,10 @@ import { PadreDashboardProvider } from './providers/padre-dashboard.provider';
 import { AdminDashboardProvider } from './providers/admin-dashboard.provider';
 import { PsicologaDashboardProvider } from './providers/psicologa-dashboard.provider';
 import { AuxiliarDashboardProvider } from './providers/auxiliar-dashboard.provider';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
+    imports: [StorageModule],
     controllers: [DashboardController],
     providers: [
         DashboardService,
