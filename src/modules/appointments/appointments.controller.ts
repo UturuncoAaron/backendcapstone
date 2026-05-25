@@ -264,8 +264,11 @@ export class AppointmentsController {
     return this.service.acceptAppointment({ id: user.id, rol: user.rol }, id);
   }
 
+  // Spec (Aarón, 2026-05): el alumno NO puede aplazar citas.
+  // Sólo puede cancelar con motivo. El guard sirve como primera línea
+  // de defensa; el service repite la validación por seguridad.
   @Patch(':id/aplazar')
-  @Roles('padre', 'alumno', 'admin', 'psicologa', 'docente')
+  @Roles('padre', 'admin', 'psicologa', 'docente')
   aplazar(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PostponeAppointmentDto,

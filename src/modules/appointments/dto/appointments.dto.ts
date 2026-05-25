@@ -85,10 +85,12 @@ export class UpdateAppointmentDto {
 }
 
 export class CancelAppointmentDto {
-  @IsOptional()
+  // Spec (Aarón, 2026-05): el motivo de cancelación es OBLIGATORIO para
+  // que ambas partes vean por qué se canceló la cita.
   @IsString()
+  @MinLength(3)
   @MaxLength(500)
-  motivo?: string;
+  motivo: string;
 }
 
 export class RejectAppointmentDto {
