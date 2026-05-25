@@ -48,6 +48,7 @@ import {
   callerRequiresStudent,
   callerOwnsSchedule,
   allowedRecipientsFor,
+  resolveInitialStatus,
   CallerRol,
 } from './appointments.rules.js';
 import {
@@ -410,6 +411,21 @@ export class AppointmentsService {
 
       if (conflict) throw new ConflictException('Ese horario ya está ocupado');
 
+      // Matriz de estado inicial (spec Aarón 2026-05):
+      //   padre → psi          confirmada
+      //   alumno → psi         confirmada
+      //   psi → alumno         confirmada (sin padre vinculado)
+      //   psi → alumno + padre pendiente
+      //   psi → padre          pendiente
+      //   docente → padre      pendiente
+      //   admin → padre        pendiente
+      const initialStatus = resolveInitialStatus({
+        caller: caller.rol as CallerRol,
+        recipient: convocadoA.rol as CallerRol,
+        hasStudent: !!dto.studentId,
+        hasParent: !!dto.parentId,
+      });
+
       const appointment = em.create(Appointment, {
         createdById: caller.id,
         convocadoAId: convocadoA.id,
@@ -420,7 +436,7 @@ export class AppointmentsService {
         motivo: dto.motivo,
         scheduledAt,
         durationMin,
-        estado: rule.directBooking ? 'confirmada' : 'pendiente',
+        estado: initialStatus,
         priorNotes: dto.priorNotes ?? null,
       });
       const saved = await em.save(appointment);
@@ -748,17 +764,25 @@ export class AppointmentsService {
         `No se puede cancelar una cita ${appt.estado}`,
       );
 
+    // Spec (Aarón, 2026-05): el motivo de cancelación es OBLIGATORIO y
+    // queda persistido para que ambas partes sepan por qué se canceló.
+    const motivo = (dto.motivo ?? '').trim();
+    if (motivo.length < 3)
+      throw new BadRequestException(
+        'Debes indicar un motivo de cancelación (mín. 3 caracteres)',
+      );
+
     const previousStatus = appt.estado;
     appt.estado = 'cancelada';
     appt.cancelledAt = new Date();
     appt.cancelledById = caller.id;
-    appt.cancelReason = dto.motivo ?? null;
+    appt.cancelReason = motivo;
     const saved = await this.appointmentRepo.save(appt);
 
     this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CANCELLED, {
       appointmentId: saved.id,
       actorId: caller.id,
-      reason: dto.motivo ?? null,
+      reason: motivo,
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentCancelledEvent);
     await this.appendStatusLog(
@@ -766,7 +790,7 @@ export class AppointmentsService {
       previousStatus,
       'cancelada',
       caller.id,
-      dto.motivo ?? null,
+      motivo,
     );
     return saved;
   }
@@ -873,6 +897,13 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new NotFoundException('Cita no encontrada');
+
+    // Spec (Aarón, 2026-05): el alumno NUNCA puede aplazar una cita.
+    // Solo puede cancelar (con motivo). El resto de roles puede aplazar.
+    if (caller.rol === 'alumno')
+      throw new ForbiddenException(
+        'El alumno no puede aplazar una cita. Si necesitas cambiarla, cancélala y vuelve a agendarla.',
+      );
 
     const isAdmin = caller.rol === 'admin';
     const isConvocador = appt.createdById === caller.id;

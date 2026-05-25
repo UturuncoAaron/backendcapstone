@@ -235,3 +235,48 @@ export function callerRequiresStudent(caller: CallerRol): boolean {
 export function callerOwnsSchedule(caller: CallerRol): boolean {
   return caller === 'psicologa' || caller === 'docente' || caller === 'admin';
 }
+
+// ============================================================================
+// MATRIZ DE ESTADO INICIAL (Aarón, spec 2026-05)
+// ----------------------------------------------------------------------------
+// La cita se confirma automáticamente solo si:
+//   • padre → psicóloga                                       (confirmada)
+//   • alumno → psicóloga                                      (confirmada)
+//   • psicóloga → alumno (sin padre vinculado a la cita)      (confirmada)
+//
+// Resto de combinaciones queda en `pendiente` esperando la confirmación
+// del invitado (o del padre, en el caso psi → padre+alumno).
+// ============================================================================
+export type InitialStatus = 'confirmada' | 'pendiente';
+
+export interface InitialStatusContext {
+  caller: CallerRol;
+  recipient: CallerRol;
+  /** True si la cita lleva un alumno vinculado (psi → alumno [+ padre]). */
+  hasStudent?: boolean;
+  /** True si la cita lleva un padre vinculado además del invitado. */
+  hasParent?: boolean;
+}
+
+export function resolveInitialStatus(ctx: InitialStatusContext): InitialStatus {
+  const { caller, recipient } = ctx;
+
+  // Padre → psicóloga = confirmada (la psicóloga acepta abiertamente al padre).
+  if (caller === 'padre' && recipient === 'psicologa') return 'confirmada';
+
+  // Alumno → psicóloga = confirmada (el alumno sólo puede agendar con psi).
+  if (caller === 'alumno' && recipient === 'psicologa') return 'confirmada';
+
+  // Psicóloga → alumno: confirmada si NO hay padre vinculado; si el padre
+  // también participa, queda pendiente hasta que el padre confirme.
+  if (caller === 'psicologa' && recipient === 'alumno') {
+    return ctx.hasParent ? 'pendiente' : 'confirmada';
+  }
+
+  // Cualquier otra combinación queda pendiente:
+  //   • padre → docente / admin
+  //   • psicóloga → padre
+  //   • docente → padre
+  //   • admin → padre
+  return 'pendiente';
+}
