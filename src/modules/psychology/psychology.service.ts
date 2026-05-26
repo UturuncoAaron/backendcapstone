@@ -256,7 +256,11 @@ export class PsychologyService {
     // ── Directorio ────────────────────────────────────────────────
 
     async searchStudents(query: string) {
-        const rows = await this.usersService.searchAlumnos(query);
+        // Directorio para citas: necesitamos TODOS los alumnos (matriculados
+        // o no). El filtro `incluirMatriculados=true` evita que `searchAlumnos`
+        // excluya a los alumnos con matrícula activa — eso lo hace por
+        // defecto porque su uso original es el flujo de "matricular alumno".
+        const rows = await this.usersService.searchAlumnos(query, undefined, true);
         return rows.map((r: any) => this.stripCredentials(r));
     }
 

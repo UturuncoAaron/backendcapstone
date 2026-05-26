@@ -805,11 +805,45 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new NotFoundException('Cita no encontrada');
-    if (caller.rol !== 'admin' && appt.convocadoAId !== caller.id)
-      throw new ForbiddenException('Solo el convocado puede aceptar la cita');
     if (appt.estado !== 'pendiente')
       throw new BadRequestException(
         `Solo se pueden aceptar citas pendientes (estado actual: ${appt.estado})`,
+      );
+
+    // Spec (Aarón, 2026-05): cuando una cita queda `pendiente` por un
+    // aplazamiento, la parte que NO aplazó debe ser quien confirme. Si
+    // la última transición fue `aplazar` por `caller.id`, no puede
+    // auto-confirmar su propia propuesta — la confirmación debe venir
+    // del otro lado de la cita.
+    const lastPostpone = await this.statusLogRepo.findOne({
+      where: { appointmentId: id, nextStatus: 'pendiente' },
+      order: { changedAt: 'DESC' },
+    });
+    const postponedBySelf =
+      lastPostpone &&
+      lastPostpone.changedById &&
+      lastPostpone.changedById === caller.id &&
+      lastPostpone.previousStatus !== null;
+    if (postponedBySelf)
+      throw new ForbiddenException(
+        'No puedes confirmar un aplazamiento que tú mismo propusiste — debe aceptarlo la otra parte de la cita.',
+      );
+
+    // Quién puede aceptar: el convocado original, o — si el aplazamiento
+    // lo hizo el convocado — el convocador. Admin siempre puede.
+    const isConvocador = appt.createdById === caller.id;
+    const isConvocado = appt.convocadoAId === caller.id;
+    const lastPostponeByConvocado =
+      lastPostpone &&
+      lastPostpone.changedById === appt.convocadoAId &&
+      lastPostpone.previousStatus !== null;
+    const canAccept =
+      caller.rol === 'admin' ||
+      isConvocado ||
+      (lastPostponeByConvocado && isConvocador);
+    if (!canAccept)
+      throw new ForbiddenException(
+        'Solo la parte que no propuso el aplazamiento puede confirmar la cita',
       );
 
     appt.estado = 'confirmada';
