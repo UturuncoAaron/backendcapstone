@@ -34,10 +34,10 @@ export class ListAsistenciasQueryDto {
     @IsOptional() @IsDateString() fecha?: string;
     @IsOptional() @IsDateString() desde?: string;
     @IsOptional() @IsDateString() hasta?: string;
+    @IsOptional() @IsUUID() periodo_id?: string;
     @IsOptional() @IsInt() @Min(1) @Max(500) @Type(() => Number) limit?: number;
     @IsOptional() @IsInt() @Min(0) @Type(() => Number) offset?: number;
 }
-
 export class ReporteAsistenciaQueryDto {
     @IsUUID() periodo_id: string;
     @IsOptional() @IsUUID() seccion_id?: string;
@@ -56,10 +56,9 @@ export class RegistroDocenteDto {
     @IsUUID()
     docente_id: string;
 
-    @IsIn(['presente', 'tardanza', 'ausente', 'permiso', 'licencia'])
+    @IsIn(['presente', 'tardanza', 'falto', 'justificado'])
     estado: string;
 }
-
 export class BulkDocenteAsistenciaDto {
     @IsDateString()
     fecha: string;

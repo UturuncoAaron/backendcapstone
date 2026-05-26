@@ -168,19 +168,46 @@ export class AssistsService {
     ): Promise<{ validos: string[]; invalidos: string[] }> {
         if (!alumnoIds.length) return { validos: [], invalidos: [] };
 
-        const found = await this.dataSource.createQueryBuilder()
-            .select('m.alumno_id', 'alumno_id')
-            .from('cursos', 'c')
-            .innerJoin('matriculas', 'm', 'm.seccion_id = c.seccion_id AND m.anio = c.anio')
-            .where('c.id = :cursoId', { cursoId })
-            .andWhere('m.activo = TRUE')
-            .andWhere('m.alumno_id IN (:...alumnoIds)', { alumnoIds })
-            .getRawMany<{ alumno_id: string }>();
+        // 1. Obtener datos del curso
+        const cursoInfo = await this.dataSource.query<{ seccion_id: string; anio: number }[]>(
+            `SELECT seccion_id, anio FROM cursos WHERE id = $1 AND activo = TRUE LIMIT 1`,
+            [cursoId]
+        );
 
-        const validos = new Set(found.map(r => r.alumno_id));
+        if (!cursoInfo.length) {
+            this.logger.error(`[DEBUG] El curso ${cursoId} NO existe o tiene activo = FALSE`);
+            return { validos: [], invalidos: alumnoIds };
+        }
+
+        const { seccion_id, anio } = cursoInfo[0];
+
+        // --- LOG CLAVE 1 ---
+        this.logger.warn(`[DEBUG-1] Evaluando Curso -> seccion_id: ${seccion_id} | anio: ${anio}`);
+        this.logger.warn(`[DEBUG-2] Alumnos a evaluar: ${alumnoIds.length}`);
+
+        // 2. Consulta RAW a prueba de balas para Postgres
+        const found = await this.dataSource.query<{ alumno_id: string }[]>(
+            `SELECT alumno_id 
+             FROM matriculas 
+             WHERE seccion_id = $1 
+               AND anio = $2 
+               AND activo = TRUE 
+               AND alumno_id = ANY($3::uuid[])`,
+            [seccion_id, anio, alumnoIds]
+        );
+
+        // --- LOG CLAVE 3 ---
+        this.logger.warn(`[DEBUG-3] Matrículas válidas encontradas: ${found.length}`);
+
+        if (found.length === 0) {
+            this.logger.error(`[DEBUG-4] ¡Atención! Ningún alumno coincidió. Verifica si en la tabla 'matriculas' existe el anio=${anio} y seccion_id=${seccion_id} para estos alumnos.`);
+        }
+
+        const validosSet = new Set(found.map(r => String(r.alumno_id).toLowerCase()));
+
         return {
-            validos: alumnoIds.filter(id => validos.has(id)),
-            invalidos: alumnoIds.filter(id => !validos.has(id)),
+            validos: alumnoIds.filter(id => validosSet.has(String(id).toLowerCase())),
+            invalidos: alumnoIds.filter(id => !validosSet.has(String(id).toLowerCase())),
         };
     }
     // ─────────────────────────────────────────────────────────────────
@@ -489,6 +516,7 @@ export class AssistsService {
         }
         const where: any = { curso_id: cursoId };
         if (q.desde && q.hasta) where.fecha = Between(q.desde, q.hasta);
+        if (q.periodo_id) where.periodo_id = q.periodo_id;   // ← agregar
         return this.classRepo.find({
             where,
             relations: ['alumno'],
@@ -497,7 +525,6 @@ export class AssistsService {
             skip: q.offset ?? 0,
         });
     }
-
     async classListByAlumno(alumnoId: string, q: ListAsistenciasQueryDto & { cursoId?: string }) {
         const qb = this.classRepo.createQueryBuilder('a')
             .leftJoinAndSelect('a.curso', 'c')
