@@ -15,21 +15,6 @@ import {
     BulkDocenteAsistenciaDto,
 } from './dto/asistencia.dto.js';
 
-/**
- * Reglas de autorización (defensa en profundidad):
- *
- * - El **admin NO toma asistencia** (no puede crear/editar/borrar registros).
- *   Sí puede leer historiales, listas y el reporte agregado.
- * - El **tutor de sección** (un docente designado) toma la asistencia general
- *   por sección.
- * - El **docente** toma la asistencia de su(s) propio(s) curso(s).
- * - El **auxiliar** usa el escaneo QR en la entrada y puede consultar listas
- *   del día.
- *
- * Las restricciones finas (que el docente sea efectivamente del curso, que el
- * tutor sea de esa sección, que el padre sea de ese alumno) viven en
- * `AssistsService` (`assertDocenteDelCurso`, `assertTutorDeSeccion`, etc.).
- */
 @Controller('asistencias')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AssistsController {

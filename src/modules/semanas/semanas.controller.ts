@@ -1,10 +1,10 @@
 import {
-    Controller, Get, Patch, Param, Body,
+    Controller, Get, Post, Patch, Param, Body,
     ParseUUIDPipe, ParseIntPipe, UseGuards,
     BadRequestException,
 } from '@nestjs/common';
 import { SemanasService, SEMANAS_POR_CURSO } from './semanas.service.js';
-import { ToggleSemanaDto, UpdateSemanaDto } from './dto/semanas.dto.js';
+import { ToggleSemanaDto, UpdateSemanaDto, AddNextSemanaDto } from './dto/semanas.dto.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
@@ -16,7 +16,6 @@ import type { AuthUser } from '../auth/types/auth-user.js';
 export class SemanasController {
     constructor(private readonly semanasService: SemanasService) { }
 
-    /** Lista las N semanas del curso (con su config aplicada). El alumno no ve las ocultas. */
     @Get()
     @Roles('alumno', 'docente', 'admin', 'padre')
     async list(
@@ -24,7 +23,16 @@ export class SemanasController {
         @CurrentUser() user: AuthUser,
     ) {
         const semanas = await this.semanasService.listForCourse(courseId);
-        return user?.rol === 'alumno' ? semanas.filter((s) => !s.oculta) : semanas;
+        return user?.rol === 'alumno' ? semanas.filter(s => !s.oculta) : semanas;
+    }
+
+    @Post('next')
+    @Roles('docente', 'admin')
+    addNext(
+        @Param('courseId', ParseUUIDPipe) courseId: string,
+        @Body() dto: AddNextSemanaDto,
+    ) {
+        return this.semanasService.addNextSemana(courseId, dto.bimestre);
     }
 
     @Patch(':semana/toggle')

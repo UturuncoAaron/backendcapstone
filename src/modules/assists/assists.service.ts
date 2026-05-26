@@ -3,7 +3,7 @@ import {
     BadRequestException, Logger, UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Between } from 'typeorm';
+import { Repository, DataSource, Between, In } from 'typeorm';
 import { AttendanceGeneral } from './entities/attendance-general.entity.js';
 import { AttendanceClass } from './entities/attendance-class.entity.js';
 import { AttendanceDocente } from './entities/attendance-docente.entity.js';
@@ -77,20 +77,9 @@ export class AssistsService {
         }
     }
 
-    /**
-     * Resuelve el período bimestral para una fecha dada.
-     *
-     * OPTIMIZACIÓN: El período activo cambia solo 4 veces al año.
-     * Cacheamos en memoria: si la fecha pedida es <= fecha_fin del período
-     * cacheado, devolvemos el id sin ir a DB. El cache se invalida
-     * automáticamente cuando llega una fecha fuera del rango.
-     *
-     * Ahorro real en pico de 15 scans/min: 15 queries/min → 0.
-     */
     private async resolvePeriodoId(fecha: string, periodoIdOpcional?: string): Promise<string> {
         if (periodoIdOpcional) return periodoIdOpcional;
 
-        // Cache hit: la fecha pedida cae dentro del período ya cacheado
         if (this.periodoCache && fecha >= '1970-01-01' && fecha <= this.periodoCache.fecha_fin) {
             return this.periodoCache.id;
         }
@@ -109,14 +98,12 @@ export class AssistsService {
             );
         }
 
-        // Actualizar cache con el período encontrado
         this.periodoCache = { id: rows[0].id, fecha_fin: rows[0].fecha_fin };
         this.logger.log(`Cache período actualizado → id=${rows[0].id} hasta=${rows[0].fecha_fin}`);
 
         return rows[0].id;
     }
 
-    /** Verifica que el alumno esté matriculado en la sección para el AÑO de la fecha. */
     private async assertAlumnoEnSeccion(alumnoId: string, seccionId: string, fecha: string) {
         const anio = new Date(fecha + 'T12:00:00').getFullYear();
         const rows = await this.dataSource.query<{ ok: number }[]>(
@@ -132,15 +119,13 @@ export class AssistsService {
         }
     }
 
-    /** Verifica que el alumno esté matriculado en la sección del curso para el año del curso. */
     private async assertAlumnoEnCurso(alumnoId: string, cursoId: string) {
         const rows = await this.dataSource.query<{ ok: number }[]>(
             `SELECT 1 AS ok
              FROM cursos c
-             JOIN periodos p ON p.id = c.periodo_id
              JOIN matriculas m
                ON m.seccion_id = c.seccion_id
-              AND m.anio = p.anio
+              AND m.anio = c.anio
              WHERE c.id = $1
                AND m.alumno_id = $2
                AND m.activo = TRUE
@@ -152,16 +137,25 @@ export class AssistsService {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // CORRECCIÓN: Uso estricto de QueryBuilder para evitar bugs 
+    // de serialización de arrays con ANY($2::uuid[]) en Postgres
+    // ─────────────────────────────────────────────────────────────────
     private async filtrarAlumnosEnSeccion(
         alumnoIds: string[], seccionId: string, fecha: string,
     ): Promise<{ validos: string[]; invalidos: string[] }> {
+        if (!alumnoIds.length) return { validos: [], invalidos: [] };
         const anio = new Date(fecha + 'T12:00:00').getFullYear();
-        const found = await this.dataSource.query<{ alumno_id: string }[]>(
-            `SELECT alumno_id FROM matriculas
-             WHERE seccion_id = $1 AND anio = $2 AND activo = TRUE
-               AND alumno_id = ANY($3::uuid[])`,
-            [seccionId, anio, alumnoIds],
-        );
+
+        const found = await this.dataSource.createQueryBuilder()
+            .select('m.alumno_id', 'alumno_id')
+            .from('matriculas', 'm')
+            .where('m.seccion_id = :seccionId', { seccionId })
+            .andWhere('m.anio = :anio', { anio })
+            .andWhere('m.activo = TRUE')
+            .andWhere('m.alumno_id IN (:...alumnoIds)', { alumnoIds })
+            .getRawMany<{ alumno_id: string }>();
+
         const validos = new Set(found.map(r => r.alumno_id));
         return {
             validos: alumnoIds.filter(id => validos.has(id)),
@@ -172,24 +166,24 @@ export class AssistsService {
     private async filtrarAlumnosEnCurso(
         alumnoIds: string[], cursoId: string,
     ): Promise<{ validos: string[]; invalidos: string[] }> {
-        const found = await this.dataSource.query<{ alumno_id: string }[]>(
-            `SELECT m.alumno_id
-             FROM cursos c
-             JOIN periodos p ON p.id = c.periodo_id
-             JOIN matriculas m
-               ON m.seccion_id = c.seccion_id
-              AND m.anio = p.anio
-             WHERE c.id = $1
-               AND m.activo = TRUE
-               AND m.alumno_id = ANY($2::uuid[])`,
-            [cursoId, alumnoIds],
-        );
+        if (!alumnoIds.length) return { validos: [], invalidos: [] };
+
+        const found = await this.dataSource.createQueryBuilder()
+            .select('m.alumno_id', 'alumno_id')
+            .from('cursos', 'c')
+            .innerJoin('matriculas', 'm', 'm.seccion_id = c.seccion_id AND m.anio = c.anio')
+            .where('c.id = :cursoId', { cursoId })
+            .andWhere('m.activo = TRUE')
+            .andWhere('m.alumno_id IN (:...alumnoIds)', { alumnoIds })
+            .getRawMany<{ alumno_id: string }>();
+
         const validos = new Set(found.map(r => r.alumno_id));
         return {
             validos: alumnoIds.filter(id => validos.has(id)),
             invalidos: alumnoIds.filter(id => !validos.has(id)),
         };
     }
+    // ─────────────────────────────────────────────────────────────────
 
     private mapAlumnoScan(info: {
         alumno_id: string;
@@ -222,7 +216,6 @@ export class AssistsService {
         const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
         await this.assertAlumnoEnSeccion(dto.alumno_id, seccionId, dto.fecha);
 
-        // upsert devuelve el estado final — no necesitamos findOne extra
         const record = {
             alumno_id: dto.alumno_id,
             seccion_id: seccionId,
@@ -283,7 +276,6 @@ export class AssistsService {
     async generalScan(dto: ScanQrDto, user: AuthUser) {
         this.requireAuth(user);
 
-        // ── 1. Verificar QR ──────────────────────────────────────────────────
         const verified = this.qrService.verifyAttendanceToken(dto.qr_token);
         if (!verified) throw new BadRequestException('QR inválido o no reconocido');
 
@@ -291,11 +283,8 @@ export class AssistsService {
             timeZone: 'America/Lima',
         });
         const anio = new Date(fecha + 'T12:00:00').getFullYear();
-
-        // ── 2. Período (desde cache en memoria la mayoría de veces) ──────────
         const periodo_id = await this.resolvePeriodoId(fecha);
 
-        // ── 3. Alumno + matrícula activa en un solo JOIN ──────────────────────
         const rows = await this.dataSource.query<{
             alumno_id: string;
             nombre: string;
@@ -332,10 +321,8 @@ export class AssistsService {
             );
         }
 
-        // ── 4. Verificar autorización (auxiliar/admin no hace query extra) ────
         await this.assertTutorDeSeccion(info.seccion_id, user);
 
-        // ── 5. ¿Ya existe registro hoy? ──────────────────────────────────────
         const existing = await this.generalRepo.findOne({
             where: { alumno_id: info.alumno_id, seccion_id: info.seccion_id, fecha },
         });
@@ -348,20 +335,14 @@ export class AssistsService {
             };
         }
 
-        // ── 6. Determinar estado por hora de llegada ─────────────────────────
-        // Hora actual en Lima (UTC-5)
         const horaLima = new Date().toLocaleTimeString('en-GB', {
             timeZone: 'America/Lima',
             hour: '2-digit',
             minute: '2-digit',
-        }); // → 'HH:MM'
+        });
         const estado: EstadoAsistencia =
             horaLima <= this.HORA_LIMITE_ENTRADA ? 'asistio' : 'tardanza';
 
-        // ── 7. Guardar — sin findOne posterior (OPTIMIZACIÓN) ────────────────
-        // Construimos el objeto de respuesta con los datos que ya tenemos.
-        // El upsert es por seguridad ante concurrencia, pero en práctica
-        // el check de duplicado del paso 5 ya previene doble registro.
         const record = {
             alumno_id: info.alumno_id,
             seccion_id: info.seccion_id,
@@ -467,6 +448,7 @@ export class AssistsService {
 
         const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
         const alumnoIds = dto.alumnos.map(a => a.alumno_id);
+
         const { validos, invalidos } = await this.filtrarAlumnosEnCurso(alumnoIds, cursoId);
 
         if (invalidos.length) {
@@ -558,12 +540,13 @@ export class AssistsService {
         const horarioIds = dto.registros.map(r => r.horario_id);
 
         await this.dataSource.transaction(async em => {
-            await em.query(
-                `DELETE FROM asistencias_docente
-                 WHERE fecha = $1::date
-                   AND horario_id = ANY($2::uuid[])`,
-                [dto.fecha, horarioIds],
-            );
+            // CORRECCIÓN: Uso de em.delete con operador In de TypeORM
+            // para evitar arrays crudos.
+            await em.delete(AttendanceDocente, {
+                fecha: dto.fecha,
+                horario_id: In(horarioIds),
+            });
+
             for (const r of dto.registros) {
                 await em.query(
                     `INSERT INTO asistencias_docente
