@@ -220,10 +220,8 @@ export function allowedRecipientsFor(
 
 /** True si el rol que cita necesita SIEMPRE indicar `alumno_id` en la cita. */
 export function callerRequiresStudent(caller: CallerRol): boolean {
-  // docente y admin/director siempre citan en torno a un alumno específico.
-  return caller === 'docente' || caller === 'admin';
+  return caller === 'docente';
 }
-
 /**
  * True si la cita debe usar la regla del CONVOCADOR para calcular
  * duración / slot. Aplica cuando el convocador tiene su propia

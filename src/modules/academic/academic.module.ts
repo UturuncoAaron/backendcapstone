@@ -1,19 +1,20 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-
 import { AcademicController } from './academic.controller.js';
 import { AcademicService } from './academic.service.js';
 import { GradeLevel } from './entities/grade-level.entity.js';
 import { Section } from './entities/section.entity.js';
 import { Period } from './entities/period.entity.js';
 import { Matricula } from './entities/matricula.entity.js';
+import { SeccionTutor } from './entities/seccion-tutor.entity.js';
 import { CoursesModule } from '../courses/courses.module.js';
 import { StorageModule } from '../storage/storage.module.js';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([GradeLevel, Section, Period, Matricula]),
-        CoursesModule,StorageModule
+        TypeOrmModule.forFeature([GradeLevel, Section, Period, Matricula, SeccionTutor]),
+        CoursesModule,
+        StorageModule,
     ],
     controllers: [AcademicController],
     providers: [AcademicService],

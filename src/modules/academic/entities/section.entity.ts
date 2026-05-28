@@ -4,7 +4,6 @@ import {
     ManyToOne, JoinColumn,
 } from 'typeorm';
 import { GradeLevel } from './grade-level.entity.js';
-import { Docente } from '../../users/entities/docente.entity.js';
 
 @Entity('secciones')
 export class Section {
@@ -23,13 +22,6 @@ export class Section {
 
     @Column({ type: 'smallint', default: 35 })
     capacidad: number;
-
-    @Column({ name: 'tutor_id', type: 'uuid', nullable: true })
-    tutor_id: string | null;
-
-    @ManyToOne(() => Docente, { nullable: true, onDelete: 'SET NULL' })
-    @JoinColumn({ name: 'tutor_id' })
-    tutor: Docente | null;
 
     @Column({ default: true })
     activo: boolean;

@@ -650,11 +650,15 @@ export class LibretasService {
 
         const ok = await this.dataSource.query(
             `SELECT 1 FROM periodos p
-             JOIN matriculas m ON m.anio = p.anio AND m.alumno_id = $1::uuid AND m.activo = TRUE
-             JOIN secciones s ON s.id = m.seccion_id AND s.tutor_id = $2::uuid
-             LEFT JOIN anios_lectivos al ON al.anio = p.anio
-             WHERE p.id = $3::uuid AND (al.estado IS NULL OR al.estado <> 'archivado')
-             LIMIT 1`,
+         JOIN matriculas m ON m.anio = p.anio AND m.alumno_id = $1::uuid AND m.activo = TRUE
+         JOIN secciones s ON s.id = m.seccion_id
+         JOIN secciones_tutores st ON st.seccion_id = s.id
+             AND st.docente_id = $2::uuid
+             AND st.anio = p.anio
+             AND st.activo = TRUE
+         LEFT JOIN anios_lectivos al ON al.anio = p.anio
+         WHERE p.id = $3::uuid AND (al.estado IS NULL OR al.estado <> 'archivado')
+         LIMIT 1`,
             [cuentaId, userId, periodoId],
         );
         if (!ok.length) throw new ForbiddenException('Solo el tutor de la sección puede gestionar esta libreta');

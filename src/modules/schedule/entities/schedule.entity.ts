@@ -8,8 +8,8 @@ export type DiaSemana = 'lunes' | 'martes' | 'miercoles' | 'jueves' | 'viernes';
 
 @Entity('horarios')
 export class Schedule {
-    @PrimaryGeneratedColumn()
-    id: number;
+    @PrimaryGeneratedColumn('uuid')
+    id: string;
 
     @Column('uuid')
     curso_id: string;

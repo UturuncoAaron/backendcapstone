@@ -108,10 +108,6 @@ interface AppointmentPersonView {
   rol: string;
 }
 
-/**
- * Información que devolvemos al FE cuando un endpoint produce una
- * cascada de cancelaciones (vista bonita en el modal "¿Estás seguro?").
- */
 export interface AffectedAppointmentSummary {
   id: string;
   scheduledAt: Date;
@@ -135,20 +131,9 @@ export class AppointmentsService {
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
     private readonly events: EventEmitter2,
-  ) {}
+  ) { }
 
-  // ════════════════════════════════════════════════════════════════
-  // HISTORIAL DE ESTADOS
-  // ════════════════════════════════════════════════════════════════
 
-  /**
-   * Inserta una entrada en `cita_estado_log`. Se llama desde cada
-   * método que cambia el estado de una cita (crear, aceptar, rechazar,
-   * cancelar, aplazar, realizar, no_asistio, cancelaciones en cascada).
-   *
-   * Errores se loguean pero no abortan la transacción principal — el
-   * historial es un complemento, no debe tumbar la operación funcional.
-   */
   private async appendStatusLog(
     appointmentId: string,
     previousStatus: AppointmentStatus | null,
@@ -172,18 +157,12 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `appendStatusLog falló para cita ${appointmentId}: ${
-          err instanceof Error ? err.message : String(err)
+        `appendStatusLog falló para cita ${appointmentId}: ${err instanceof Error ? err.message : String(err)
         }`,
       );
     }
   }
 
-  /**
-   * Devuelve el historial completo de transiciones de estado de una cita.
-   * Sólo participantes (caller en createdById/convocadoAId/parentId) o
-   * admin pueden consultarlo.
-   */
   async getStatusLog(caller: CallerContext, appointmentId: string) {
     const appt = await this.appointmentRepo.findOne({
       where: { id: appointmentId },
@@ -218,13 +197,22 @@ export class AppointmentsService {
             l.anterior_estado AS previous_status,
             l.nuevo_estado    AS next_status,
             l.changed_by_id,
-            c.nombre              AS changed_by_nombre,
-            c.apellido_paterno    AS changed_by_apellido_paterno,
-            c.rol::text           AS changed_by_rol,
+            COALESCE(al.nombre, d.nombre, p.nombre, ps.nombre, ad.nombre, ax.nombre)
+                AS changed_by_nombre,
+            COALESCE(al.apellido_paterno, d.apellido_paterno, p.apellido_paterno,
+                     ps.apellido_paterno, ad.apellido_paterno, ax.apellido_paterno)
+                AS changed_by_apellido_paterno,
+            c.rol::text AS changed_by_rol,
             l.razon,
             l.changed_at
          FROM cita_estado_log l
-         LEFT JOIN cuentas c ON c.id = l.changed_by_id
+         LEFT JOIN cuentas    c  ON c.id  = l.changed_by_id
+         LEFT JOIN alumnos    al ON al.id = c.id
+         LEFT JOIN docentes   d  ON d.id  = c.id
+         LEFT JOIN padres     p  ON p.id  = c.id
+         LEFT JOIN psicologas ps ON ps.id = c.id
+         LEFT JOIN admins     ad ON ad.id = c.id
+         LEFT JOIN auxiliares ax ON ax.id = c.id
         WHERE l.cita_id = $1
         ORDER BY l.changed_at ASC, l.id ASC`,
       [appointmentId],
@@ -236,10 +224,9 @@ export class AppointmentsService {
       nextStatus: r.next_status,
       changedById: r.changed_by_id,
       changedByName: r.changed_by_nombre
-        ? `${r.changed_by_nombre}${
-            r.changed_by_apellido_paterno
-              ? ' ' + r.changed_by_apellido_paterno
-              : ''
+        ? `${r.changed_by_nombre}${r.changed_by_apellido_paterno
+            ? ' ' + r.changed_by_apellido_paterno
+            : ''
           }`.trim()
         : null,
       changedByRole: r.changed_by_rol,
@@ -249,10 +236,6 @@ export class AppointmentsService {
   }
 
   private readonly logger = new Logger(AppointmentsService.name);
-
-  // ════════════════════════════════════════════════════════════════
-  // CREATE
-  // ════════════════════════════════════════════════════════════════
 
   async createAppointment(
     caller: CallerContext,
@@ -273,13 +256,6 @@ export class AppointmentsService {
         'La cuenta convocada no existe o está inactiva',
       );
 
-    // ── Regla "una cita activa por padre" ──────────────────────────
-    //
-    // Spec (Aarón, 2026-05): un padre no puede tener múltiples citas
-    // pendientes/confirmadas simultáneas con profesionales distintos.
-    // Mientras tenga una cita activa con un usuario, no puede pedir
-    // otra con un usuario diferente. Sí puede reprogramar/cancelar la
-    // existente — al hacerlo, queda libre para crear una nueva.
     if (caller.rol === 'padre') {
       const existing = await this.appointmentRepo
         .createQueryBuilder('a')
@@ -345,19 +321,6 @@ export class AppointmentsService {
       await this.warnIfPsicologaNotLinked(convocadoA.id, dto.studentId);
     if (caller.rol === 'psicologa' && dto.studentId)
       await this.warnIfPsicologaNotLinked(caller.id, dto.studentId);
-
-    // ── Qué regla manda la duración/slot ───────────────────────────
-    //
-    // Si el CONVOCADOR tiene su propia disponibilidad (psicóloga, docente,
-    // admin/director), su regla gana: la cita se acopla a su calendario y
-    // a su `slotMinutes`. El padre/alumno son convocados pasivos y no
-    // imponen duración.
-    //
-    // Si el CONVOCADOR no tiene disponibilidad (padre, alumno), la cita
-    // se acopla al calendario del CONVOCADO (psicóloga o docente).
-    //
-    // Caso especial preexistente: psicóloga citando a un alumno usa su
-    // propia regla (el alumno no tiene calendario).
     const callerHasSchedule = callerOwnsSchedule(caller.rol as CallerRol);
     const ruleAccount: AccountSummary = callerHasSchedule
       ? { id: caller.id, rol: caller.rol, cargo: null }
@@ -440,8 +403,6 @@ export class AppointmentsService {
         priorNotes: dto.priorNotes ?? null,
       });
       const saved = await em.save(appointment);
-
-      // Primera entrada del historial: anterior=null → nuevo=estado inicial.
       await this.appendStatusLog(
         saved.id,
         null,
@@ -485,22 +446,6 @@ export class AppointmentsService {
     });
   }
 
-  // ════════════════════════════════════════════════════════════════
-  // READ
-  // ════════════════════════════════════════════════════════════════
-
-  /**
-   * Auto-cierre de citas vencidas. Para cualquier cita cuyo
-   * `scheduledAt + durationMin` haya quedado en el pasado y siga en
-   * estado `pendiente` o `confirmada`, el sistema la marca:
-   *
-   *   - `confirmada` → `realizada` (cita aceptada, se asume cumplida)
-   *   - `pendiente`  → `no_asistio` (nadie confirmó a tiempo)
-   *
-   * Es idempotente: si no hay nada para cerrar, no hace nada. Se llama
-   * antes de devolver listados o detalles para que el FE siempre vea
-   * estados coherentes con la fecha actual.
-   */
   private async autoFinalizePastAppointments(): Promise<void> {
     try {
       await this.appointmentRepo.query(
@@ -519,8 +464,7 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `autoFinalizePastAppointments falló: ${
-          err instanceof Error ? err.message : String(err)
+        `autoFinalizePastAppointments falló: ${err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -532,8 +476,6 @@ export class AppointmentsService {
     const limit = q.limit ?? 25;
     const order = q.order ?? 'DESC';
 
-    // Aplica filtros sobre un QB sin joins (evita bug de TypeORM con
-    // skip/take + leftJoinAndSelect + orderBy en createOrderByCombinedWithSelectExpression)
     const applyFilters = (qb: SelectQueryBuilder<Appointment>) => {
       qb.where(
         new Brackets((w) => {
@@ -904,26 +846,6 @@ export class AppointmentsService {
     return saved;
   }
 
-  // ════════════════════════════════════════════════════════════════
-  // APLAZAR / REALIZAR / INASISTENCIA  (spec sec. 4)
-  // ════════════════════════════════════════════════════════════════
-
-  /**
-   * Aplaza la cita proponiendo una nueva fecha. Dos caminos según quién llama:
-   *
-   *  • CONVOCADOR (psicóloga, docente, admin/director): re-propone el horario
-   *    dentro de su propia disponibilidad. La cita vuelve a `pendiente` y el
-   *    convocado debe re-aceptar.
-   *
-   *  • CONVOCADO (padre, alumno): contra-propone un horario dentro de la
-   *    disponibilidad del CONVOCADOR. También deja la cita en `pendiente`,
-   *    pero ahora es el convocador quien debe re-aceptar.
-   *
-   *  • admin sin ser parte: puede aplazar cualquier cita (uso operativo).
-   *
-   * El motivo es obligatorio en ambos casos y queda registrado tanto en
-   * `prior_notes` como en `cita_estado_log.razon` para auditoría.
-   */
   async postponeAppointment(
     caller: CallerContext,
     id: string,
@@ -932,8 +854,6 @@ export class AppointmentsService {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new NotFoundException('Cita no encontrada');
 
-    // Spec (Aarón, 2026-05): el alumno NUNCA puede aplazar una cita.
-    // Solo puede cancelar (con motivo). El resto de roles puede aplazar.
     if (caller.rol === 'alumno')
       throw new ForbiddenException(
         'El alumno no puede aplazar una cita. Si necesitas cambiarla, cancélala y vuelve a agendarla.',
@@ -1060,10 +980,6 @@ export class AppointmentsService {
     return saved;
   }
 
-  /**
-   * La psicóloga marca la cita como `no_asistio`. Se notifica al padre vinculado
-   * al alumno (si lo hay) con el evento `inasistencia_alumno`.
-   */
   async markAsNoAsistio(
     caller: CallerContext,
     id: string,
@@ -1148,9 +1064,6 @@ export class AppointmentsService {
         'La cuenta indicada no es una psicóloga válida',
       );
 
-    // Reutilizamos createAppointment con tipo=psicologico y caller=docente
-    // pero como caller=docente no puede convocar a psicologa (matriz)
-    // creamos la cita directamente respetando las reglas mínimas.
     const scheduledAt = new Date(dto.scheduledAt);
     this.assertScheduledAtIsValid(scheduledAt);
 
@@ -1193,12 +1106,6 @@ export class AppointmentsService {
         throw new ConflictException(
           'Ese horario ya está ocupado para la psicóloga',
         );
-
-      // Spec (Aarón, 2026-05):
-      //   Al derivar el docente al alumno, la cita debe quedar auto-
-      //   confirmada ante la psicóloga (informativa para el docente,
-      //   accionable para la psicóloga). El alumno la verá como
-      //   "confirmada" con subtítulo "Derivado por: <docente>".
       const appointment = em.create(Appointment, {
         createdById: caller.id,
         convocadoAId: psicologaSummary.id,
@@ -1506,9 +1413,6 @@ export class AppointmentsService {
       throw new ForbiddenException(
         'No puedes eliminar la disponibilidad de otra persona',
       );
-
-    // Buscamos citas en pendiente o confirmada cuya fecha_hora caiga en
-    // el dia_semana y dentro del rango [hora_inicio, hora_fin) del slot.
     const affected = await this.appointmentRepo
       .createQueryBuilder('a')
       .leftJoinAndSelect('a.student', 'student')
@@ -1585,10 +1489,10 @@ export class AppointmentsService {
       }
       return cancelledCount > 0
         ? {
-            deleted: true as const,
-            cancelledCount,
-            affected: summaries,
-          }
+          deleted: true as const,
+          cancelledCount,
+          affected: summaries,
+        }
         : { deleted: true as const, cancelledCount };
     });
   }
@@ -1671,22 +1575,6 @@ export class AppointmentsService {
       label: rule.label,
     };
   }
-
-  // ════════════════════════════════════════════════════════════════
-  // DIRECTORIO DE DOCENTES CONVOCABLES (role-aware)
-  // ════════════════════════════════════════════════════════════════
-
-  /**
-   * Devuelve los docentes que el caller puede convocar.
-   *
-   * - `padre`: docentes que dictan curso a alguno de sus hijos o son
-   *   tutores de su sección. Solo docentes activos.
-   * - `psicologa` / `admin`: todos los docentes activos.
-   *
-   * El padre llama a esto desde el dialog "Agendar cita con docente". El
-   * admin lo usa desde gestión de citas. El docente NO debe convocar a otro
-   * docente, así que no le exponemos esta ruta.
-   */
   async listBookableTeachers(caller: CallerContext): Promise<
     Array<{
       id: string;
@@ -1786,9 +1674,9 @@ export class AppointmentsService {
       especialidad: r.especialidad,
       tutoria_actual: r.tutoria_seccion_id
         ? {
-            seccion_id: r.tutoria_seccion_id,
-            seccion_label: r.tutoria_seccion_label ?? '',
-          }
+          seccion_id: r.tutoria_seccion_id,
+          seccion_label: r.tutoria_seccion_label ?? '',
+        }
         : null,
     };
   }
@@ -1833,8 +1721,7 @@ export class AppointmentsService {
     const effectiveMax = Math.min(rule.maxDurationMin, maxBySlots);
     if (value > effectiveMax)
       throw new BadRequestException(
-        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${
-          rule.maxConsecutiveSlots === 1 ? '' : 's'
+        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${rule.maxConsecutiveSlots === 1 ? '' : 's'
         } consecutivo${rule.maxConsecutiveSlots === 1 ? '' : 's'} (${effectiveMax} min)`,
       );
     return value;

@@ -1,6 +1,7 @@
 import {
     IsArray, IsDateString, IsIn, IsOptional, IsString,
-    IsUUID, IsNotEmpty, MaxLength, ArrayNotEmpty, ValidateNested, IsInt, Min, Max,
+    IsUUID, IsNotEmpty, MaxLength, ArrayNotEmpty,
+    ValidateNested, IsInt, Min, Max, IsBoolean, Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ESTADOS_ASISTENCIA } from '../entities/attendance-general.entity.js';
@@ -38,6 +39,7 @@ export class ListAsistenciasQueryDto {
     @IsOptional() @IsInt() @Min(1) @Max(500) @Type(() => Number) limit?: number;
     @IsOptional() @IsInt() @Min(0) @Type(() => Number) offset?: number;
 }
+
 export class ReporteAsistenciaQueryDto {
     @IsUUID() periodo_id: string;
     @IsOptional() @IsUUID() seccion_id?: string;
@@ -56,9 +58,27 @@ export class RegistroDocenteDto {
     @IsUUID()
     docente_id: string;
 
+    @IsOptional()
+    @Matches(/^\d{2}:\d{2}$/, { message: 'hora_llegada debe tener formato HH:mm' })
+    hora_llegada?: string;
+
     @IsIn(['presente', 'tardanza', 'falto', 'justificado'])
     estado: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(500)
+    motivo_justificacion?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    hubo_reemplazo?: boolean;
+
+    @IsOptional()
+    @IsString()
+    observacion?: string;
 }
+
 export class BulkDocenteAsistenciaDto {
     @IsDateString()
     fecha: string;

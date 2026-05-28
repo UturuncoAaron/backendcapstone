@@ -25,6 +25,7 @@ import { PdfGenerator } from './pdf/pdf.generator.js';
 // ── Imports ──────────────────────────────────────────────────────────────────
 import { StorageModule } from '../storage/storage.module.js';
 import { PsychologyModule } from '../psychology/psychology.module.js';
+import { AttendanceXlsxBuilder } from './attendance/attendance-xlsx-builder.service.js';
 
 @Module({
   imports: [
@@ -49,11 +50,12 @@ import { PsychologyModule } from '../psychology/psychology.module.js';
     XlsxBuilderService,
     AlumnoReportService,
     AlumnoReportXlsxBuilder,
+    AttendanceXlsxBuilder,
     PsychologyReportService,
     PdfGenerator,
   ],
   exports: [
-    PsychologyReportService,   // ← lo necesita ParentPortalService y luego AlumnoPortalService
+    PsychologyReportService,
   ],
 })
 export class ReportsModule { }

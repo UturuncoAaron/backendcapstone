@@ -73,7 +73,7 @@ export class CoursesService {
                 .where('c.docente_id = :userId', { userId })
                 .andWhere('c.activo = true')
                 .andWhere('c.anio = :anio', { anio: anioActual })
-                .orderBy('c.nombre', 'ASC')
+                .orderBy('cat.nombre', 'ASC')
                 .getMany();
         }
 
@@ -95,7 +95,7 @@ export class CoursesService {
                 .where('c.seccion_id IN (:...ids)', { ids: seccionIds })
                 .andWhere('c.anio = :anio', { anio: anioActual })
                 .andWhere('c.activo = true')
-                .orderBy('c.nombre', 'ASC')
+                .orderBy('cat.nombre', 'ASC')
                 .getMany();
         }
 
@@ -111,7 +111,7 @@ export class CoursesService {
 
         if (seccionId) query.andWhere('c.seccion_id = :seccionId', { seccionId });
 
-        return query.orderBy('c.nombre', 'ASC').getMany();
+        return query.orderBy('cat.nombre', 'ASC').getMany();
     }
 
     async findOne(id: string) {
@@ -137,7 +137,6 @@ export class CoursesService {
         if (!catalogo) throw new NotFoundException(`Curso de catálogo ${dto.catalogo_id} no encontrado`);
 
         const course = this.courseRepo.create({
-            nombre: catalogo.nombre,
             catalogo_id: dto.catalogo_id,
             descripcion: dto.descripcion ?? null,
             docente_id: dto.docente_id ?? null,
@@ -164,7 +163,10 @@ export class CoursesService {
     }
 
     async assignTeacher(cursoId: string, docenteId: string) {
-        const course = await this.courseRepo.findOne({ where: { id: cursoId, activo: true } });
+        const course = await this.courseRepo.findOne({
+            where: { id: cursoId, activo: true },
+            relations: ['catalogo'],
+        });
         if (!course) throw new NotFoundException(`Curso ${cursoId} no encontrado`);
 
         const [docente] = await this.dataSource.query(
@@ -179,7 +181,7 @@ export class CoursesService {
         course.docente_id = docenteId;
         await this.courseRepo.save(course);
         return {
-            curso: course.nombre,
+            curso: course.catalogo.nombre,
             docente: `${docente.nombre} ${docente.apellido_paterno}`,
         };
     }

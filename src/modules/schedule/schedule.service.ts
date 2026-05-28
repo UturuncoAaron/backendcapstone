@@ -12,16 +12,16 @@ export class ScheduleService {
         private readonly db: DataSource,
     ) { }
 
-    // ── GET schedule for a section ────────────────────────────────
     async getHorarioBySeccion(seccionId: string, anio: number) {
         const courses = await this.db.query<{ id: string; nombre: string; color: string }[]>(
-            `SELECT id, nombre, color
-         FROM cursos
-         WHERE seccion_id = $1
-           AND anio = $2
-           AND activo = TRUE
-           AND docente_id IS NOT NULL
-         ORDER BY nombre`,
+            `SELECT c.id, cc.nombre, c.color
+             FROM cursos c
+             JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
+             WHERE c.seccion_id = $1
+               AND c.anio = $2
+               AND c.activo = TRUE
+               AND c.docente_id IS NOT NULL
+             ORDER BY cc.nombre`,
             [seccionId, anio],
         );
         if (!courses.length) return [];
@@ -48,29 +48,30 @@ export class ScheduleService {
         }));
     }
 
-    // ── UPSERT slots for a course (replace all) ───────────────────
     async upsertFranjasCurso(cursoId: string, slots: UpsertFranjaDto[]) {
         const [course] = await this.db.query(
-            `SELECT c.id, c.nombre, c.seccion_id FROM cursos WHERE id = $1 AND activo = TRUE`,
+            `SELECT c.id, cc.nombre, c.seccion_id
+             FROM cursos c
+             JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
+             WHERE c.id = $1 AND c.activo = TRUE`,
             [cursoId],
         );
         if (!course) throw new NotFoundException(`Curso ${cursoId} no encontrado`);
 
-        // Validación interna del curso (hora_inicio < hora_fin + solapamiento propio)
         this.validateOverlap(slots);
 
-        // Validación cruzada: otros cursos de la misma sección
         if (slots.length > 0) {
             const diasUsados = [...new Set(slots.map(s => s.dia_semana))];
             const otrosSlots = await this.db.query<{
                 dia_semana: string; hora_inicio: string; hora_fin: string; curso_nombre: string;
             }[]>(
-                `SELECT h.dia_semana, h.hora_inicio, h.hora_fin, c.nombre AS curso_nombre
-               FROM horarios h
-               JOIN cursos c ON c.id = h.curso_id
-              WHERE c.seccion_id = $1
-                AND c.id <> $2
-                AND h.dia_semana = ANY($3::text[])`,
+                `SELECT h.dia_semana, h.hora_inicio, h.hora_fin, cc.nombre AS curso_nombre
+                 FROM horarios h
+                 JOIN cursos c ON c.id = h.curso_id
+                 JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
+                 WHERE c.seccion_id = $1
+                   AND c.id <> $2
+                   AND h.dia_semana = ANY($3::text[])`,
                 [course.seccion_id, cursoId, diasUsados],
             );
 
@@ -111,7 +112,6 @@ export class ScheduleService {
         return { course: course.nombre, slots_saved: slots.length };
     }
 
-    // ── Horario para un alumno ────────────────────────────────────
     async getHorarioForAlumno(alumnoId: string) {
         const [periodoActivo] = await this.db.query<{ anio: number }[]>(
             `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
@@ -120,15 +120,15 @@ export class ScheduleService {
 
         const [enrollment] = await this.db.query<{ seccion_id: string }[]>(
             `SELECT seccion_id FROM matriculas
-         WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE
-         LIMIT 1`,
+             WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE
+             LIMIT 1`,
             [alumnoId, periodoActivo.anio],
         );
         if (!enrollment) return [];
 
         return this.getHorarioBySeccion(enrollment.seccion_id, periodoActivo.anio);
     }
-    // ── Verificación de vínculo padre-alumno ──────────────────────
+
     async isPadreDeAlumno(padreId: string, alumnoId: string): Promise<boolean> {
         const rows = await this.db.query(
             `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
@@ -137,23 +137,13 @@ export class ScheduleService {
         return rows.length > 0;
     }
 
-    // ── DELETE single slot ────────────────────────────────────────
-    async deleteFranja(slotId: number) {
+    async deleteFranja(slotId: string) {
         const slot = await this.scheduleRepo.findOne({ where: { id: slotId } });
         if (!slot) throw new NotFoundException(`Slot ${slotId} no encontrado`);
         await this.scheduleRepo.remove(slot);
         return { deleted: slotId };
     }
 
-    // ════════════════════════════════════════════════════════════
-    // HORARIOS DEL DÍA (para asistencia de docentes)
-    // ════════════════════════════════════════════════════════════
-
-    /**
-     * Devuelve todos los horarios programados para un día de la semana,
-     * junto con la información del docente y el curso.
-     * Usado por el auxiliar para registrar asistencia de docentes.
-     */
     async getHorariosByDia(dia: string) {
         const horarios = await this.db.query<{
             id: string;
@@ -175,10 +165,11 @@ export class ScheduleService {
                 d.nombre           AS docente_nombre,
                 d.apellido_paterno AS docente_apellido_paterno,
                 d.especialidad,
-                c.nombre           AS curso_nombre
+                cc.nombre          AS curso_nombre
              FROM horarios h
-             JOIN cursos c   ON c.id = h.curso_id AND c.activo = TRUE
-             JOIN docentes d ON d.id = c.docente_id
+             JOIN cursos c          ON c.id = h.curso_id AND c.activo = TRUE
+             JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
+             JOIN docentes d        ON d.id = c.docente_id
              WHERE LOWER(h.dia_semana) = LOWER($1)
              ORDER BY h.hora_inicio ASC`,
             [dia],
@@ -198,7 +189,6 @@ export class ScheduleService {
         }));
     }
 
-    // ── Overlap validation ────────────────────────────────────────
     private validateOverlap(slots: UpsertFranjaDto[]) {
         const byDay = new Map<string, { start: string; end: string }[]>();
 

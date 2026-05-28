@@ -6,6 +6,7 @@ import { DataSource, Repository } from 'typeorm';
 import { GradeLevel } from './entities/grade-level.entity.js';
 import { Section } from './entities/section.entity.js';
 import { Period } from './entities/period.entity.js';
+import { SeccionTutor } from './entities/seccion-tutor.entity.js';
 import { CoursesService } from '../courses/courses.service.js';
 import { StorageService } from '../storage/storage.service.js';
 
@@ -23,6 +24,7 @@ export class AcademicService {
         @InjectRepository(GradeLevel) private readonly gradoRepo: Repository<GradeLevel>,
         @InjectRepository(Section) private readonly seccionRepo: Repository<Section>,
         @InjectRepository(Period) private readonly periodoRepo: Repository<Period>,
+        @InjectRepository(SeccionTutor) private readonly seccionTutorRepo: Repository<SeccionTutor>,
         private readonly coursesService: CoursesService,
         private readonly storageService: StorageService,
         private readonly dataSource: DataSource,
@@ -40,32 +42,47 @@ export class AcademicService {
 
     // ── SECCIONES ────────────────────────────────────────────────
 
-    findAllSecciones(gradoId?: string) {
-        const where: any = {};
-        if (gradoId) where.grado_id = gradoId;
-        return this.seccionRepo.find({
-            where,
-            relations: ['grado', 'tutor'],
-            order: { nombre: 'ASC' },
-        });
+    async findAllSecciones(gradoId?: string) {
+        const anio = await this.getAnioActual();
+
+        const params: any[] = [anio];
+        let gradoFilter = '';
+        if (gradoId) {
+            params.push(gradoId);
+            gradoFilter = `AND s.grado_id = $${params.length}`;
+        }
+
+        return this.dataSource.query(
+            `SELECT
+                s.id, s.nombre, s.capacidad, s.activo, s.grado_id,
+                g.nombre  AS grado_nombre,
+                g.orden   AS grado_orden,
+                st.docente_id AS tutor_id,
+                d.nombre  AS tutor_nombre,
+                d.apellido_paterno AS tutor_apellido
+             FROM secciones s
+             JOIN grados g ON g.id = s.grado_id
+             LEFT JOIN secciones_tutores st
+                ON st.seccion_id = s.id AND st.anio = $1 AND st.activo = TRUE
+             LEFT JOIN docentes d ON d.id = st.docente_id
+             WHERE s.activo = TRUE ${gradoFilter}
+             ORDER BY g.orden ASC, s.nombre ASC`,
+            params,
+        );
     }
 
-    /**
-     * Secciones donde el docente tiene al menos un curso activo asignado.
-     * Usado por LibretasPadresPage para limitar el selector a sus secciones.
-     */
     async getSeccionesDocente(docenteId: string) {
         return this.dataSource.query(
             `SELECT DISTINCT
                 s.id,
                 s.nombre,
-                g.nombre  AS grado_nombre,
-                g.orden   AS grado_orden
+                g.nombre AS grado_nombre,
+                g.orden  AS grado_orden
              FROM cursos c
              JOIN secciones s ON s.id = c.seccion_id
              JOIN grados    g ON g.id = s.grado_id
              WHERE c.docente_id = $1
-               AND c.activo     = TRUE
+               AND c.activo = TRUE
              ORDER BY g.orden ASC, s.nombre ASC`,
             [docenteId],
         );
@@ -86,25 +103,82 @@ export class AcademicService {
         return this.seccionRepo.save(seccion);
     }
 
+    async updateSeccion(seccionId: string, nombre?: string, capacidad?: number) {
+        const seccion = await this.seccionRepo.findOne({ where: { id: seccionId } });
+        if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+
+        if (nombre !== undefined) {
+            const existe = await this.seccionRepo.findOne({
+                where: { grado_id: seccion.grado_id, nombre },
+            });
+            if (existe && existe.id !== seccionId)
+                throw new ConflictException(`Ya existe una sección "${nombre}" en ese grado`);
+            seccion.nombre = nombre;
+        }
+
+        if (capacidad !== undefined) {
+            const ocupacion = await this.dataSource.query<{ count: string }[]>(
+                `SELECT COUNT(*)::text AS count FROM matriculas
+                 WHERE seccion_id = $1 AND activo = TRUE`,
+                [seccionId],
+            );
+            if (capacidad < Number(ocupacion[0].count))
+                throw new BadRequestException(
+                    `La capacidad no puede ser menor a los alumnos matriculados (${ocupacion[0].count})`,
+                );
+            seccion.capacidad = capacidad;
+        }
+
+        await this.seccionRepo.save(seccion);
+
+        // Retornar con tutor del año actual
+        const anio = await this.getAnioActual();
+        const [result] = await this.dataSource.query(
+            `SELECT
+                s.id, s.nombre, s.capacidad, s.activo, s.grado_id,
+                g.nombre AS grado_nombre,
+                st.docente_id AS tutor_id,
+                d.nombre AS tutor_nombre,
+                d.apellido_paterno AS tutor_apellido
+             FROM secciones s
+             JOIN grados g ON g.id = s.grado_id
+             LEFT JOIN secciones_tutores st
+                ON st.seccion_id = s.id AND st.anio = $2 AND st.activo = TRUE
+             LEFT JOIN docentes d ON d.id = st.docente_id
+             WHERE s.id = $1`,
+            [seccionId, anio],
+        );
+        return result;
+    }
+
     async asignarTutor(seccionId: string, docenteId: string | null, force = false) {
         const seccion = await this.seccionRepo.findOne({ where: { id: seccionId } });
         if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
 
+        const anio = await this.getAnioActual();
+
         if (docenteId === null) {
-            seccion.tutor_id = null;
-            await this.seccionRepo.save(seccion);
-            return this.seccionRepo.findOne({
-                where: { id: seccionId },
-                relations: ['grado', 'tutor'],
-            });
+            // Desasignar: marcar como inactivo el registro del año actual
+            await this.dataSource.query(
+                `UPDATE secciones_tutores SET activo = FALSE
+                 WHERE seccion_id = $1 AND anio = $2`,
+                [seccionId, anio],
+            );
+            return this.getSectionWithTutor(seccionId, anio);
         }
 
-        const otra = await this.seccionRepo
-            .createQueryBuilder('s')
-            .leftJoin('grados', 'g', 'g.id = s.grado_id')
-            .select(['s.id AS id', 's.nombre AS nombre', 'g.nombre AS grado_nombre'])
-            .where('s.tutor_id = :docId AND s.id <> :seccionId', { docId: docenteId, seccionId })
-            .getRawOne();
+        // Verificar si el docente ya es tutor de otra sección este año
+        const [otra] = await this.dataSource.query(
+            `SELECT st.seccion_id, s.nombre, g.nombre AS grado_nombre
+             FROM secciones_tutores st
+             JOIN secciones s ON s.id = st.seccion_id
+             JOIN grados g ON g.id = s.grado_id
+             WHERE st.docente_id = $1
+               AND st.anio = $2
+               AND st.activo = TRUE
+               AND st.seccion_id <> $3`,
+            [docenteId, anio, seccionId],
+        );
 
         if (otra && !force) {
             throw new ConflictException(
@@ -114,39 +188,49 @@ export class AcademicService {
         }
 
         if (otra && force) {
-            await this.seccionRepo.update({ id: otra.id }, { tutor_id: null });
+            // Desasignar de la sección anterior
+            await this.dataSource.query(
+                `UPDATE secciones_tutores SET activo = FALSE
+                 WHERE seccion_id = $1 AND anio = $2 AND docente_id = $3`,
+                [otra.seccion_id, anio, docenteId],
+            );
         }
 
-        seccion.tutor_id = docenteId;
-        await this.seccionRepo.save(seccion);
+        // Upsert en secciones_tutores
+        await this.dataSource.query(
+            `INSERT INTO secciones_tutores (seccion_id, docente_id, anio, activo)
+             VALUES ($1, $2, $3, TRUE)
+             ON CONFLICT (seccion_id, anio)
+             DO UPDATE SET docente_id = $2, activo = TRUE`,
+            [seccionId, docenteId, anio],
+        );
 
-        return this.seccionRepo.findOne({
-            where: { id: seccionId },
-            relations: ['grado', 'tutor'],
-        });
+        return this.getSectionWithTutor(seccionId, anio);
     }
 
     async getTutoriaForDocente(docenteId: string) {
-        const seccion = await this.dataSource.query(
+        const anio = await this.getAnioActual();
+
+        const [seccionRow] = await this.dataSource.query(
             `SELECT
                 s.id, s.nombre, s.grado_id, s.capacidad,
                 g.nombre AS grado_nombre, g.orden AS grado_orden
-             FROM secciones s
+             FROM secciones_tutores st
+             JOIN secciones s ON s.id = st.seccion_id
              JOIN grados g ON g.id = s.grado_id
-             WHERE s.tutor_id = $1
+             WHERE st.docente_id = $1
+               AND st.anio = $2
+               AND st.activo = TRUE
              LIMIT 1`,
-            [docenteId],
+            [docenteId, anio],
         );
 
-        if (!seccion.length) return null;
+        if (!seccionRow) return null;
 
-        const sec = seccion[0];
         const periodoActivo = await this.dataSource.query(
             `SELECT id, nombre, anio, bimestre, activo
              FROM periodos WHERE activo = TRUE LIMIT 1`,
         );
-
-        const anio = periodoActivo.length ? periodoActivo[0].anio : new Date().getFullYear();
 
         const periodos = await this.dataSource.query(
             `SELECT id, nombre, anio, bimestre, activo
@@ -164,7 +248,7 @@ export class AcademicService {
              JOIN alumnos a ON a.id = m.alumno_id
              WHERE m.seccion_id = $1 AND m.activo = TRUE AND m.anio = $2
              ORDER BY a.apellido_paterno, a.nombre`,
-            [sec.id, anio],
+            [seccionRow.id, anio],
         );
 
         const alumnoIds = alumnos.map((a: any) => a.id);
@@ -197,11 +281,6 @@ export class AcademicService {
             libretasPorAlumno.set(l.alumno_id, arr);
         });
 
-        const alumnosConLibretas = alumnos.map((a: any) => ({
-            ...a,
-            libretas: libretasPorAlumno.get(a.id) ?? [],
-        }));
-
         let padres: any[] = [];
         if (alumnoIds.length) {
             padres = await this.dataSource.query(
@@ -220,16 +299,19 @@ export class AcademicService {
 
         return {
             seccion: {
-                id: sec.id,
-                nombre: sec.nombre,
-                grado_id: sec.grado_id,
-                grado_nombre: sec.grado_nombre,
-                grado_orden: sec.grado_orden,
-                capacidad: sec.capacidad,
+                id: seccionRow.id,
+                nombre: seccionRow.nombre,
+                grado_id: seccionRow.grado_id,
+                grado_nombre: seccionRow.grado_nombre,
+                grado_orden: seccionRow.grado_orden,
+                capacidad: seccionRow.capacidad,
             },
             periodo_activo: periodoActivo[0] ?? null,
             periodos,
-            alumnos: alumnosConLibretas,
+            alumnos: alumnos.map((a: any) => ({
+                ...a,
+                libretas: libretasPorAlumno.get(a.id) ?? [],
+            })),
             padres,
         };
     }
@@ -267,13 +349,7 @@ export class AcademicService {
     // ── MATRÍCULAS ───────────────────────────────────────────────
 
     async findMatriculas(anio?: number, seccionId?: string, gradoId?: string) {
-        let anioFinal = anio;
-        if (!anioFinal) {
-            const [row] = await this.dataSource.query<{ anio: number }[]>(
-                `SELECT anio FROM periodos WHERE activo = TRUE LIMIT 1`,
-            );
-            anioFinal = row?.anio ?? new Date().getFullYear();
-        }
+        const anioFinal = anio ?? await this.getAnioActual();
 
         const params: (number | string)[] = [anioFinal];
         const conditions = [`m.anio = $1`];
@@ -290,21 +366,21 @@ export class AcademicService {
 
         const rows = await this.dataSource.query<any[]>(
             `SELECT
-            m.id, m.activo, m.fecha_matricula, m.anio, m.seccion_id,
-            m.condicion_final,
-            a.id               AS alumno_id,
-            a.nombre, a.apellido_paterno, a.apellido_materno, a.codigo_estudiante,
-            s.nombre           AS seccion_nombre,
-            s.capacidad,
-            g.id               AS grado_id,
-            g.nombre           AS grado_nombre,
-            g.orden            AS grado_orden
-         FROM matriculas m
-         JOIN alumnos   a ON a.id = m.alumno_id
-         JOIN secciones s ON s.id = m.seccion_id
-         JOIN grados    g ON g.id = s.grado_id
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY g.orden ASC, s.nombre ASC, a.apellido_paterno ASC, a.nombre ASC`,
+                m.id, m.activo, m.fecha_matricula, m.anio, m.seccion_id,
+                m.condicion_final,
+                a.id               AS alumno_id,
+                a.nombre, a.apellido_paterno, a.apellido_materno, a.codigo_estudiante,
+                s.nombre           AS seccion_nombre,
+                s.capacidad,
+                g.id               AS grado_id,
+                g.nombre           AS grado_nombre,
+                g.orden            AS grado_orden
+             FROM matriculas m
+             JOIN alumnos   a ON a.id = m.alumno_id
+             JOIN secciones s ON s.id = m.seccion_id
+             JOIN grados    g ON g.id = s.grado_id
+             WHERE ${conditions.join(' AND ')}
+             ORDER BY g.orden ASC, s.nombre ASC, a.apellido_paterno ASC, a.nombre ASC`,
             params,
         );
 
@@ -326,35 +402,32 @@ export class AcademicService {
             grado_orden: r.grado_orden,
         }));
     }
-    async updateSeccion(seccionId: string, nombre?: string, capacidad?: number) {
-        const seccion = await this.seccionRepo.findOne({ where: { id: seccionId } });
-        if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
 
-        if (nombre !== undefined) {
-            const existe = await this.seccionRepo.findOne({
-                where: { grado_id: seccion.grado_id, nombre },
-            });
-            if (existe && existe.id !== seccionId)
-                throw new ConflictException(`Ya existe una sección "${nombre}" en ese grado`);
-            seccion.nombre = nombre;
-        }
+    // ── HELPERS PRIVADOS ─────────────────────────────────────────
 
-        if (capacidad !== undefined) {
-            const ocupacion = await this.dataSource.query<{ count: string }[]>(
-                `SELECT COUNT(*)::text AS count FROM matriculas
-             WHERE seccion_id = $1 AND activo = TRUE`,
-                [seccionId],
-            );
-            if (capacidad < Number(ocupacion[0].count))
-                throw new BadRequestException(
-                    `La capacidad no puede ser menor a los alumnos matriculados (${ocupacion[0].count})`,
-                );
-            seccion.capacidad = capacidad;
-        }
-
-        await this.seccionRepo.save(seccion);
-        return this.seccionRepo.findOne({ where: { id: seccionId }, relations: ['grado', 'tutor'] });
+    private async getAnioActual(): Promise<number> {
+        const [row] = await this.dataSource.query<{ anio: number }[]>(
+            `SELECT anio FROM anios_lectivos WHERE estado = 'en_curso' LIMIT 1`,
+        );
+        return row?.anio ?? new Date().getFullYear();
     }
 
-
+    private async getSectionWithTutor(seccionId: string, anio: number) {
+        const [result] = await this.dataSource.query(
+            `SELECT
+                s.id, s.nombre, s.capacidad, s.activo, s.grado_id,
+                g.nombre AS grado_nombre,
+                st.docente_id AS tutor_id,
+                d.nombre AS tutor_nombre,
+                d.apellido_paterno AS tutor_apellido
+             FROM secciones s
+             JOIN grados g ON g.id = s.grado_id
+             LEFT JOIN secciones_tutores st
+                ON st.seccion_id = s.id AND st.anio = $2 AND st.activo = TRUE
+             LEFT JOIN docentes d ON d.id = st.docente_id
+             WHERE s.id = $1`,
+            [seccionId, anio],
+        );
+        return result;
+    }
 }

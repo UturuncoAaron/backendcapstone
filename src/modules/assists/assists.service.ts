@@ -21,7 +21,7 @@ export class AssistsService {
     private readonly logger = new Logger(AssistsService.name);
 
     private readonly HORA_LIMITE_ENTRADA = '07:30';
-    private periodoCache: { id: string; fecha_fin: string } | null = null;
+    private periodoCache: { id: string; fecha_inicio: string; fecha_fin: string } | null = null;
 
     constructor(
         @InjectRepository(AttendanceGeneral)
@@ -55,39 +55,22 @@ export class AssistsService {
         }
     }
 
-    private async assertTutorDeSeccion(seccionId: string, user: AuthUser) {
-        if (user.rol === 'admin' || user.rol === 'auxiliar') {
-            const rows = await this.dataSource.query<{ activo: boolean }[]>(
-                `SELECT activo FROM secciones WHERE id = $1`, [seccionId],
-            );
-            if (!rows[0]) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
-            if (!rows[0].activo) throw new BadRequestException(`Sección ${seccionId} inactiva`);
-            return;
-        }
-        if (user.rol !== 'docente') {
-            throw new ForbiddenException('Solo docente-tutor, auxiliar o admin pueden registrar asistencia general');
-        }
-        const rows = await this.dataSource.query<{ tutor_id: string | null; activo: boolean }[]>(
-            `SELECT tutor_id, activo FROM secciones WHERE id = $1`, [seccionId],
-        );
-        if (!rows[0]) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
-        if (!rows[0].activo) throw new BadRequestException(`Sección ${seccionId} inactiva`);
-        if (rows[0].tutor_id !== user.id) {
-            throw new ForbiddenException('Solo el tutor de la sección puede registrar asistencia general');
-        }
-    }
-
+    // 2. El método completo resolvePeriodoId
     private async resolvePeriodoId(fecha: string, periodoIdOpcional?: string): Promise<string> {
         if (periodoIdOpcional) return periodoIdOpcional;
 
-        if (this.periodoCache && fecha >= '1970-01-01' && fecha <= this.periodoCache.fecha_fin) {
+        if (
+            this.periodoCache &&
+            fecha >= this.periodoCache.fecha_inicio &&
+            fecha <= this.periodoCache.fecha_fin
+        ) {
             return this.periodoCache.id;
         }
 
-        const rows = await this.dataSource.query<{ id: string; fecha_fin: string }[]>(
-            `SELECT id, fecha_fin FROM periodos
-             WHERE $1::date BETWEEN fecha_inicio AND fecha_fin
-             LIMIT 1`,
+        const rows = await this.dataSource.query<{ id: string; fecha_inicio: string; fecha_fin: string }[]>(
+            `SELECT id, fecha_inicio::text, fecha_fin::text FROM periodos
+         WHERE $1::date BETWEEN fecha_inicio AND fecha_fin
+         LIMIT 1`,
             [fecha],
         );
 
@@ -98,9 +81,12 @@ export class AssistsService {
             );
         }
 
-        this.periodoCache = { id: rows[0].id, fecha_fin: rows[0].fecha_fin };
-        this.logger.log(`Cache período actualizado → id=${rows[0].id} hasta=${rows[0].fecha_fin}`);
-
+        this.periodoCache = {
+            id: rows[0].id,
+            fecha_inicio: rows[0].fecha_inicio,
+            fecha_fin: rows[0].fecha_fin,
+        };
+        this.logger.log(`Cache período → id=${rows[0].id} [${rows[0].fecha_inicio} → ${rows[0].fecha_fin}]`);
         return rows[0].id;
     }
 
@@ -237,25 +223,35 @@ export class AssistsService {
     // ASISTENCIA GENERAL
     // ════════════════════════════════════════════════════════════
 
-    async generalRegister(seccionId: string, dto: RegisterAsistenciaDto, user: AuthUser) {
-        this.requireAuth(user);
-        await this.assertTutorDeSeccion(seccionId, user);
-        const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
-        await this.assertAlumnoEnSeccion(dto.alumno_id, seccionId, dto.fecha);
+    private async assertTutorDeSeccion(seccionId: string, user: AuthUser) {
+        if (user.rol === 'admin' || user.rol === 'auxiliar') {
+            const rows = await this.dataSource.query<{ activo: boolean }[]>(
+                `SELECT activo FROM secciones WHERE id = $1`, [seccionId],
+            );
+            if (!rows[0]) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+            if (!rows[0].activo) throw new BadRequestException(`Sección ${seccionId} inactiva`);
+            return;
+        }
+        if (user.rol !== 'docente') {
+            throw new ForbiddenException('Solo docente-tutor, auxiliar o admin pueden registrar asistencia general');
+        }
 
-        const record = {
-            alumno_id: dto.alumno_id,
-            seccion_id: seccionId,
-            periodo_id,
-            fecha: dto.fecha,
-            estado: dto.estado,
-            observacion: dto.observacion ?? null,
-            registrado_por: user.id,
-        };
-        await this.generalRepo.upsert(record, ['alumno_id', 'seccion_id', 'fecha']);
-        return record;
+        // Buscar tutor en secciones_tutores para el año activo
+        const anio = await this.getAnioActual();
+        const rows = await this.dataSource.query<{ activo: boolean; docente_id: string | null }[]>(
+            `SELECT s.activo, st.docente_id
+         FROM secciones s
+         LEFT JOIN secciones_tutores st
+           ON st.seccion_id = s.id AND st.anio = $2 AND st.activo = TRUE
+         WHERE s.id = $1`,
+            [seccionId, anio],
+        );
+        if (!rows[0]) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+        if (!rows[0].activo) throw new BadRequestException(`Sección ${seccionId} inactiva`);
+        if (rows[0].docente_id !== user.id) {
+            throw new ForbiddenException('Solo el tutor de la sección puede registrar asistencia general');
+        }
     }
-
     async generalBulk(seccionId: string, dto: BulkAsistenciaDto, user: AuthUser) {
         this.requireAuth(user);
         await this.assertTutorDeSeccion(seccionId, user);
@@ -567,19 +563,31 @@ export class AssistsService {
         const horarioIds = dto.registros.map(r => r.horario_id);
 
         await this.dataSource.transaction(async em => {
-            // CORRECCIÓN: Uso de em.delete con operador In de TypeORM
-            // para evitar arrays crudos.
             await em.delete(AttendanceDocente, {
                 fecha: dto.fecha,
                 horario_id: In(horarioIds),
             });
 
             for (const r of dto.registros) {
+                // Si viene hora_llegada, el trigger BD calcula presente/tardanza
+                // El service solo envía estado para falto/justificado
                 await em.query(
                     `INSERT INTO asistencias_docente
-                        (horario_id, docente_id, fecha, estado, registrado_por)
-                     VALUES ($1::uuid, $2::uuid, $3::date, $4, $5::uuid)`,
-                    [r.horario_id, r.docente_id, dto.fecha, r.estado, userId],
+                    (horario_id, docente_id, fecha, estado, hora_llegada,
+                     motivo_justificacion, hubo_reemplazo, observacion, registrado_por)
+                 VALUES ($1::uuid, $2::uuid, $3::date, $4, $5,
+                         $6, $7, $8, $9::uuid)`,
+                    [
+                        r.horario_id,
+                        r.docente_id,
+                        dto.fecha,
+                        r.estado,
+                        r.hora_llegada ?? null,
+                        r.motivo_justificacion ?? null,
+                        r.hubo_reemplazo ?? false,
+                        r.observacion ?? null,
+                        userId,
+                    ],
                 );
             }
         });
@@ -617,7 +625,7 @@ export class AssistsService {
                 d.id           AS docente_id,
                 d.nombre       AS docente_nombre,
                 d.apellido_paterno,
-                c.nombre       AS curso_nombre,
+                cc.nombre AS curso_nombre,
                 s.nombre       AS seccion_nombre,
                 h.hora_inicio,
                 h.hora_fin,
@@ -627,6 +635,7 @@ export class AssistsService {
                 ad.observacion
              FROM horarios h
              JOIN cursos    c ON c.id = h.curso_id AND c.activo = TRUE
+             JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
              JOIN secciones s ON s.id = c.seccion_id AND s.activo = TRUE
              JOIN docentes  d ON d.id = c.docente_id
              JOIN cuentas   cu ON cu.id = d.id AND cu.activo = TRUE
@@ -726,5 +735,30 @@ export class AssistsService {
              ORDER BY al.apellido_paterno, al.apellido_materno, al.nombre`,
             [q.curso_id, q.periodo_id],
         );
+    }
+    private async getAnioActual(): Promise<number> {
+        const [row] = await this.dataSource.query<{ anio: number }[]>(
+            `SELECT anio FROM anios_lectivos WHERE estado = 'en_curso' LIMIT 1`,
+        );
+        return row?.anio ?? new Date().getFullYear();
+    }
+
+    async generalRegister(seccionId: string, dto: RegisterAsistenciaDto, user: AuthUser) {
+        this.requireAuth(user);
+        await this.assertTutorDeSeccion(seccionId, user);
+        const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
+        await this.assertAlumnoEnSeccion(dto.alumno_id, seccionId, dto.fecha);
+
+        const record = {
+            alumno_id: dto.alumno_id,
+            seccion_id: seccionId,
+            periodo_id,
+            fecha: dto.fecha,
+            estado: dto.estado,
+            observacion: dto.observacion ?? null,
+            registrado_por: user.id,
+        };
+        await this.generalRepo.upsert(record, ['alumno_id', 'seccion_id', 'fecha']);
+        return record;
     }
 }

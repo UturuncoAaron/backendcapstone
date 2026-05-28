@@ -2,6 +2,7 @@ import {
     IsString, IsNotEmpty, IsOptional, IsDateString,
     IsInt, IsBoolean, Min, Max, ValidateNested,
     ArrayMinSize, IsUUID, IsArray,
+    IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -42,7 +43,10 @@ export class CreateTaskDto {
 
     @IsOptional() @IsString()
     instrucciones?: string;
-
+    @IsOptional()
+    
+    @IsIn(['tarea', 'practica', 'proyecto'])
+    tipo?: 'tarea' | 'practica' | 'proyecto';
     // Archivo enunciado subido por el docente a R2
     @IsOptional() @IsString()
     enunciado_storage_key?: string;

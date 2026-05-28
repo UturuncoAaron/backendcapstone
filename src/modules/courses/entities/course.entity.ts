@@ -12,9 +12,6 @@ export class Course {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column({ length: 150 })
-    nombre: string;
-
     @Column({ type: 'text', nullable: true })
     descripcion: string | null;
 

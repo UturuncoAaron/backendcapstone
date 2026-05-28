@@ -1,6 +1,6 @@
 import {
     Controller, Get, Put, Delete,
-    Param, Body, Query, ParseIntPipe, ParseUUIDPipe,
+    Param, Body, Query, ParseUUIDPipe,
     UseGuards, ForbiddenException,
 } from '@nestjs/common';
 import { ScheduleService } from './schedule.service.js';
@@ -44,6 +44,7 @@ export class ScheduleController {
         const anioFinal = anio ? +anio : new Date().getFullYear();
         return this.scheduleService.getHorarioBySeccion(seccionId, anioFinal);
     }
+
     @Get('hoy')
     @Roles('auxiliar', 'admin')
     getHorarioHoy(@Query('dia') dia?: string) {
@@ -52,10 +53,6 @@ export class ScheduleController {
         return this.scheduleService.getHorariosByDia(diaFinal);
     }
 
-    /**
-     * PUT /api/schedule/course/:cursoId
-     * Replaces all slots for a course. Send franjas: [] to clear all.
-     */
     @Put('course/:cursoId')
     @Roles('admin')
     upsertSlots(
@@ -65,13 +62,9 @@ export class ScheduleController {
         return this.scheduleService.upsertFranjasCurso(cursoId, slots ?? []);
     }
 
-    /**
-     * DELETE /api/schedule/slot/:id
-     * Deletes a single time slot.
-     */
     @Delete('slot/:id')
     @Roles('admin')
-    deleteSlot(@Param('id', ParseIntPipe) id: number) {
+    deleteSlot(@Param('id', ParseUUIDPipe) id: string) {
         return this.scheduleService.deleteFranja(id);
     }
 }
