@@ -45,6 +45,10 @@ export class Course {
     @Column({ default: true })
     activo: boolean;
 
+    get nombre(): string {
+        return this.catalogo?.nombre ?? '';
+    }
+
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;
 

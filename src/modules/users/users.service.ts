@@ -563,15 +563,17 @@ export class UsersService {
 
     if (filters?.includeTutoria) {
       qb
-        .leftJoin('secciones', 's', 's.tutor_id = d.id')
-        .leftJoin('grados', 'g', 'g.id = s.grado_id').addSelect(`
-                    CASE WHEN s.id IS NULL THEN NULL
-                         ELSE jsonb_build_object(
-                             'seccion_id',    s.id::text,
-                             'seccion_label', g.nombre || ' – Sección ' || s.nombre
-                         )
-                    END AS tutoria_actual
-                `);
+        .leftJoin('secciones_tutores', 'st', 'st.docente_id = d.id AND st.activo = TRUE')
+        .leftJoin('secciones', 's', 's.id = st.seccion_id')
+        .leftJoin('grados', 'g', 'g.id = s.grado_id')
+        .addSelect(`
+        CASE WHEN s.id IS NULL THEN NULL
+             ELSE jsonb_build_object(
+                 'seccion_id',    s.id::text,
+                 'seccion_label', g.nombre || ' – Sección ' || s.nombre
+             )
+        END AS tutoria_actual
+    `);
     }
 
     if (filters?.q && filters.q.trim().length >= 2) {
@@ -767,15 +769,17 @@ export class UsersService {
 
     if (includeTutoria) {
       qb
-        .leftJoin('secciones', 's', 's.tutor_id = d.id')
-        .leftJoin('grados', 'g', 'g.id = s.grado_id').addSelect(`
-                    CASE WHEN s.id IS NULL THEN NULL
-                         ELSE jsonb_build_object(
-                             'seccion_id',    s.id::text,
-                             'seccion_label', g.nombre || ' – Sección ' || s.nombre
-                         )
-                    END AS tutoria_actual
-                `);
+        .leftJoin('secciones_tutores', 'st', 'st.docente_id = d.id AND st.activo = TRUE')
+        .leftJoin('secciones', 's', 's.id = st.seccion_id')
+        .leftJoin('grados', 'g', 'g.id = s.grado_id')
+        .addSelect(`
+        CASE WHEN s.id IS NULL THEN NULL
+             ELSE jsonb_build_object(
+                 'seccion_id',    s.id::text,
+                 'seccion_label', g.nombre || ' - Sección ' || s.nombre
+             )
+        END AS tutoria_actual
+    `);
     }
 
     const rows = await qb.getRawMany();

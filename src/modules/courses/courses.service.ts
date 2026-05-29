@@ -64,8 +64,34 @@ export class CoursesService {
     async findMyCourses(userId: string, rol: string, seccionId?: string, anio?: number) {
         const anioActual = anio ?? new Date().getFullYear();
 
+        const mapCurso = (c: Course) => ({
+            id: c.id,
+            nombre: c.catalogo?.nombre ?? '',
+            catalogo_id: c.catalogo_id,
+            descripcion: c.descripcion,
+            color: c.color,
+            activo: c.activo,
+            anio: c.anio,
+            seccion_id: c.seccion_id,
+            docente_id: c.docente_id,
+            seccion: c.seccion ? {
+                id: c.seccion.id,
+                nombre: c.seccion.nombre,
+                grado: c.seccion.grado ? {
+                    id: c.seccion.grado.id,
+                    nombre: c.seccion.grado.nombre,
+                } : null,
+            } : null,
+            docente: c.docente ? {
+                id: c.docente.id,
+                nombre: c.docente.nombre,
+                apellido_paterno: c.docente.apellido_paterno,
+                especialidad: c.docente.especialidad ?? null,
+            } : null,
+        });
+
         if (rol === 'docente') {
-            return this.courseRepo
+            const cursos = await this.courseRepo
                 .createQueryBuilder('c')
                 .leftJoinAndSelect('c.seccion', 's')
                 .leftJoinAndSelect('s.grado', 'g')
@@ -75,18 +101,19 @@ export class CoursesService {
                 .andWhere('c.anio = :anio', { anio: anioActual })
                 .orderBy('cat.nombre', 'ASC')
                 .getMany();
+            return cursos.map(mapCurso);
         }
 
         if (rol === 'alumno') {
             const enrollments = await this.dataSource.query<{ seccion_id: string }[]>(
                 `SELECT seccion_id FROM matriculas
-                 WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE`,
+             WHERE alumno_id = $1 AND anio = $2 AND activo = TRUE`,
                 [userId, anioActual],
             );
             if (!enrollments.length) return [];
 
             const seccionIds = enrollments.map(e => e.seccion_id);
-            return this.courseRepo
+            const cursos = await this.courseRepo
                 .createQueryBuilder('c')
                 .leftJoinAndSelect('c.seccion', 's')
                 .leftJoinAndSelect('s.grado', 'g')
@@ -97,6 +124,7 @@ export class CoursesService {
                 .andWhere('c.activo = true')
                 .orderBy('cat.nombre', 'ASC')
                 .getMany();
+            return cursos.map(mapCurso);
         }
 
         // Admin
@@ -111,7 +139,8 @@ export class CoursesService {
 
         if (seccionId) query.andWhere('c.seccion_id = :seccionId', { seccionId });
 
-        return query.orderBy('cat.nombre', 'ASC').getMany();
+        const cursos = await query.orderBy('cat.nombre', 'ASC').getMany();
+        return cursos.map(mapCurso);
     }
 
     async findOne(id: string) {
@@ -190,16 +219,38 @@ export class CoursesService {
 
     async enrollStudent(alumnoId: string, seccionId: string, anio: number) {
         return this.dataSource.transaction(async (manager) => {
+
+            // ── Validar capacidad ──────────────────────────────────────
+            const [seccion] = await manager.query<{ capacidad: number; ocupacion: string }[]>(
+                `SELECT s.capacidad,
+                    COUNT(m.id)::text AS ocupacion
+             FROM secciones s
+             LEFT JOIN matriculas m ON m.seccion_id = s.id
+                                   AND m.anio = $2
+                                   AND m.activo = TRUE
+                                   AND m.alumno_id <> $1
+             WHERE s.id = $3
+             GROUP BY s.capacidad`,
+                [alumnoId, anio, seccionId],
+            );
+            if (!seccion) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+            if (Number(seccion.ocupacion) >= seccion.capacidad) {
+                throw new ConflictException(
+                    `La sección está llena (${seccion.ocupacion}/${seccion.capacidad} alumnos)`,
+                );
+            }
+            // ──────────────────────────────────────────────────────────
+
             await manager.query(
                 `UPDATE matriculas
-                 SET activo = FALSE
-                 WHERE alumno_id = $1 AND anio = $2 AND seccion_id <> $3 AND activo = TRUE`,
+             SET activo = FALSE
+             WHERE alumno_id = $1 AND anio = $2 AND seccion_id <> $3 AND activo = TRUE`,
                 [alumnoId, anio, seccionId],
             );
 
             const [existing] = await manager.query<{ id: string; activo: boolean }[]>(
                 `SELECT id, activo FROM matriculas
-                 WHERE alumno_id = $1 AND anio = $2`,
+             WHERE alumno_id = $1 AND anio = $2`,
                 [alumnoId, anio],
             );
 
@@ -218,14 +269,13 @@ export class CoursesService {
 
             const [created] = await manager.query(
                 `INSERT INTO matriculas (alumno_id, seccion_id, anio, activo, fecha_matricula)
-                 VALUES ($1, $2, $3, TRUE, CURRENT_DATE)
-                 RETURNING *`,
+             VALUES ($1, $2, $3, TRUE, CURRENT_DATE)
+             RETURNING *`,
                 [alumnoId, seccionId, anio],
             );
             return created;
         });
     }
-
     async unenrollStudent(enrollmentId: string) {
         const [enrollment] = await this.dataSource.query<{ id: string }[]>(
             `SELECT id FROM matriculas WHERE id = $1 AND activo = TRUE`,

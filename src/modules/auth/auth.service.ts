@@ -16,10 +16,6 @@ interface SeccionTutorada {
     id: string;
     nombre: string;
 }
-
-// ── Mapeo permiso_extra → módulo JWT ─────────────────────────────────────────
-// Cuando el admin otorga uno de estos permisos, el módulo correspondiente
-// se inyecta en el JWT al próximo login. Agregar aquí si crece el sistema.
 const PERMISO_A_MODULO: Array<{
     modulo: string;
     accion: string;
@@ -154,7 +150,12 @@ export class AuthService {
         return this.sectionRepo
             .createQueryBuilder('s')
             .select(['s.id AS id', 's.nombre AS nombre'])
-            .where('s.tutor_id = :id', { id: docenteId })
+            .innerJoin(
+                'secciones_tutores',
+                'st',
+                'st.seccion_id = s.id AND st.docente_id = :id AND st.activo = true',
+                { id: docenteId },
+            )
             .orderBy('s.nombre', 'ASC')
             .getRawMany();
     }
