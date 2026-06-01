@@ -20,31 +20,9 @@ import type {
     EntregasTareaRow,
 } from '../types/reports.types.js';
 
-/**
- * SectionReportService
- *
- * Reporte maestro de sección: combina notas + asistencia + tareas
- * en un solo endpoint con consultas paralelas (Promise.all).
- *
- * Acceso:
- *   - admin    → cualquier sección
- *   - docente  → solo secciones donde es tutor
- *   - auxiliar → lectura de asistencia (sin notas ni tareas si se requiere)
- *
- * Por qué Promise.all y no una mega-query:
- *   - Cada sub-query afecta tablas distintas → no se beneficia de un JOIN
- *   - Queries independientes se ejecutan en paralelo en el pool de PG
- *   - Más fácil testear, cachear y escalar independientemente
- *   - Mantenibilidad: cambiar la query de notas no afecta la de asistencia
- */
 @Injectable()
 export class SectionReportService {
     constructor(@InjectDataSource() private readonly ds: DataSource) { }
-
-    /**
-     * Reporte maestro: devuelve todo lo necesario para la UI de la sección.
-     * Las 6 queries se lanzan en paralelo.
-     */
     async getSeccionResumen(
         user: AuthUser,
         seccionId: string,
@@ -53,8 +31,6 @@ export class SectionReportService {
         topInasistentesLimit = 10,
     ): Promise<SeccionResumenResponse> {
         await this.assertCanViewSeccion(user, seccionId);
-
-        // Obtener metadata de sección y periodo en paralelo con los datos
         const [
             seccionRows,
             periodoRows,
@@ -92,11 +68,6 @@ export class SectionReportService {
             entregas_por_tarea: entregasPorTarea,
         };
     }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Autorización
-    // ─────────────────────────────────────────────────────────────────────
-
     private async assertCanViewSeccion(
         user: AuthUser,
         seccionId: string,
@@ -115,8 +86,6 @@ export class SectionReportService {
         }
 
         if (user.rol === 'auxiliar') {
-            // Auxiliar puede ver asistencia pero no notas ni tareas.
-            // El controller decide qué tabs mostrar por rol.
             return;
         }
 

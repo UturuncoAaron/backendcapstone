@@ -3,7 +3,7 @@ import {
     BadRequestException, Logger, UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Between, In } from 'typeorm';
+import { Repository, DataSource, Between } from 'typeorm';
 import { AttendanceGeneral } from './entities/attendance-general.entity.js';
 import { AttendanceClass } from './entities/attendance-class.entity.js';
 import { AttendanceDocente } from './entities/attendance-docente.entity.js';
@@ -11,7 +11,7 @@ import type { EstadoAsistencia } from './entities/attendance-general.entity.js';
 import {
     RegisterAsistenciaDto, BulkAsistenciaDto, UpdateAsistenciaDto,
     ListAsistenciasQueryDto, ReporteAsistenciaQueryDto, ScanQrDto,
-    BulkDocenteAsistenciaDto,
+
 } from './dto/asistencia.dto.js';
 import { QrService } from '../qr/qr.service.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
@@ -552,126 +552,6 @@ export class AssistsService {
         await this.classRepo.remove(a);
         return { ok: true };
     }
-
-    // ════════════════════════════════════════════════════════════
-    // ASISTENCIA DOCENTE
-    // ════════════════════════════════════════════════════════════
-
-    async bulkDocenteAsistencia(dto: BulkDocenteAsistenciaDto, userId: string) {
-        if (!dto.registros.length) throw new BadRequestException('Lista vacía');
-
-        const horarioIds = dto.registros.map(r => r.horario_id);
-
-        await this.dataSource.transaction(async em => {
-            await em.delete(AttendanceDocente, {
-                fecha: dto.fecha,
-                horario_id: In(horarioIds),
-            });
-
-            for (const r of dto.registros) {
-                // Si viene hora_llegada, el trigger BD calcula presente/tardanza
-                // El service solo envía estado para falto/justificado
-                await em.query(
-                    `INSERT INTO asistencias_docente
-                    (horario_id, docente_id, fecha, estado, hora_llegada,
-                     motivo_justificacion, hubo_reemplazo, observacion, registrado_por)
-                 VALUES ($1::uuid, $2::uuid, $3::date, $4, $5,
-                         $6, $7, $8, $9::uuid)`,
-                    [
-                        r.horario_id,
-                        r.docente_id,
-                        dto.fecha,
-                        r.estado,
-                        r.hora_llegada ?? null,
-                        r.motivo_justificacion ?? null,
-                        r.hubo_reemplazo ?? false,
-                        r.observacion ?? null,
-                        userId,
-                    ],
-                );
-            }
-        });
-
-        this.logger.log(`Asist. docente bulk: ${dto.registros.length} registros | ${dto.fecha}`);
-        return { registrados: dto.registros.length };
-    }
-
-    async getHorariosDelDia(fechaParam?: string) {
-        const fecha = fechaParam ?? new Date().toLocaleDateString('en-CA', {
-            timeZone: 'America/Lima',
-        });
-        const diasMap: Record<number, string> = {
-            0: 'domingo', 1: 'lunes', 2: 'martes',
-            3: 'miercoles', 4: 'jueves', 5: 'viernes', 6: 'sabado',
-        };
-        const diaSemana = diasMap[new Date(fecha + 'T12:00:00').getDay()];
-
-        const rows = await this.dataSource.query<{
-            horario_id: string;
-            docente_id: string;
-            docente_nombre: string;
-            apellido_paterno: string;
-            curso_nombre: string;
-            seccion_nombre: string;
-            hora_inicio: string;
-            hora_fin: string;
-            aula: string | null;
-            estado_actual: string | null;
-            hora_llegada: string | null;
-            observacion: string | null;
-        }[]>(
-            `SELECT DISTINCT ON (h.id)
-                h.id           AS horario_id,
-                d.id           AS docente_id,
-                d.nombre       AS docente_nombre,
-                d.apellido_paterno,
-                cc.nombre AS curso_nombre,
-                s.nombre       AS seccion_nombre,
-                h.hora_inicio,
-                h.hora_fin,
-                h.aula,
-                ad.estado      AS estado_actual,
-                ad.hora_llegada,
-                ad.observacion
-             FROM horarios h
-             JOIN cursos    c ON c.id = h.curso_id AND c.activo = TRUE
-             JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
-             JOIN secciones s ON s.id = c.seccion_id AND s.activo = TRUE
-             JOIN docentes  d ON d.id = c.docente_id
-             JOIN cuentas   cu ON cu.id = d.id AND cu.activo = TRUE
-             LEFT JOIN asistencias_docente ad
-               ON ad.horario_id = h.id AND ad.fecha = $1::date
-             WHERE
-                h.dia_semana = $2
-                OR h.id IN (
-                    SELECT horario_id FROM asistencias_docente WHERE fecha = $1::date
-                )
-             ORDER BY h.id, h.hora_inicio`,
-            [fecha, diaSemana],
-        );
-
-        rows.sort((a, b) => {
-            if (a.hora_inicio < b.hora_inicio) return -1;
-            if (a.hora_inicio > b.hora_inicio) return 1;
-            return a.apellido_paterno.localeCompare(b.apellido_paterno);
-        });
-
-        return rows.map(r => ({
-            horario_id: r.horario_id,
-            docente_id: r.docente_id,
-            docente_nombre: r.docente_nombre,
-            apellido_paterno: r.apellido_paterno,
-            curso_nombre: r.curso_nombre,
-            seccion_nombre: r.seccion_nombre,
-            hora_inicio: r.hora_inicio,
-            hora_fin: r.hora_fin,
-            aula: r.aula,
-            estado_actual: r.estado_actual ?? null,
-            hora_llegada: r.hora_llegada ?? null,
-            observacion: r.observacion ?? null,
-        }));
-    }
-
     // ════════════════════════════════════════════════════════════
     // REPORTE
     // ════════════════════════════════════════════════════════════

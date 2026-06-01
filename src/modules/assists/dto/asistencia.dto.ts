@@ -2,6 +2,7 @@ import {
     IsArray, IsDateString, IsIn, IsOptional, IsString,
     IsUUID, IsNotEmpty, MaxLength, ArrayNotEmpty,
     ValidateNested, IsInt, Min, Max, IsBoolean, Matches,
+    ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ESTADOS_ASISTENCIA } from '../entities/attendance-general.entity.js';
@@ -87,4 +88,59 @@ export class BulkDocenteAsistenciaDto {
     @ValidateNested({ each: true })
     @Type(() => RegistroDocenteDto)
     registros: RegistroDocenteDto[];
+}
+
+export class RegistrarAsistenciaDocenteDiaDto {
+    @IsUUID()
+    docente_id: string;
+
+    @IsIn(['presente', 'tardanza', 'falto', 'justificado'])
+    estado: string;
+
+    @IsOptional()
+    @Matches(/^\d{2}:\d{2}$/, { message: 'hora_llegada debe tener formato HH:MM' })
+    hora_llegada?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(500)
+    @ValidateIf(o => o.estado === 'justificado')
+    motivo_justificacion?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    hubo_reemplazo?: boolean;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(1000)
+    observacion?: string;
+}
+
+export class RegistrarAsistenciaDocenteBulkDiaDto {
+    @IsDateString()
+    fecha: string;
+
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => RegistrarAsistenciaDocenteDiaDto)
+    docentes: RegistrarAsistenciaDocenteDiaDto[];
+}
+
+export class HorariosDiaQueryDto {
+    @IsDateString()
+    fecha: string;
+}
+
+export class MarcarSalidaDocenteDto {
+    @IsUUID()
+    horario_id: string;
+
+    @IsString()
+    @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'fecha debe ser YYYY-MM-DD' })
+    fecha: string;
+
+    @IsString()
+    @Matches(/^\d{2}:\d{2}(:\d{2})?$/, { message: 'hora_salida debe ser HH:mm o HH:mm:ss' })
+    hora_salida: string;
 }

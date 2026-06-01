@@ -1,4 +1,9 @@
-export const COLORES_SUGERIDOS = [
+export interface ColorOption {
+  label: string;
+  value: string;
+}
+
+export const COLORES_SUGERIDOS: ColorOption[] = [
   { label: 'Azul', value: '#3B82F6' },
   { label: 'Verde', value: '#10B981' },
   { label: 'Ámbar', value: '#F59E0B' },

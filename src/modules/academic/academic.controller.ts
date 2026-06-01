@@ -87,7 +87,7 @@ export class AcademicController {
     // ── PERIODOS ─────────────────────────────────────────────────
 
     @Get('periodos')
-    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa')
+    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa','auxiliar')
     findAllPeriodos() {
         return this.academicService.findAllPeriodos();
     }

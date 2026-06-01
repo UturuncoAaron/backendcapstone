@@ -4,6 +4,7 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { AssistsService } from './assists.service.js';
+import { DocenteAttendanceService } from './docente-attendance.service.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -12,17 +13,20 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import {
     RegisterAsistenciaDto, BulkAsistenciaDto, UpdateAsistenciaDto,
     ListAsistenciasQueryDto, ReporteAsistenciaQueryDto, ScanQrDto,
-    BulkDocenteAsistenciaDto,
+    HorariosDiaQueryDto, RegistrarAsistenciaDocenteBulkDiaDto,
+    MarcarSalidaDocenteDto,
 } from './dto/asistencia.dto.js';
 
 @Controller('asistencias')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AssistsController {
-    constructor(private readonly svc: AssistsService) { }
+    constructor(
+        private readonly svc: AssistsService,
+        private readonly docenteSvc: DocenteAttendanceService,
+    ) { }
 
     // ── GENERAL (tutor de sección / auxiliar) ──
 
-    /** Escanea el QR del carnet del alumno y marca asistencia general automática. */
     @Post('general/scan')
     @Roles('auxiliar')
     generalScan(
@@ -30,7 +34,6 @@ export class AssistsController {
         @Body() dto: ScanQrDto,
     ) { return this.svc.generalScan(dto, user); }
 
-    /** Registra/actualiza la asistencia general de un alumno en una sección. */
     @Post('general/:seccionId')
     @Roles('docente', 'auxiliar')
     generalRegister(
@@ -39,7 +42,6 @@ export class AssistsController {
         @Body() dto: RegisterAsistenciaDto,
     ) { return this.svc.generalRegister(seccionId, dto, user); }
 
-    /** Registra asistencia general de varios alumnos en una sola llamada. */
     @Post('general/:seccionId/bulk')
     @Roles('docente', 'auxiliar')
     generalBulk(
@@ -48,7 +50,6 @@ export class AssistsController {
         @Body() dto: BulkAsistenciaDto,
     ) { return this.svc.generalBulk(seccionId, dto, user); }
 
-    /** Lista asistencias generales de una sección (por fecha o rango). */
     @Get('general/:seccionId')
     @Roles('admin', 'docente', 'auxiliar', 'psicologa')
     generalList(
@@ -56,7 +57,6 @@ export class AssistsController {
         @Query() q: ListAsistenciasQueryDto,
     ) { return this.svc.generalListBySeccion(seccionId, q); }
 
-    /** Lista asistencias generales históricas de un alumno. */
     @Get('general/alumno/:alumnoId')
     @Roles('admin', 'docente', 'padre', 'psicologa', 'alumno')
     generalByAlumno(
@@ -64,7 +64,6 @@ export class AssistsController {
         @Query() q: ListAsistenciasQueryDto,
     ) { return this.svc.generalListByAlumno(alumnoId, q); }
 
-    /** Modifica el estado u observación de un registro general. */
     @Patch('general/:id')
     @Roles('docente', 'auxiliar')
     generalUpdate(
@@ -73,7 +72,6 @@ export class AssistsController {
         @Body() dto: UpdateAsistenciaDto,
     ) { return this.svc.generalUpdate(id, dto, user); }
 
-    /** Elimina un registro general. */
     @Delete('general/:id') @HttpCode(HttpStatus.NO_CONTENT)
     @Roles('docente', 'auxiliar')
     generalRemove(
@@ -83,7 +81,6 @@ export class AssistsController {
 
     // ── POR CURSO (docente del curso) ──
 
-    /** Registra/actualiza la asistencia de un alumno en un curso. */
     @Post('curso/:cursoId')
     @Roles('docente')
     classRegister(
@@ -92,7 +89,6 @@ export class AssistsController {
         @Body() dto: RegisterAsistenciaDto,
     ) { return this.svc.classRegister(cursoId, dto, user); }
 
-    /** Registra asistencia de varios alumnos en un curso en una sola llamada. */
     @Post('curso/:cursoId/bulk')
     @Roles('docente')
     classBulk(
@@ -101,7 +97,6 @@ export class AssistsController {
         @Body() dto: BulkAsistenciaDto,
     ) { return this.svc.classBulk(cursoId, dto, user); }
 
-    /** Lista asistencias de un curso (por fecha o rango). */
     @Get('curso/:cursoId')
     @Roles('admin', 'docente', 'padre', 'psicologa')
     classList(
@@ -109,7 +104,6 @@ export class AssistsController {
         @Query() q: ListAsistenciasQueryDto,
     ) { return this.svc.classListByCurso(cursoId, q); }
 
-    /** Lista asistencias históricas de un alumno (filtrable por curso). */
     @Get('curso/alumno/:alumnoId')
     @Roles('admin', 'docente', 'padre', 'psicologa', 'alumno')
     classByAlumno(
@@ -117,7 +111,6 @@ export class AssistsController {
         @Query() q: ListAsistenciasQueryDto & { cursoId?: string },
     ) { return this.svc.classListByAlumno(alumnoId, q); }
 
-    /** Modifica el estado u observación de un registro de curso. */
     @Patch('curso/:id')
     @Roles('docente')
     classUpdate(
@@ -126,7 +119,6 @@ export class AssistsController {
         @Body() dto: UpdateAsistenciaDto,
     ) { return this.svc.classUpdate(id, dto, user); }
 
-    /** Elimina un registro de curso. */
     @Delete('curso/:id') @HttpCode(HttpStatus.NO_CONTENT)
     @Roles('docente')
     classRemove(
@@ -136,31 +128,34 @@ export class AssistsController {
 
     // ── DOCENTE (auxiliar / admin) ──
 
-    /** Registra la asistencia de docentes en bloque para el día. */
-    @Post('docente/bulk')
+    @Get('docente/dia')
     @Roles('auxiliar', 'admin')
-    bulkDocente(
+    getDocentesDelDia(
         @CurrentUser() user: AuthUser,
-        @Body() dto: BulkDocenteAsistenciaDto,
-    ) {
-        return this.svc.bulkDocenteAsistencia(dto, user.id);
-    }
+        @Query() q: HorariosDiaQueryDto,
+    ) { return this.docenteSvc.getDocentesDelDia(user, q.fecha); }
+
+    @Post('docente/registrar')
+    @HttpCode(HttpStatus.OK)
+    @Roles('auxiliar', 'admin')
+    registrarDocenteBulk(
+        @CurrentUser() user: AuthUser,
+        @Body() dto: RegistrarAsistenciaDocenteBulkDiaDto,
+    ) { return this.docenteSvc.registrarBulk(user, dto); }
+
+    @Patch('docente/salida')
+    @HttpCode(HttpStatus.OK)
+    @Roles('auxiliar', 'admin')
+    marcarSalida(
+        @CurrentUser() user: AuthUser,
+        @Body() dto: MarcarSalidaDocenteDto,
+    ) { return this.docenteSvc.marcarSalida(user, dto); }
 
     // ── REPORTE ──
 
-    /** Reporte agregado de asistencias por sección o curso para Excel. */
     @Get('reporte')
     @Roles('admin', 'docente')
     reporte(@Query() q: ReporteAsistenciaQueryDto) {
         return this.svc.reporte(q);
-    }
-
-    // ── HORARIOS DEL DÍA (auxiliar) ──
-
-    /** Devuelve los bloques de horario del día con estado de asistencia ya registrado. */
-    @Get('docente/horarios-dia')
-    @Roles('auxiliar', 'admin')
-    horariosDelDia(@Query('fecha') fecha?: string) {
-        return this.svc.getHorariosDelDia(fecha);
     }
 }

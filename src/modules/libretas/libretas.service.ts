@@ -11,8 +11,6 @@ import { PermissionsService } from '../permissions/permissions.service.js';
 
 export const PERMISO_LIBRETAS_SUBIR_PADRE = { modulo: 'libretas', accion: 'subir_padre' } as const;
 
-// ── Interfaces internas ─────────────────────────────────────────────────────
-
 interface UpsertLibretaDto {
     cuenta_id: string;
     tipo: LibretaTipo;
@@ -31,11 +29,9 @@ interface BulkUpsertParams {
     rol: string;
 }
 
-/** Parámetros para la carga masiva de libretas de PADRES. */
 interface BulkUpsertPadresParams {
     files: Express.Multer.File[];
     periodoId: string;
-    /** Asignaciones explícitas generadas por el cliente: filename → padre cuenta_id */
     assignments: { filename: string; padre_id: string }[];
     subidoPor: string;
     rol: string;
@@ -60,7 +56,6 @@ export interface BulkUploadResult {
     items: BulkUploadResultItem[];
 }
 
-/** Resultado de la carga masiva de padres */
 export interface BulkUploadPadreResultItem {
     filename: string;
     padre_id: string | null;
@@ -126,8 +121,6 @@ export interface PadreConAuditoria {
     };
 }
 
-// ── Servicio ────────────────────────────────────────────────────────────────
-
 @Injectable()
 export class LibretasService {
     private readonly logger = new Logger(LibretasService.name);
@@ -141,8 +134,6 @@ export class LibretasService {
         private readonly dataSource: DataSource,
         private readonly permissions: PermissionsService,
     ) { }
-
-    // ── Tracking de lectura ─────────────────────────────────────────────────
 
     async marcarVista(libretaId: string, lectorId: string) {
         const libreta = await this.libretaRepo.findOne({ where: { id: libretaId } });
@@ -167,8 +158,6 @@ export class LibretasService {
         return { vista_en: row.vista_en, ultima_apertura_en: row.ultima_apertura_en, veces_vista: row.veces_vista };
     }
 
-    // ── Lecturas por sección ────────────────────────────────────────────────
-
     async findPadresPorSeccion(seccionId: string, periodoId: string, requesterId: string, requesterRol: string) {
         if (requesterRol === 'docente') {
             const ok = await this.dataSource.query(
@@ -191,8 +180,6 @@ export class LibretasService {
         return this.hydratePadresAuditoria(rows, periodoId, seccionId);
     }
 
-    // ── Listado paginado (admin y docente) ──────────────────────────────────
-
     async findPadresAdminPaginated(opts: {
         periodoId: string;
         seccionId: string | null;
@@ -205,11 +192,8 @@ export class LibretasService {
 
         const buildWhere = (paramsOut: unknown[]) => {
             const parts: string[] = [];
-
-            // Solo cuentas activas — siempre
             parts.push(`EXISTS (SELECT 1 FROM cuentas c WHERE c.id = p.id AND c.activo = TRUE)`);
 
-            // Sección: filtro OPCIONAL — no bloquea cuando no se pasa
             if (seccionId) {
                 paramsOut.push(seccionId);
                 const idx = paramsOut.length;
@@ -220,7 +204,6 @@ export class LibretasService {
                 )`);
             }
 
-            // Búsqueda libre
             if (search?.trim()) {
                 paramsOut.push(`%${search.trim()}%`);
                 const idx = paramsOut.length;
@@ -240,7 +223,15 @@ export class LibretasService {
             countParams,
         );
         const total = Number(countRows[0]?.total ?? 0);
-        if (total === 0) return { items: [], total: 0, page, limit };
+
+        // CORREGIDO: Para calcular las estadísticas reales globales superiores sin discriminar contextos vacíos
+        const globalCargadas = await this.dataSource.query<{ total: string }[]>(
+            `SELECT COUNT(*)::int AS total FROM libretas WHERE tipo = 'padre' AND periodo_id = $1::uuid`,
+            [periodoId]
+        );
+        const statCargadas = Number(globalCargadas[0]?.total ?? 0);
+
+        if (total === 0) return { items: [], total: 0, page, limit, stats: { cargadas: statCargadas, total: 0 } };
 
         const pageParams: unknown[] = [];
         const pageWhere = buildWhere(pageParams);
@@ -256,10 +247,8 @@ export class LibretasService {
         );
 
         const items = await this.hydratePadresAuditoria(rows, periodoId, seccionId);
-        return { items, total, page, limit };
+        return { items, total, page, limit, stats: { cargadas: statCargadas, total } };
     }
-
-    // ── Hydrate ─────────────────────────────────────────────────────────────
 
     private async hydratePadresAuditoria(padres: PadreRow[], periodoId: string, seccionId: string | null): Promise<PadreConAuditoria[]> {
         if (!padres.length) return [];
@@ -279,6 +268,8 @@ export class LibretasService {
         );
         const propiaPorPadre = new Map(libretasPadre.map(r => [r.cuenta_id, r]));
 
+        // CORREGIDO: Se cambia a LEFT JOIN en cascada hacia matriculas, secciones y grados.
+        // Si el alumno no tiene aula, el LEFT JOIN preserva la fila y evita que desaparezca del mapa.
         const seccionFilter = seccionId ? `AND m.seccion_id = $3::uuid` : '';
         const params: unknown[] = [periodoId, padreIds];
         if (seccionId) params.push(seccionId);
@@ -298,7 +289,7 @@ export class LibretasService {
                     ll.vista_en, ll.ultima_apertura_en, ll.veces_vista
              FROM padre_alumno pa
              JOIN alumnos a ON a.id = pa.alumno_id
-             JOIN matriculas m ON m.alumno_id = a.id AND m.activo = TRUE
+             LEFT JOIN matriculas m ON m.alumno_id = a.id AND m.activo = TRUE
              LEFT JOIN secciones s ON s.id = m.seccion_id
              LEFT JOIN grados g ON g.id = s.grado_id
              LEFT JOIN libretas l ON l.cuenta_id = a.id AND l.tipo = 'alumno' AND l.periodo_id = $1::uuid
@@ -326,7 +317,8 @@ export class LibretasService {
                 nombre: h.alumno_nombre,
                 apellido_paterno: h.alumno_apellido_paterno,
                 apellido_materno: h.alumno_apellido_materno,
-                grado: h.grado, seccion: h.seccion,
+                grado: h.grado ? h.grado.replace(' de Secundaria', '') : null, // Sanitizado limpio para el bento
+                seccion: h.seccion,
                 libreta: h.libreta_id && h.storage_key ? {
                     id: h.libreta_id,
                     url: await this.storageService.getSignedUrl(h.storage_key),
@@ -442,8 +434,6 @@ export class LibretasService {
         return { ...libreta, url: await this.storageService.getSignedUrl(libreta.storage_key) };
     }
 
-    // ── Subida individual ───────────────────────────────────────────────────
-
     async upsert(dto: UpsertLibretaDto) {
         await this.assertCanManage(dto.subido_por, dto.rol, dto.cuenta_id, dto.tipo, dto.periodo_id);
 
@@ -470,8 +460,6 @@ export class LibretasService {
             subido_por: dto.subido_por, observaciones: dto.observaciones ?? null,
         }));
     }
-
-    // ── Carga masiva: alumnos ───────────────────────────────────────────────
 
     async bulkUpsert(params: BulkUpsertParams): Promise<BulkUploadResult> {
         const alumnos: AlumnoCandidate[] = await this.dataSource.query(
@@ -535,14 +523,7 @@ export class LibretasService {
         return result;
     }
 
-    // ── Carga masiva: padres ────────────────────────────────────────────────
-
-    /**
-     * Sube múltiples libretas de padres usando asignaciones explícitas del cliente.
-     * Verifica el permiso UNA sola vez (no por archivo) para eficiencia.
-     */
     async bulkUpsertPadres(params: BulkUpsertPadresParams): Promise<BulkUploadPadreResult> {
-        // Verificar permiso una sola vez
         if (params.rol !== 'admin') {
             const ok = await this.permissions.hasPermiso(
                 params.subidoPor,
@@ -552,10 +533,7 @@ export class LibretasService {
             if (!ok) throw new ForbiddenException('Necesitas permiso explícito para subir libretas de padres');
         }
 
-        // Mapa filename → padre_id desde las asignaciones del frontend
         const assignMap = new Map(params.assignments.map(a => [a.filename, a.padre_id]));
-
-        // Buscar nombres de padres para el resultado (informativo)
         const padreIds = [...new Set(params.assignments.map(a => a.padre_id).filter(Boolean))];
         const padreNombres = padreIds.length
             ? await this.dataSource.query<{ id: string; nombre: string; apellido_paterno: string }[]>(
@@ -624,8 +602,6 @@ export class LibretasService {
         return result;
     }
 
-    // ── Eliminar ────────────────────────────────────────────────────────────
-
     async remove(id: string, userId: string, rol: string) {
         const libreta = await this.libretaRepo.findOne({ where: { id } });
         if (!libreta) throw new NotFoundException('Libreta no encontrada');
@@ -634,8 +610,6 @@ export class LibretasService {
         await this.libretaRepo.remove(libreta);
         return { message: 'Libreta eliminada correctamente' };
     }
-
-    // ── Permisos ────────────────────────────────────────────────────────────
 
     private async assertCanManage(userId: string, rol: string, cuentaId: string, tipo: LibretaTipo, periodoId: string): Promise<void> {
         if (rol === 'admin') return;

@@ -114,7 +114,6 @@ export class LibretasController {
         });
     }
 
-    // ── Subida individual: alumno ──────────────────────────────────────────
     @Post('alumno')
     @Roles('admin', 'docente')
     @UseInterceptors(FileInterceptor('file', MULTER_MEMORY))
@@ -131,7 +130,6 @@ export class LibretasController {
         });
     }
 
-    // ── Subida individual: padre ───────────────────────────────────────────
     @Post('padre')
     @Roles('admin', 'docente')
     @UseInterceptors(FileInterceptor('file', MULTER_MEMORY))
@@ -148,7 +146,6 @@ export class LibretasController {
         });
     }
 
-    // ── Carga masiva: alumnos (por sección, matching automático) ──────────
     @Post('bulk')
     @Roles('admin', 'docente')
     @UseInterceptors(FilesInterceptor('files', 50, MULTER_BULK))
@@ -166,9 +163,6 @@ export class LibretasController {
         });
     }
 
-    // ── Carga masiva: padres (asignaciones explícitas desde el frontend) ───
-    // El frontend envía el JSON de asignaciones (archivo → padre_id) porque
-    // ya hizo el matching en el cliente y el usuario pudo corregirlo.
     @Post('bulk-padre')
     @Roles('admin', 'docente')
     @UseInterceptors(FilesInterceptor('files', 50, MULTER_BULK))
@@ -197,7 +191,6 @@ export class LibretasController {
         });
     }
 
-    // ── Eliminar ───────────────────────────────────────────────────────────
     @Delete(':id')
     @Roles('admin', 'docente')
     @HttpCode(HttpStatus.OK)

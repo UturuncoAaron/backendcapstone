@@ -219,21 +219,19 @@ export interface DocenteDelDiaRow {
 
 /** Reporte diario de docentes */
 export interface AsistenciaDocenteDiariaRow {
-    asistencia_id: string | null;
     horario_id: string;
     docente_id: string;
     docente_nombre: string;
-    docente_apellido_paterno: string;
-    docente_apellido_materno: string | null;
+    apellido_paterno: string;
+    apellido_materno: string | null;
     curso_nombre: string;
     seccion_nombre: string;
     grado_nombre: string;
     hora_inicio: string;
     hora_fin: string;
     aula: string | null;
-    estado: EstadoAsistenciaDocente;
+    estado: string;
     hora_llegada: string | null;
-    tiene_justificacion: boolean;
     motivo_justificacion: string | null;
     hubo_reemplazo: boolean;
     observacion: string | null;
@@ -248,14 +246,12 @@ export interface ResumenAsistenciaDocenteRow {
     total_bloques_esperados: number;
     presentes: number;
     tardanzas: number;
-    ausentes: number;
-    permisos: number;
-    licencias: number;
+    faltos: number;
+    justificados: number;
     sin_registro: number;
-    ausentes_sin_justificacion: number;
+    faltos_sin_justificacion: number;
     porcentaje_asistencia: string | null;
 }
-
 /** Top docentes con más ausencias — alerta director */
 export interface AlertaAusenciaDocenteRow {
     docente_id: string;

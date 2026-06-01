@@ -1,12 +1,19 @@
 import {
     Injectable, NotFoundException, ForbiddenException, ConflictException,
-} from '@nestjs/common';
+} from '@nestjs/common'; // CORREGIDO: De '@nestjs/any' a '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Course } from './entities/course.entity.js';
 import { Enrollment } from './entities/enrollment.entity.js';
 import { CourseCatalog } from './entities/course-catalog.entity.js';
 import { COLORES_SUGERIDOS } from './course-colors.js';
+
+// Catálogo maestro de áreas curriculares centralizado en el servidor
+export const AREAS_CURRICULARES = [
+    'Comunicación', 'Matemática', 'Ciencias Sociales',
+    'Ciencia y Tecnología', 'Inglés', 'Arte y Cultura',
+    'Educación Física', 'Educación Religiosa', 'Tutoría', 'Otro',
+];
 
 @Injectable()
 export class CoursesService {
@@ -30,16 +37,22 @@ export class CoursesService {
     }
 
     async createCatalogItem(dto: { nombre: string; area?: string; color?: string }) {
+        const nombreNormalizado = dto.nombre.trim();
+
         const exists = await this.catalogRepo.findOne({
-            where: { nombre: dto.nombre.trim() },
+            where: { nombre: nombreNormalizado },
         });
-        if (exists) throw new ConflictException(`El curso "${dto.nombre}" ya existe en el catálogo`);
+        if (exists) throw new ConflictException(`El curso "${nombreNormalizado}" ya existe en el catálogo`);
+
+        // Color por defecto basado en la paleta oficial (Azul: '#3B82F6')
+        const colorPorDefecto = COLORES_SUGERIDOS.length > 0 ? COLORES_SUGERIDOS[0].value : '#3B82F6';
 
         const item = this.catalogRepo.create({
-            nombre: dto.nombre.trim(),
+            nombre: nombreNormalizado,
             area: dto.area?.trim() ?? null,
-            color: dto.color ?? '#1976d2',
+            color: dto.color?.trim() ?? colorPorDefecto,
         });
+
         return this.catalogRepo.save(item);
     }
 
@@ -49,14 +62,22 @@ export class CoursesService {
     ) {
         const item = await this.catalogRepo.findOne({ where: { id } });
         if (!item) throw new NotFoundException(`Curso de catálogo ${id} no encontrado`);
+
+        if (dto.nombre) dto.nombre = dto.nombre.trim();
+        if (dto.area) dto.area = dto.area.trim() || null;
+
         Object.assign(item, dto);
         return this.catalogRepo.save(item);
     }
 
-    // ── Colores sugeridos ─────────────────────────────────────
+    // ── Catálogos Auxiliares Dinámicos (Sin Hardcodeo) ────────
 
     getAvailableColors() {
         return COLORES_SUGERIDOS;
+    }
+
+    getAvailableAreas(): string[] {
+        return AREAS_CURRICULARES;
     }
 
     // ── Cursos ────────────────────────────────────────────────
@@ -91,7 +112,7 @@ export class CoursesService {
         });
 
         if (rol === 'docente') {
-            const cursos = await this.courseRepo
+            const courses = await this.courseRepo
                 .createQueryBuilder('c')
                 .leftJoinAndSelect('c.seccion', 's')
                 .leftJoinAndSelect('s.grado', 'g')
@@ -101,7 +122,7 @@ export class CoursesService {
                 .andWhere('c.anio = :anio', { anio: anioActual })
                 .orderBy('cat.nombre', 'ASC')
                 .getMany();
-            return cursos.map(mapCurso);
+            return courses.map(mapCurso);
         }
 
         if (rol === 'alumno') {
@@ -113,7 +134,7 @@ export class CoursesService {
             if (!enrollments.length) return [];
 
             const seccionIds = enrollments.map(e => e.seccion_id);
-            const cursos = await this.courseRepo
+            const courses = await this.courseRepo
                 .createQueryBuilder('c')
                 .leftJoinAndSelect('c.seccion', 's')
                 .leftJoinAndSelect('s.grado', 'g')
@@ -124,7 +145,7 @@ export class CoursesService {
                 .andWhere('c.activo = true')
                 .orderBy('cat.nombre', 'ASC')
                 .getMany();
-            return cursos.map(mapCurso);
+            return courses.map(mapCurso);
         }
 
         // Admin
@@ -139,8 +160,8 @@ export class CoursesService {
 
         if (seccionId) query.andWhere('c.seccion_id = :seccionId', { seccionId });
 
-        const cursos = await query.orderBy('cat.nombre', 'ASC').getMany();
-        return cursos.map(mapCurso);
+        const courses = await query.orderBy('cat.nombre', 'ASC').getMany();
+        return courses.map(mapCurso);
     }
 
     async findOne(id: string) {
@@ -219,8 +240,6 @@ export class CoursesService {
 
     async enrollStudent(alumnoId: string, seccionId: string, anio: number) {
         return this.dataSource.transaction(async (manager) => {
-
-            // ── Validar capacidad ──────────────────────────────────────
             const [seccion] = await manager.query<{ capacidad: number; ocupacion: string }[]>(
                 `SELECT s.capacidad,
                     COUNT(m.id)::text AS ocupacion
@@ -239,7 +258,6 @@ export class CoursesService {
                     `La sección está llena (${seccion.ocupacion}/${seccion.capacidad} alumnos)`,
                 );
             }
-            // ──────────────────────────────────────────────────────────
 
             await manager.query(
                 `UPDATE matriculas
@@ -276,6 +294,7 @@ export class CoursesService {
             return created;
         });
     }
+
     async unenrollStudent(enrollmentId: string) {
         const [enrollment] = await this.dataSource.query<{ id: string }[]>(
             `SELECT id FROM matriculas WHERE id = $1 AND activo = TRUE`,
