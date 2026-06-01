@@ -144,6 +144,13 @@ export class AppointmentsController {
     return this.service.listBookableTeachers({ id: user.id, rol: user.rol });
   }
 
+  // ── Administradores/directivos con los que se puede agendar ─────
+  @Get('admins/bookable')
+  @Roles('padre', 'psicologa', 'admin')
+  getBookableAdmins(@CurrentUser() user: AuthUser) {
+    return this.service.listBookableAdmins({ id: user.id, rol: user.rol });
+  }
+
   // ── Reemplazar atómicamente toda mi disponibilidad ──────────────
   @Put('availability/bulk')
   @Roles('psicologa', 'docente', 'admin')

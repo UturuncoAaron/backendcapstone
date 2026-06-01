@@ -797,14 +797,24 @@ export class AppointmentsService {
       lastPostpone &&
       lastPostpone.changedById === appt.convocadoAId &&
       lastPostpone.previousStatus !== null;
-    const canAccept =
-      caller.rol === 'admin' ||
-      isConvocado ||
-      isParent ||
-      (lastPostponeByConvocado && isConvocador);
+
+    // Spec (Aarón, 2026-06): si la cita tiene un padre/tutor vinculado, la
+    // confirmación depende ENTERAMENTE de él. Ni el alumno convocado ni la
+    // psicóloga que aplazó pueden confirmarla; solo el padre (o admin).
+    let canAccept: boolean;
+    if (appt.parentId !== null) {
+      canAccept = caller.rol === 'admin' || isParent;
+    } else {
+      canAccept =
+        caller.rol === 'admin' ||
+        isConvocado ||
+        (lastPostponeByConvocado && isConvocador);
+    }
     if (!canAccept)
       throw new ForbiddenException(
-        'Solo la parte que no propuso el aplazamiento puede confirmar la cita',
+        appt.parentId !== null
+          ? 'Solo el padre/tutor puede confirmar esta cita'
+          : 'Solo la parte que no propuso el aplazamiento puede confirmar la cita',
       );
 
     appt.estado = 'confirmada';
@@ -833,8 +843,18 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new NotFoundException('Cita no encontrada');
-    if (caller.rol !== 'admin' && appt.convocadoAId !== caller.id)
-      throw new ForbiddenException('Solo el convocado puede rechazar la cita');
+    // El convocado puede rechazar; en citas mixtas (convocado = alumno) el
+    // padre/tutor vinculado (parentId) también puede rechazar la cita
+    // pendiente que se le propuso o que la psicóloga aplazó.
+    const isParent = appt.parentId !== null && appt.parentId === caller.id;
+    if (
+      caller.rol !== 'admin' &&
+      appt.convocadoAId !== caller.id &&
+      !isParent
+    )
+      throw new ForbiddenException(
+        'Solo el convocado o el padre/tutor puede rechazar la cita',
+      );
     if (appt.estado !== 'pendiente')
       throw new BadRequestException(
         `Solo se pueden rechazar citas pendientes (estado actual: ${appt.estado})`,
@@ -1104,6 +1124,19 @@ export class AppointmentsService {
       rule.defaultHours,
     );
 
+    // Nombre legible del docente que deriva (para mostrarlo en el detalle de
+    // la derivación en lugar del UUID).
+    const docenteRows = await this.dataSource.query<
+      { nombre: string; apellido_paterno: string; apellido_materno: string | null }[]
+    >(
+      `SELECT nombre, apellido_paterno, apellido_materno FROM docentes WHERE id = $1`,
+      [caller.id],
+    );
+    const docenteNombre = docenteRows[0]
+      ? `${docenteRows[0].nombre} ${docenteRows[0].apellido_paterno}${docenteRows[0].apellido_materno ? ' ' + docenteRows[0].apellido_materno : ''
+        }`.trim()
+      : 'Docente';
+
     return this.dataSource.transaction('SERIALIZABLE', async (em) => {
       const conflict = await em
         .createQueryBuilder(Appointment, 'a')
@@ -1137,7 +1170,7 @@ export class AppointmentsService {
         scheduledAt,
         durationMin,
         estado: 'confirmada',
-        priorNotes: `[Derivación] Docente ${caller.id} → Psicóloga ${psicologaSummary.id}`,
+        priorNotes: `[Derivación] Derivado por el docente ${docenteNombre}.`,
       });
       const saved = await em.save(appointment);
 
@@ -2150,66 +2183,77 @@ export class AppointmentsService {
       tutoria_seccion_label: string | null;
     };
 
+    // NOTA: la tabla `secciones` NO tiene `tutor_id`. El tutor de una sección
+    // vive en `secciones_tutores (seccion_id, docente_id, anio, activo)`.
+    // Se resuelve la tutoría del AÑO EN CURSO con un LATERAL para no
+    // multiplicar filas (un docente puede tutorar varias secciones/años).
     const baseSelect = `
-      SELECT DISTINCT
+      SELECT
         d.id,
         d.nombre,
         d.apellido_paterno,
         d.apellido_materno,
         d.especialidad,
-        s.id  AS tutoria_seccion_id,
+        st.seccion_id AS tutoria_seccion_id,
         CASE
-          WHEN s.id IS NOT NULL
+          WHEN st.seccion_id IS NOT NULL
           THEN CONCAT(g.nombre, ' · ', s.nombre)
           ELSE NULL
-        END   AS tutoria_seccion_label
+        END           AS tutoria_seccion_label
       FROM docentes d
-      JOIN cuentas c       ON c.id = d.id AND c.activo = TRUE
-      LEFT JOIN secciones s ON s.tutor_id = d.id AND s.activo = TRUE
-      LEFT JOIN grados g    ON g.id = s.grado_id
+      JOIN cuentas c ON c.id = d.id AND c.activo = TRUE
+      LEFT JOIN LATERAL (
+        SELECT stt.seccion_id
+        FROM secciones_tutores stt
+        WHERE stt.docente_id = d.id
+          AND stt.activo = TRUE
+          AND stt.anio = EXTRACT(YEAR FROM NOW())::smallint
+        LIMIT 1
+      ) st ON TRUE
+      LEFT JOIN secciones s ON s.id = st.seccion_id
+      LEFT JOIN grados    g ON g.id = s.grado_id
     `;
 
-    if (caller.rol === 'admin' || caller.rol === 'psicologa') {
+    // Spec (Aarón, 2026-06): el padre/tutor ve ABSOLUTAMENTE todos los
+    // docentes activos (igual que admin/psicóloga). Si el docente no tiene
+    // disponibilidad configurada, el FE muestra el aviso correspondiente.
+    if (
+      caller.rol === 'admin' ||
+      caller.rol === 'psicologa' ||
+      caller.rol === 'padre'
+    ) {
       const rows = await this.dataSource.query<Row[]>(
         `${baseSelect}
          WHERE d.estado_contrato = 'activo'
          ORDER BY d.apellido_paterno, d.apellido_materno, d.nombre`,
-      );
-      return rows.map((r) => this.mapTeacherRow(r));
-    }
-
-    if (caller.rol === 'padre') {
-      // Docentes vinculados a los hijos del padre, vía:
-      //   1. curso dictado en sección donde el hijo está matriculado
-      //      (matrícula activa en el año en curso)
-      //   2. tutor de la sección donde el hijo está matriculado
-      const rows = await this.dataSource.query<Row[]>(
-        `${baseSelect}
-         WHERE d.estado_contrato = 'activo'
-           AND d.id IN (
-             -- Docentes que dictan cursos a los hijos del padre
-             SELECT c2.docente_id
-             FROM cursos c2
-             JOIN matriculas m ON m.seccion_id = c2.seccion_id AND m.activo = TRUE
-             JOIN padre_alumno pa ON pa.alumno_id = m.alumno_id
-             WHERE pa.padre_id = $1
-               AND c2.docente_id IS NOT NULL
-             UNION
-             -- Tutores de las secciones donde están los hijos
-             SELECT s2.tutor_id
-             FROM secciones s2
-             JOIN matriculas m ON m.seccion_id = s2.id AND m.activo = TRUE
-             JOIN padre_alumno pa ON pa.alumno_id = m.alumno_id
-             WHERE pa.padre_id = $1
-               AND s2.tutor_id IS NOT NULL
-           )
-         ORDER BY d.apellido_paterno, d.apellido_materno, d.nombre`,
-        [caller.id],
       );
       return rows.map((r) => this.mapTeacherRow(r));
     }
 
     return [];
+  }
+
+  /**
+   * Lista los administradores/directivos activos con los que se puede agendar
+   * (admin incluye director, secretaría y cualquier rol administrativo). El
+   * padre/tutor, psicóloga y admin pueden consultarla.
+   */
+  async listBookableAdmins(caller: CallerContext): Promise<
+    Array<{
+      id: string;
+      nombre: string;
+      apellido_paterno: string;
+      apellido_materno: string | null;
+      cargo: string | null;
+    }>
+  > {
+    if (!['admin', 'psicologa', 'padre'].includes(caller.rol)) return [];
+    return this.dataSource.query(
+      `SELECT a.id, a.nombre, a.apellido_paterno, a.apellido_materno, a.cargo
+         FROM admins a
+         JOIN cuentas c ON c.id = a.id AND c.activo = TRUE
+        ORDER BY a.apellido_paterno, a.apellido_materno, a.nombre`,
+    );
   }
 
   private mapTeacherRow(r: {

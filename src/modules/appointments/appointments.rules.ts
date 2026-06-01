@@ -221,7 +221,10 @@ export type RecipientRol = Rol;
 const INVITATION_MATRIX: Partial<Record<CallerRol, readonly RecipientRol[]>> = {
   docente: ['padre'],
   psicologa: ['alumno', 'padre'],
-  padre: ['psicologa', 'docente'],
+  // Spec (Aarón, 2026-06): el padre/tutor puede agendar con psicóloga,
+  // docente y administración (admin incluye director / secretaría / cualquier
+  // rol administrativo).
+  padre: ['psicologa', 'docente', 'admin'],
   alumno: ['psicologa'],
   admin: ['padre'],
   // auxiliar: deliberadamente excluido — solo gestiona asistencias.
