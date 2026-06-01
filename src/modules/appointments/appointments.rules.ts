@@ -1,4 +1,5 @@
 import type { Rol } from '../auth/types/auth-user.js';
+import type { AppointmentType } from './appointments.types.js';
 
 export type DiaSemanaIso =
   | 'lunes'
@@ -43,6 +44,15 @@ export interface AppointmentRoleRule {
   maxConsecutiveSlots: number;
   allowedDays: readonly DiaSemanaIso[];
   defaultHours: { start: string; end: string };
+  /**
+   * Hora límite de atención (HH:mm). Aunque el profesional declare
+   * disponibilidad más allá de esta hora, el motor de slots la recorta
+   * a este tope. `null` = sin tope adicional (solo aplica defaultHours).
+   *
+   * Spec (Aarón, 2026-05): docentes y administración/dirección atienden
+   * estrictamente hasta las 15:30.
+   */
+  attentionEnd: string | null;
   label: string;
   requiresChild: boolean;
   directBooking: boolean;
@@ -73,44 +83,54 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
     maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '16:00' },
+    attentionEnd: null,
     label: 'Psicología',
     requiresChild: true,
     directBooking: true,
   },
   docente: {
     role: 'docente',
-    fixedDurationMin: 45,
-    maxDurationMin: 45,
-    slotMinutes: 45,
-    // El docente tiene duración fija, sólo cabe 1 slot por cita.
+    // Spec (Aarón, 2026-05): los bloques de disponibilidad de 45 min se
+    // dividen internamente en 3 sub-slots de 15 min. Cada cita ocupa un
+    // único sub-slot de 15 min, permitiendo atender hasta 3 padres por
+    // bloque de 45 min. La cita docente es, por tanto, de 15 min fijos.
+    fixedDurationMin: 15,
+    maxDurationMin: 15,
+    slotMinutes: 15,
     maxConsecutiveSlots: 1,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '15:30' },
+    attentionEnd: '15:30',
     label: 'Docente',
     requiresChild: true,
     directBooking: false,
   },
   director: {
     role: 'director',
-    fixedDurationMin: null,
-    // 2 slots × 15 min = 30 min máx.
-    maxDurationMin: 30,
+    // Spec: slots absolutamente fijos e indivisibles de 15 min, un solo
+    // padre por slot.
+    fixedDurationMin: 15,
+    maxDurationMin: 15,
     slotMinutes: 15,
-    maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
+    maxConsecutiveSlots: 1,
     allowedDays: ['martes', 'jueves'],
     defaultHours: { start: '08:00', end: '15:30' },
+    attentionEnd: '15:30',
     label: 'Dirección',
     requiresChild: false,
     directBooking: false,
   },
   admin: {
     role: 'admin',
-    fixedDurationMin: null,
-    maxDurationMin: 30,
+    // Spec: slots absolutamente fijos e indivisibles de 15 min, un solo
+    // padre por slot.
+    fixedDurationMin: 15,
+    maxDurationMin: 15,
     slotMinutes: 15,
-    maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
+    maxConsecutiveSlots: 1,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '15:30' },
+    attentionEnd: '15:30',
     label: 'Administración',
     requiresChild: false,
     directBooking: false,
@@ -123,6 +143,7 @@ export const APPOINTMENT_RULES: Record<AppointmentRole, AppointmentRoleRule> = {
     maxConsecutiveSlots: MAX_CONSECUTIVE_SLOTS,
     allowedDays: WEEK_FULL,
     defaultHours: { start: '08:00', end: '16:00' },
+    attentionEnd: null,
     label: 'Padre / Tutor',
     requiresChild: false,
     directBooking: false,
@@ -259,22 +280,42 @@ export interface InitialStatusContext {
 export function resolveInitialStatus(ctx: InitialStatusContext): InitialStatus {
   const { caller, recipient } = ctx;
 
-  // Padre → psicóloga = confirmada (la psicóloga acepta abiertamente al padre).
-  if (caller === 'padre' && recipient === 'psicologa') return 'confirmada';
-
-  // Alumno → psicóloga = confirmada (el alumno sólo puede agendar con psi).
+  // Alumno → psicóloga = confirmada (el alumno sólo puede agendar con psi,
+  // se asume vínculo/confianza directa).
   if (caller === 'alumno' && recipient === 'psicologa') return 'confirmada';
 
   // Psicóloga → alumno: confirmada si NO hay padre vinculado; si el padre
-  // también participa, queda pendiente hasta que el padre confirme.
+  // también participa (cita mixta), queda pendiente hasta que el padre
+  // confirme — la cita depende enteramente del padre.
   if (caller === 'psicologa' && recipient === 'alumno') {
     return ctx.hasParent ? 'pendiente' : 'confirmada';
   }
 
-  // Cualquier otra combinación queda pendiente:
-  //   • padre → docente / admin
+  // Cualquier otra combinación queda pendiente. En particular:
+  //   • padre → psicóloga / docente / admin   (el profesional debe aceptar
+  //     en su panel — cuando el PADRE inicia la solicitud, queda pendiente)
   //   • psicóloga → padre
   //   • docente → padre
-  //   • admin → padre
+  //   • admin / director → padre
   return 'pendiente';
+}
+
+// ============================================================================
+// RECURRENCIA DE SEGUIMIENTO (Plan de Seguimiento Inteligente)
+// ----------------------------------------------------------------------------
+// Intervalo recomendado (en días) hasta la próxima sesión de seguimiento,
+// según el `tipo` de la cita actual. El panel de cierre clínico propone por
+// defecto `fecha_actual + intervalo` y la psicóloga puede ajustarla.
+// ============================================================================
+export const FOLLOW_UP_INTERVAL_DAYS: Record<AppointmentType, number> = {
+  psicologico: 14,
+  conductual: 14,
+  familiar: 21,
+  academico: 30,
+  disciplinario: 7,
+  otro: 14,
+};
+
+export function getFollowUpIntervalDays(tipo: AppointmentType): number {
+  return FOLLOW_UP_INTERVAL_DAYS[tipo] ?? 14;
 }

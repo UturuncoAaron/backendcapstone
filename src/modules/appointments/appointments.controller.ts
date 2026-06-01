@@ -27,6 +27,7 @@ import {
   PostponeAppointmentDto,
   DeriveAppointmentDto,
   CompleteAppointmentDto,
+  CloseSessionDto,
 } from './dto/appointments.dto.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 
@@ -115,6 +116,21 @@ export class AppointmentsController {
       date,
       slotMinutes ? parseInt(slotMinutes, 10) : undefined,
     );
+  }
+
+  // ── Detalle por bloques + sub-slots de un día (drawer/slide-over) ─
+  // El calendario macro muestra los bloques generales; al abrir un día
+  // se despliega este detalle con los sub-slots de 15/30 min.
+  @Get('day-blocks/:cuentaId')
+  @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
+  getDayBlocks(
+    @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
+    @Query('date') date: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    // Solo el dueño de la agenda (o admin) ve quién ocupa cada sub-slot.
+    const revealOccupants = user.rol === 'admin' || user.id === cuentaId;
+    return this.service.getDayBlocks(cuentaId, date, revealOccupants);
   }
 
   // ── Lista de docentes que el caller puede convocar ─────────────
@@ -328,5 +344,38 @@ export class AppointmentsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.markAsNoAsistio({ id: user.id, rol: user.rol }, id);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // CIERRE CLÍNICO + SEGUIMIENTO INTELIGENTE (Psicología)
+  // ══════════════════════════════════════════════════════════════
+
+  // Sugerencia de fecha de seguimiento + slots libres precargados.
+  @Get(':id/seguimiento-sugerido')
+  @Roles('psicologa', 'admin')
+  followUpSuggestion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.getFollowUpSuggestion(
+      { id: user.id, rol: user.rol },
+      id,
+    );
+  }
+
+  // Cierra la cita (realizada) + ficha clínica + cita de seguimiento, todo
+  // en una sola transacción (botón "Guardar Notas y Programar Seguimiento").
+  @Post(':id/cerrar-sesion')
+  @Roles('psicologa', 'admin')
+  closeSession(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CloseSessionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.closeSessionWithFollowUp(
+      { id: user.id, rol: user.rol },
+      id,
+      dto,
+    );
   }
 }

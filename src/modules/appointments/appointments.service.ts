@@ -23,7 +23,10 @@ import {
   DiaSemana,
 } from './entities/account-availability.entity.js';
 import { PsychologistStudent } from '../psychology/entities/psychologist-student.entity.js';
-import type { AppointmentStatus } from './appointments.types.js';
+import type {
+  AppointmentStatus,
+  AppointmentType,
+} from './appointments.types.js';
 import {
   CreateAppointmentDto,
   UpdateAppointmentDto,
@@ -32,6 +35,7 @@ import {
   PostponeAppointmentDto,
   DeriveAppointmentDto,
   CompleteAppointmentDto,
+  CloseSessionDto,
 } from './dto/appointments.dto.js';
 import {
   ROLES_WITH_AVAILABILITY,
@@ -40,6 +44,7 @@ import {
 } from './appointments.types.js';
 import {
   AppointmentRole,
+  AppointmentRoleRule,
   getAppointmentRule,
   isDayAllowed,
   formatAllowedDays,
@@ -49,6 +54,7 @@ import {
   callerOwnsSchedule,
   allowedRecipientsFor,
   resolveInitialStatus,
+  getFollowUpIntervalDays,
   CallerRol,
 } from './appointments.rules.js';
 import {
@@ -131,8 +137,7 @@ export class AppointmentsService {
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
     private readonly events: EventEmitter2,
-  ) { }
-
+  ) {}
 
   private async appendStatusLog(
     appointmentId: string,
@@ -157,7 +162,8 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `appendStatusLog falló para cita ${appointmentId}: ${err instanceof Error ? err.message : String(err)
+        `appendStatusLog falló para cita ${appointmentId}: ${
+          err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -224,9 +230,10 @@ export class AppointmentsService {
       nextStatus: r.next_status,
       changedById: r.changed_by_id,
       changedByName: r.changed_by_nombre
-        ? `${r.changed_by_nombre}${r.changed_by_apellido_paterno
-            ? ' ' + r.changed_by_apellido_paterno
-            : ''
+        ? `${r.changed_by_nombre}${
+            r.changed_by_apellido_paterno
+              ? ' ' + r.changed_by_apellido_paterno
+              : ''
           }`.trim()
         : null,
       changedByRole: r.changed_by_rol,
@@ -342,6 +349,7 @@ export class AppointmentsService {
         durationMin,
         undefined,
         rule.defaultHours,
+        rule.attentionEnd,
       );
 
     if (hasAvailability(caller.rol) && caller.id !== convocadoA.id)
@@ -349,6 +357,9 @@ export class AppointmentsService {
         caller.id,
         scheduledAt,
         durationMin,
+        undefined,
+        undefined,
+        rule.attentionEnd,
       );
 
     return this.dataSource.transaction('SERIALIZABLE', async (em) => {
@@ -464,7 +475,8 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `autoFinalizePastAppointments falló: ${err instanceof Error ? err.message : String(err)
+        `autoFinalizePastAppointments falló: ${
+          err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -773,8 +785,14 @@ export class AppointmentsService {
 
     // Quién puede aceptar: el convocado original, o — si el aplazamiento
     // lo hizo el convocado — el convocador. Admin siempre puede.
+    //
+    // Cita mixta (Psicóloga → Alumno + Padre): el convocado formal es el
+    // alumno, pero la cita depende ENTERAMENTE del padre. El padre vinculado
+    // (`parentId`) es quien debe presionar "Confirmar" para que la cita pase
+    // a `confirmada` para todas las partes (spec Aarón, 2026-05).
     const isConvocador = appt.createdById === caller.id;
     const isConvocado = appt.convocadoAId === caller.id;
+    const isParent = appt.parentId !== null && appt.parentId === caller.id;
     const lastPostponeByConvocado =
       lastPostpone &&
       lastPostpone.changedById === appt.convocadoAId &&
@@ -782,6 +800,7 @@ export class AppointmentsService {
     const canAccept =
       caller.rol === 'admin' ||
       isConvocado ||
+      isParent ||
       (lastPostponeByConvocado && isConvocador);
     if (!canAccept)
       throw new ForbiddenException(
@@ -898,6 +917,7 @@ export class AppointmentsService {
         appt.durationMin,
         appt.id,
         convocadorRule.defaultHours,
+        convocadorRule.attentionEnd,
       );
     }
 
@@ -1152,6 +1172,341 @@ export class AppointmentsService {
   }
 
   // ════════════════════════════════════════════════════════════════
+  // CIERRE CLÍNICO + SEGUIMIENTO INTELIGENTE (Psicología)
+  // ════════════════════════════════════════════════════════════════
+
+  /**
+   * Resuelve la psicóloga participante de una cita (la que creó la cita o el
+   * convocado, según el flujo). Devuelve `null` si ninguna parte es psicóloga.
+   */
+  private async resolvePsychologistOf(
+    appt: Appointment,
+  ): Promise<string | null> {
+    for (const id of [appt.createdById, appt.convocadoAId]) {
+      if (!id) continue;
+      const acc = await this.loadAccountSummary(id);
+      if (acc?.rol === 'psicologa') return acc.id;
+    }
+    return null;
+  }
+
+  private assertPsicologaParticipant(
+    caller: CallerContext,
+    appt: Appointment,
+  ): void {
+    if (caller.rol !== 'admin' && caller.rol !== 'psicologa')
+      throw new ForbiddenException(
+        'Solo la psicóloga (o admin) puede cerrar la sesión',
+      );
+    if (
+      caller.rol === 'psicologa' &&
+      appt.convocadoAId !== caller.id &&
+      appt.createdById !== caller.id
+    )
+      throw new ForbiddenException(
+        'Solo la psicóloga participante puede cerrar esta cita',
+      );
+  }
+
+  /** YYYY-MM-DD en hora local. */
+  private toLocalDateStr(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  /** Avanza la fecha al siguiente día permitido por la regla (lun–vie psi). */
+  private advanceToAllowedDay(d: Date, rule: AppointmentRoleRule): Date {
+    const result = new Date(d);
+    for (let i = 0; i < 7; i++) {
+      if (isDayAllowed(rule, result)) return result;
+      result.setDate(result.getDate() + 1);
+    }
+    return result;
+  }
+
+  /**
+   * Plan de Seguimiento Inteligente: para la cita indicada, calcula la fecha
+   * recomendada de la próxima sesión (según el `tipo` de cita) y precarga los
+   * slots libres de la psicóloga en esa fecha.
+   */
+  async getFollowUpSuggestion(caller: CallerContext, appointmentId: string) {
+    const appt = await this.appointmentRepo.findOne({
+      where: { id: appointmentId },
+    });
+    if (!appt) throw new NotFoundException('Cita no encontrada');
+    this.assertPsicologaParticipant(caller, appt);
+
+    const psychologistId =
+      caller.rol === 'psicologa'
+        ? caller.id
+        : await this.resolvePsychologistOf(appt);
+    if (!psychologistId)
+      throw new BadRequestException(
+        'La cita no tiene una psicóloga asociada para programar seguimiento',
+      );
+
+    const rule = getAppointmentRule('psicologa');
+    const intervalDays = getFollowUpIntervalDays(appt.tipo);
+
+    const base = new Date(appt.scheduledAt);
+    base.setDate(base.getDate() + intervalDays);
+    const suggested = this.advanceToAllowedDay(base, rule);
+    const suggestedDate = this.toLocalDateStr(suggested);
+
+    const slots = await this.getFreeSlots(psychologistId, suggestedDate);
+
+    const parents = appt.studentId
+      ? await this.findParentsOfStudent(appt.studentId)
+      : [];
+
+    return {
+      appointmentId,
+      psychologistId,
+      studentId: appt.studentId,
+      tipo: appt.tipo,
+      intervalDays,
+      suggestedDate,
+      slotMinutes: rule.slotMinutes,
+      maxConsecutiveSlots: rule.maxConsecutiveSlots,
+      defaultDurationMin: appt.durationMin || rule.slotMinutes,
+      slots,
+      parents,
+    };
+  }
+
+  /**
+   * Cierre clínico en una sola transacción:
+   *   1. Marca la cita actual como `realizada` (+ notas posteriores).
+   *   2. Guarda notas clínicas como ficha privada (fichas_psicologia).
+   *   3. (Opcional) Crea la cita de seguimiento aplicando la matriz de estado:
+   *      psi → alumno = confirmada · psi → alumno + padre = pendiente.
+   */
+  async closeSessionWithFollowUp(
+    caller: CallerContext,
+    appointmentId: string,
+    dto: CloseSessionDto,
+  ): Promise<{ closed: Appointment; followUp: Appointment | null }> {
+    const appt = await this.appointmentRepo.findOne({
+      where: { id: appointmentId },
+    });
+    if (!appt) throw new NotFoundException('Cita no encontrada');
+    this.assertPsicologaParticipant(caller, appt);
+    if (!['pendiente', 'confirmada'].includes(appt.estado))
+      throw new BadRequestException(
+        `No se puede cerrar una cita en estado ${appt.estado}`,
+      );
+
+    const psychologistId =
+      caller.rol === 'psicologa'
+        ? caller.id
+        : await this.resolvePsychologistOf(appt);
+
+    // ── Pre-validación del seguimiento (fuera de la transacción) ──────
+    const rule = getAppointmentRule('psicologa');
+    let followUpPlan: {
+      scheduledAt: Date;
+      durationMin: number;
+      parentId: string | null;
+      tipo: AppointmentType;
+      motivo: string;
+      estado: AppointmentStatus;
+    } | null = null;
+
+    if (dto.seguimiento) {
+      if (!psychologistId)
+        throw new BadRequestException(
+          'La cita no tiene psicóloga asociada para programar seguimiento',
+        );
+      const seg = dto.seguimiento;
+      const scheduledAt = new Date(seg.scheduledAt);
+      this.assertScheduledAtIsValid(scheduledAt);
+      if (!isDayAllowed(rule, scheduledAt))
+        throw new BadRequestException(
+          `${rule.label} atiende solo ${formatAllowedDays(rule)}`,
+        );
+      const durationMin = this.resolveDuration(rule, seg.durationMin);
+
+      // Padre: explícito, autocompletado, o ninguno.
+      let parentId: string | null = null;
+      if (seg.incluirPadre) {
+        if (seg.parentId) {
+          await this.assertParentBelongsToStudent(seg.parentId, appt.studentId);
+          parentId = seg.parentId;
+        } else {
+          const padres = await this.findParentsOfStudent(appt.studentId);
+          if (padres.length === 1) parentId = padres[0].id;
+          else
+            throw new BadRequestException(
+              'Debes seleccionar el padre/tutor para la cita de seguimiento',
+            );
+        }
+      }
+
+      await this.assertSlotFitsAvailability(
+        psychologistId,
+        scheduledAt,
+        durationMin,
+        undefined,
+        rule.defaultHours,
+        rule.attentionEnd,
+      );
+
+      const estado = resolveInitialStatus({
+        caller: 'psicologa',
+        recipient: 'alumno',
+        hasStudent: true,
+        hasParent: !!parentId,
+      });
+
+      followUpPlan = {
+        scheduledAt,
+        durationMin,
+        parentId,
+        tipo: seg.tipo ?? appt.tipo,
+        motivo:
+          seg.motivo?.trim() ||
+          `Sesión de seguimiento (cita previa ${this.toLocalDateStr(new Date(appt.scheduledAt))})`,
+        estado,
+      };
+    }
+
+    return this.dataSource.transaction('SERIALIZABLE', async (em) => {
+      // 1. Cerrar cita actual.
+      const current = await em.findOne(Appointment, {
+        where: { id: appointmentId },
+      });
+      if (!current) throw new NotFoundException('Cita no encontrada');
+      const previousStatus = current.estado;
+      current.estado = 'realizada';
+      if (dto.notasPosteriores !== undefined)
+        current.followUpNotes = dto.notasPosteriores;
+      const closed = await em.save(current);
+      await this.appendStatusLog(
+        closed.id,
+        previousStatus,
+        'realizada',
+        caller.id,
+        'Cierre clínico de sesión',
+        em,
+      );
+
+      // 2. Ficha clínica privada con las notas.
+      const notas = dto.notasClinicas?.trim();
+      if (notas && notas.length > 0 && psychologistId) {
+        await em.query(
+          `INSERT INTO fichas_psicologia
+             (psicologa_id, alumno_id, cita_id, categoria, contenido, es_privada)
+           VALUES ($1, $2, $3, $4, $5, TRUE)`,
+          [
+            psychologistId,
+            closed.studentId,
+            closed.id,
+            this.mapTipoToFichaCategoria(dto.fichaCategoria, closed.tipo),
+            notas,
+          ],
+        );
+      }
+
+      // 3. Cita de seguimiento.
+      let followUp: Appointment | null = null;
+      if (followUpPlan && psychologistId) {
+        const plan = followUpPlan;
+        const conflict = await em
+          .createQueryBuilder(Appointment, 'a')
+          .where('(a.convocado_a_id = :psi OR a.convocado_por_id = :psi)', {
+            psi: psychologistId,
+          })
+          .andWhere('a.estado IN (:...states)', {
+            states: ['pendiente', 'confirmada'],
+          })
+          .andWhere(
+            `tstzrange(a.fecha_hora, a.fecha_hora + (a.duracion_min || ' minutes')::interval, '[)')
+             && tstzrange(:start, :end, '[)')`,
+            {
+              start: plan.scheduledAt,
+              end: new Date(
+                plan.scheduledAt.getTime() + plan.durationMin * 60_000,
+              ),
+            },
+          )
+          .getOne();
+        if (conflict)
+          throw new ConflictException(
+            'El horario de seguimiento ya está ocupado',
+          );
+
+        const nueva = em.create(Appointment, {
+          createdById: psychologistId,
+          convocadoAId: closed.studentId,
+          studentId: closed.studentId,
+          parentId: plan.parentId,
+          tipo: plan.tipo,
+          modalidad: 'presencial',
+          motivo: plan.motivo,
+          scheduledAt: plan.scheduledAt,
+          durationMin: plan.durationMin,
+          estado: plan.estado,
+          rescheduledFromId: null,
+          priorNotes: `[Seguimiento] Generado al cerrar la cita ${closed.id}`,
+        });
+        followUp = await em.save(nueva);
+        await this.appendStatusLog(
+          followUp.id,
+          null,
+          followUp.estado,
+          caller.id,
+          'Cita de seguimiento (cierre clínico)',
+          em,
+        );
+        await this.upsertPsychologistAssignment(
+          em,
+          psychologistId,
+          closed.studentId,
+        );
+
+        this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CREATED, {
+          appointmentId: followUp.id,
+          createdById: psychologistId,
+          convocadoAId: closed.studentId,
+          parentId: plan.parentId,
+          studentId: closed.studentId,
+          scheduledAt: plan.scheduledAt,
+          motivo: plan.motivo,
+          convocadoARole: 'alumno',
+        } satisfies AppointmentCreatedEvent);
+      }
+
+      this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_STATUS_CHANGED, {
+        appointmentId: closed.id,
+        actorId: caller.id,
+        previousStatus,
+        nextStatus: 'realizada',
+        notifyAccountIds: this.recipientsOf(closed),
+      } satisfies AppointmentStatusChangedEvent);
+
+      return { closed, followUp };
+    });
+  }
+
+  /** Mapea el tipo de cita / categoría provista a la categoría de ficha. */
+  private mapTipoToFichaCategoria(
+    provided: string | undefined,
+    tipo: AppointmentType,
+  ): string {
+    const valid = ['conductual', 'academico', 'familiar', 'emocional', 'otro'];
+    if (provided && valid.includes(provided)) return provided;
+    const map: Record<string, string> = {
+      conductual: 'conductual',
+      academico: 'academico',
+      familiar: 'familiar',
+      psicologico: 'emocional',
+      disciplinario: 'conductual',
+      otro: 'otro',
+    };
+    return map[tipo] ?? 'otro';
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // DISPONIBILIDAD
   // ════════════════════════════════════════════════════════════════
 
@@ -1258,6 +1613,13 @@ export class AppointmentsService {
       else merged.push({ ...r });
     }
 
+    // Tope de atención (docentes / admin / dirección → 15:30). Recorta el
+    // fin de cada bloque y descarta los que quedan vacíos.
+    const cutoffMin = this.cutoffToMinutes(rule?.attentionEnd);
+    if (cutoffMin !== null) {
+      for (const b of merged) b.e = Math.min(b.e, cutoffMin);
+    }
+
     const dayStart = new Date(ref);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(ref);
@@ -1306,6 +1668,191 @@ export class AppointmentsService {
       }
     }
     return result;
+  }
+
+  /**
+   * Vista de "drawer / slide-over" para un día: devuelve los BLOQUES de
+   * disponibilidad declarados (p. ej. 45 min para docente) y, dentro de cada
+   * uno, los SUB-SLOTS reservables de `slotMinutes` (15 min docente/admin,
+   * 30 min psicóloga) con su flag libre/ocupado.
+   *
+   * El calendario macro no debe renderizar los micro-slots de 15 min para no
+   * saturarse: muestra los bloques generales y, al hacer clic en un día, abre
+   * este detalle.
+   *
+   * `revealOccupants` controla si se incluye el detalle de quién ocupa cada
+   * sub-slot (solo el dueño de la agenda o un admin debe verlo).
+   */
+  async getDayBlocks(
+    cuentaId: string,
+    date: string,
+    revealOccupants = false,
+  ): Promise<{
+    cuentaId: string;
+    rol: string;
+    role: AppointmentRole | null;
+    date: string;
+    diaSemana: DiaSemana | null;
+    slotMinutes: number;
+    fixedDurationMin: number | null;
+    maxConsecutiveSlots: number;
+    attentionEnd: string | null;
+    blocks: Array<{
+      start: string;
+      end: string;
+      total: number;
+      freeCount: number;
+      subSlots: Array<{
+        start: string;
+        end: string;
+        available: boolean;
+        appointmentId: string | null;
+        occupantLabel: string | null;
+      }>;
+    }>;
+  }> {
+    if (!date)
+      throw new BadRequestException(
+        'El parámetro date es requerido (YYYY-MM-DD)',
+      );
+    const ref = parseLocalDate(date);
+    if (isNaN(ref.getTime()))
+      throw new BadRequestException(
+        'Formato de fecha inválido, usa YYYY-MM-DD',
+      );
+
+    const account = await this.loadAccountSummary(cuentaId);
+    if (!account) throw new NotFoundException('Cuenta no encontrada');
+
+    const role = hasAvailability(account.rol)
+      ? this.toAppointmentRole(account)
+      : null;
+    const rule = role ? getAppointmentRule(role) : null;
+    const slotMinutes = rule?.slotMinutes ?? 30;
+
+    const dayIdx = ref.getDay();
+    const diaSemana = DIAS_SEMANA_INDEXED[dayIdx];
+
+    const empty = {
+      cuentaId,
+      rol: account.rol,
+      role,
+      date,
+      diaSemana,
+      slotMinutes,
+      fixedDurationMin: rule?.fixedDurationMin ?? null,
+      maxConsecutiveSlots: rule?.maxConsecutiveSlots ?? 1,
+      attentionEnd: rule?.attentionEnd ?? null,
+      blocks: [],
+    };
+    if (!diaSemana) return empty;
+
+    // Bloques declarados (o el horario por defecto del rol).
+    const bloques = await this.availabilityRepo.find({
+      where: { cuentaId, diaSemana, activo: true },
+      order: { horaInicio: 'ASC' },
+    });
+
+    const toMin = (hhmm: string) => {
+      const [h, m] = hhmm.split(':').map(Number);
+      return h * 60 + m;
+    };
+    let ranges: { s: number; e: number }[];
+    if (bloques.length > 0) {
+      ranges = bloques.map((b) => ({
+        s: toMin(b.horaInicio),
+        e: toMin(b.horaFin),
+      }));
+    } else if (rule) {
+      ranges = [
+        { s: toMin(rule.defaultHours.start), e: toMin(rule.defaultHours.end) },
+      ];
+    } else {
+      return empty;
+    }
+
+    const cutoffMin = this.cutoffToMinutes(rule?.attentionEnd);
+    if (cutoffMin !== null)
+      for (const r of ranges) r.e = Math.min(r.e, cutoffMin);
+    ranges = ranges
+      .filter((r) => r.e - r.s >= slotMinutes)
+      .sort((a, b) => a.s - b.s);
+
+    // Citas del día (para marcar sub-slots ocupados).
+    const dayStart = new Date(ref);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(ref);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    type OccRow = {
+      id: string;
+      fecha_hora: Date;
+      duracion_min: number;
+      motivo: string;
+      alumno_nombre: string | null;
+      alumno_apellido: string | null;
+    };
+    const citas = await this.dataSource.query<OccRow[]>(
+      `SELECT a.id, a.fecha_hora, a.duracion_min, a.motivo,
+              al.nombre AS alumno_nombre, al.apellido_paterno AS alumno_apellido
+         FROM citas a
+         LEFT JOIN alumnos al ON al.id = a.alumno_id
+        WHERE (a.convocado_a_id = $1 OR a.convocado_por_id = $1)
+          AND a.estado IN ('pendiente','confirmada')
+          AND a.fecha_hora >= $2 AND a.fecha_hora <= $3`,
+      [cuentaId, dayStart, dayEnd],
+    );
+    const occupied = citas.map((c) => {
+      const d = new Date(c.fecha_hora);
+      const s = d.getHours() * 60 + d.getMinutes();
+      return { s, e: s + (c.duracion_min ?? slotMinutes), row: c };
+    });
+
+    const now = new Date();
+    const isToday = ref.toDateString() === now.toDateString();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const toHHMM = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+
+    const blocks = ranges.map((block) => {
+      const subSlots: {
+        start: string;
+        end: string;
+        available: boolean;
+        appointmentId: string | null;
+        occupantLabel: string | null;
+      }[] = [];
+      for (
+        let cursor = block.s;
+        cursor + slotMinutes <= block.e;
+        cursor += slotMinutes
+      ) {
+        const slotEnd = cursor + slotMinutes;
+        const occ = occupied.find((o) => cursor < o.e && slotEnd > o.s);
+        const isPast = isToday && cursor < nowMinutes + MIN_LEAD_MINUTES;
+        const available = !occ && !isPast;
+        subSlots.push({
+          start: toHHMM(cursor),
+          end: toHHMM(slotEnd),
+          available,
+          appointmentId: occ ? occ.row.id : null,
+          occupantLabel:
+            occ && revealOccupants
+              ? `${occ.row.alumno_nombre ?? ''} ${occ.row.alumno_apellido ?? ''}`.trim() ||
+                occ.row.motivo.slice(0, 40)
+              : null,
+        });
+      }
+      return {
+        start: toHHMM(block.s),
+        end: toHHMM(block.e),
+        total: subSlots.length,
+        freeCount: subSlots.filter((s) => s.available).length,
+        subSlots,
+      };
+    });
+
+    return { ...empty, blocks };
   }
 
   async replaceAvailability(
@@ -1489,10 +2036,10 @@ export class AppointmentsService {
       }
       return cancelledCount > 0
         ? {
-          deleted: true as const,
-          cancelledCount,
-          affected: summaries,
-        }
+            deleted: true as const,
+            cancelledCount,
+            affected: summaries,
+          }
         : { deleted: true as const, cancelledCount };
     });
   }
@@ -1542,6 +2089,14 @@ export class AppointmentsService {
       weekStart: toDateStr(monday),
       days,
     };
+  }
+
+  /** Convierte 'HH:mm' a minutos desde medianoche, o null si no hay cutoff. */
+  private cutoffToMinutes(cutoff: string | null | undefined): number | null {
+    if (!cutoff) return null;
+    const [h, m] = cutoff.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    return h * 60 + m;
   }
 
   /** Convierte 'lunes' .. 'sabado' a ISO day-of-week 1..6 (1=Mon, 7=Sun). */
@@ -1674,9 +2229,9 @@ export class AppointmentsService {
       especialidad: r.especialidad,
       tutoria_actual: r.tutoria_seccion_id
         ? {
-          seccion_id: r.tutoria_seccion_id,
-          seccion_label: r.tutoria_seccion_label ?? '',
-        }
+            seccion_id: r.tutoria_seccion_id,
+            seccion_label: r.tutoria_seccion_label ?? '',
+          }
         : null,
     };
   }
@@ -1721,7 +2276,8 @@ export class AppointmentsService {
     const effectiveMax = Math.min(rule.maxDurationMin, maxBySlots);
     if (value > effectiveMax)
       throw new BadRequestException(
-        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${rule.maxConsecutiveSlots === 1 ? '' : 's'
+        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${
+          rule.maxConsecutiveSlots === 1 ? '' : 's'
         } consecutivo${rule.maxConsecutiveSlots === 1 ? '' : 's'} (${effectiveMax} min)`,
       );
     return value;
@@ -1874,6 +2430,7 @@ export class AppointmentsService {
     durationMin: number,
     ignoreAppointmentId?: string,
     fallback?: { start: string; end: string },
+    cutoff?: string | null,
   ): Promise<void> {
     const end = new Date(start.getTime() + durationMin * 60_000);
     const dayName = WEEK_DAYS[start.getDay()];
@@ -1897,13 +2454,20 @@ export class AppointmentsService {
         'El profesional no tiene disponibilidad ese día',
       );
 
+    // Tope de atención (15:30 para docentes / admin / dirección): la cita no
+    // puede terminar más tarde que el cutoff aunque el bloque declarado lo
+    // permita.
+    const cutoffMin = this.cutoffToMinutes(cutoff);
+
     const fits = virtualBlocks.some((d) => {
       const [hS, mS] = d.horaInicio.split(':').map(Number);
       const [hE, mE] = d.horaFin.split(':').map(Number);
+      const blockEndMin =
+        cutoffMin !== null ? Math.min(hE * 60 + mE, cutoffMin) : hE * 60 + mE;
       const ds = new Date(start);
       ds.setHours(hS, mS, 0, 0);
       const de = new Date(start);
-      de.setHours(hE, mE, 0, 0);
+      de.setHours(Math.floor(blockEndMin / 60), blockEndMin % 60, 0, 0);
       return start >= ds && end <= de;
     });
 
@@ -1911,8 +2475,10 @@ export class AppointmentsService {
       const ranges = virtualBlocks
         .map((d) => `${d.horaInicio} - ${d.horaFin}`)
         .join(', ');
+      const cutoffNote =
+        cutoffMin !== null ? ` (atención hasta las ${cutoff})` : '';
       throw new BadRequestException(
-        `Horario fuera de la disponibilidad (${ranges})`,
+        `Horario fuera de la disponibilidad (${ranges})${cutoffNote}`,
       );
     }
 

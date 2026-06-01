@@ -12,6 +12,7 @@ import {
   IsIn,
   Matches,
   IsArray,
+  IsBoolean,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -145,6 +146,72 @@ export class CompleteAppointmentDto {
   @IsString()
   @MaxLength(2000)
   notasPosteriores?: string;
+}
+
+const FICHA_CATEGORIES = [
+  'conductual',
+  'academico',
+  'familiar',
+  'emocional',
+  'otro',
+] as const;
+
+/** Datos de la cita de seguimiento creada al cerrar la sesión. */
+export class FollowUpScheduleDto {
+  @IsDateString()
+  scheduledAt: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(15)
+  @Max(180)
+  durationMin?: number;
+
+  /** Si true, la cita de seguimiento incluye al padre → nacerá pendiente. */
+  @IsOptional()
+  @IsBoolean()
+  incluirPadre?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  parentId?: string;
+
+  @IsOptional()
+  @IsEnum(APPOINTMENT_TYPES)
+  tipo?: AppointmentType;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  motivo?: string;
+}
+
+/**
+ * Cierre clínico (Slide-over de Psicología): marca la cita actual como
+ * realizada, guarda notas clínicas (ficha privada) y opcionalmente crea la
+ * cita de seguimiento en una sola transacción.
+ */
+export class CloseSessionDto {
+  /** Notas clínicas privadas → se guardan como ficha de psicología. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  notasClinicas?: string;
+
+  @IsOptional()
+  @IsIn(FICHA_CATEGORIES)
+  fichaCategoria?: (typeof FICHA_CATEGORIES)[number];
+
+  /** Notas posteriores visibles en la cita (resumen administrativo). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  notasPosteriores?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FollowUpScheduleDto)
+  seguimiento?: FollowUpScheduleDto;
 }
 
 export class ListAppointmentsQueryDto {
