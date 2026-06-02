@@ -7,6 +7,7 @@ import {
   ArrayMinSize,
   IsIn,
 } from 'class-validator';
+
 export const NOTIFICATION_TYPES = [
   'cita_agendada',
   'cita_confirmada',
@@ -20,7 +21,9 @@ export const NOTIFICATION_TYPES = [
   'contrato_por_vencer',
   'asistencia_registrada',
   'inasistencia_alumno',
+  'periodo_vencido',
 ] as const;
+
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export class CreateNotificationDto {

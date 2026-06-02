@@ -26,14 +26,12 @@ export class CoursesController {
         return this.coursesService.getAvailableColors();
     }
 
-    // ── NUEVO ENDPOINT CENTRALIZADO ───────────────────────────
     // GET /api/courses/areas
     @Get('areas')
     @Roles('admin', 'docente')
     getCourseAreas() {
         return this.coursesService.getAvailableAreas();
     }
-    // ──────────────────────────────────────────────────────────
 
     // GET /api/courses/catalog
     @Get('catalog')

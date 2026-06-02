@@ -1,6 +1,6 @@
 import {
     Injectable, NotFoundException, ForbiddenException, ConflictException,
-} from '@nestjs/common'; // CORREGIDO: De '@nestjs/any' a '@nestjs/common'
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Course } from './entities/course.entity.js';
@@ -164,13 +164,39 @@ export class CoursesService {
         return courses.map(mapCurso);
     }
 
+    // CORREGIDO: Mapeo estricto e inyección de nombre relacional para el componente de detalles
     async findOne(id: string) {
         const course = await this.courseRepo.findOne({
             where: { id, activo: true },
             relations: ['seccion', 'seccion.grado', 'catalogo', 'docente'],
         });
         if (!course) throw new NotFoundException(`Curso ${id} no encontrado`);
-        return course;
+
+        return {
+            id: course.id,
+            nombre: course.catalogo?.nombre ?? '', // Mapeo de la relación hacia la raíz
+            catalogo_id: course.catalogo_id,
+            descripcion: course.descripcion,
+            color: course.color,
+            activo: course.activo,
+            anio: course.anio,
+            seccion_id: course.seccion_id,
+            docente_id: course.docente_id,
+            seccion: course.seccion ? {
+                id: course.seccion.id,
+                nombre: course.seccion.nombre,
+                grado: course.seccion.grado ? {
+                    id: course.seccion.grado.id,
+                    nombre: course.seccion.grado.nombre,
+                } : null,
+            } : null,
+            docente: course.docente ? {
+                id: course.docente.id,
+                nombre: course.docente.nombre,
+                apellido_paterno: course.docente.apellido_paterno,
+                especialidad: course.docente.especialidad ?? null,
+            } : null,
+        };
     }
 
     async create(dto: {
@@ -205,7 +231,7 @@ export class CoursesService {
         if (!course) throw new NotFoundException(`Curso ${id} no encontrado`);
 
         if (rol === 'docente' && course.docente_id !== docenteId) {
-            throw new ForbiddenException('No tienes permiso para editar este curso');
+            throw new ForbiddenException('No tienes permission para editar este curso');
         }
 
         Object.assign(course, dto);

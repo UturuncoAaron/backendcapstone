@@ -5,6 +5,7 @@ export const NOTIFICATION_EVENT_NAMES = {
   ANNOUNCEMENT_CREATED: 'announcement.created',
   TASK_CREATED: 'task.created',
   STUDENT_ABSENT: 'student.absent',
+  PERIOD_EXPIRED: 'period.expired',
 } as const;
 
 export type NotificationEventName =
@@ -20,7 +21,6 @@ export interface AppointmentCreatedEvent {
   studentId: string | null;
   scheduledAt: Date;
   motivo: string;
-  /** Rol del convocado para mostrar etiqueta en el FE. */
   convocadoARole: string;
 }
 
@@ -29,7 +29,6 @@ export interface AppointmentStatusChangedEvent {
   actorId: string;
   previousStatus: string;
   nextStatus: string;
-  /** Cuentas a las que se debe notificar (creador + convocado + padre). */
   notifyAccountIds: string[];
 }
 
@@ -44,7 +43,6 @@ export interface AnnouncementCreatedEvent {
   announcementId: string;
   titulo: string;
   contenido: string;
-  /** Roles destino del comunicado (`todos | alumnos | docentes | padres | psicologas | auxiliares`). */
   destinatarios: string[];
   createdById: string;
 }
@@ -53,7 +51,6 @@ export interface TaskCreatedEvent {
   taskId: string;
   cursoId: string;
   titulo: string;
-  /** UUIDs de alumnos matriculados en el curso (se calcula al emitir). */
   alumnoIds: string[];
   fechaLimite: Date | null;
 }
@@ -64,4 +61,11 @@ export interface StudentAbsentEvent {
   fecha: Date;
   parentAccountIds: string[];
   motivo: string | null;
+}
+export interface PeriodExpiredEvent {
+  periodoId: string;
+  periodoNombre: string;
+  anio: number;
+  bimestre: number;
+  adminAccountIds: string[];
 }

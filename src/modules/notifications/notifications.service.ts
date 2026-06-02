@@ -2,11 +2,17 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DataSource } from 'typeorm';
 import { Notification } from './entities/notification.entity.js';
 import {
   CreateNotificationDto,
   CreateBulkNotificationDto,
 } from './dto/notification.dto.js';
+import {
+  NOTIFICATION_EVENT_NAMES,
+  PeriodExpiredEvent,
+} from './events/notification-events.js';
 
 /** TTL por defecto para auto-limpieza (días). */
 export const NOTIFICATION_TTL_DAYS = 14;
@@ -20,6 +26,8 @@ export class NotificationsService {
   constructor(
     @InjectRepository(Notification)
     private readonly repo: Repository<Notification>,
+    private readonly emitter: EventEmitter2,
+    private readonly dataSource: DataSource,
   ) { }
 
   // ════════════════════════════════════════════════════════════
@@ -79,10 +87,6 @@ export class NotificationsService {
     return qb.getMany();
   }
 
-  /**
-   * Contador de no leídas — filtra expiradas para mantener consistencia
-   * con `getMyNotifications` (el badge nunca debe mostrar más que el listado).
-   */
   async getUnreadCount(accountId: string): Promise<number> {
     return this.repo
       .createQueryBuilder('n')
@@ -113,18 +117,77 @@ export class NotificationsService {
   }
 
   // ════════════════════════════════════════════════════════════
+  // CRON — Detectar periodos vencidos sin activación
+  // Corre cada día a las 06:00 hora Lima.
+  // Condiciones para emitir:
+  //   1. El periodo está activo=FALSE y su fecha_fin ya pasó (ayer o antes)
+  //   2. El año lectivo está 'en_curso'
+  //   3. Ningún otro periodo del mismo año está activo=TRUE
+  //   4. No existe ya una notif de tipo 'periodo_vencido' para ese periodo
+  //      creada en los últimos 3 días (dedup — evita spam si el admin ignora)
+  // ════════════════════════════════════════════════════════════
+
+  @Cron('0 6 * * *', { timeZone: 'America/Lima' })
+  async checkExpiredPeriods(): Promise<void> {
+    try {
+      // Periodos vencidos sin sucesor activo en su año
+      const expired = await this.dataSource.query<
+        { id: string; nombre: string; anio: number; bimestre: number }[]
+      >(`
+        SELECT p.id, p.nombre, p.anio, p.bimestre
+        FROM   periodos p
+        JOIN   anios_lectivos al ON al.anio = p.anio
+        WHERE  al.estado    = 'en_curso'
+          AND  p.activo     = FALSE
+          AND  p.fecha_fin  < CURRENT_DATE
+          AND  NOT EXISTS (
+                 SELECT 1 FROM periodos p2
+                 WHERE  p2.anio   = p.anio
+                   AND  p2.activo = TRUE
+               )
+          AND  NOT EXISTS (
+                 SELECT 1 FROM notificaciones n
+                 WHERE  n.referencia_id   = p.id
+                   AND  n.tipo            = 'periodo_vencido'
+                   AND  n.created_at      > NOW() - INTERVAL '3 days'
+               )
+      `);
+
+      if (expired.length === 0) return;
+
+      // Obtener cuentas de todos los admins activos (puede haber más de uno)
+      const admins = await this.dataSource.query<{ id: string }[]>(
+        `SELECT id FROM cuentas WHERE rol = 'admin' AND activo = TRUE`,
+      );
+      const adminAccountIds = admins.map((a) => a.id);
+
+      if (adminAccountIds.length === 0) {
+        this.logger.warn('checkExpiredPeriods: no hay admins activos para notificar');
+        return;
+      }
+
+      for (const p of expired) {
+        const event: PeriodExpiredEvent = {
+          periodoId: p.id,
+          periodoNombre: p.nombre,
+          anio: p.anio,
+          bimestre: p.bimestre,
+          adminAccountIds,
+        };
+        this.emitter.emit(NOTIFICATION_EVENT_NAMES.PERIOD_EXPIRED, event);
+        this.logger.log(
+          `period_expired_detected periodoId=${p.id} nombre="${p.nombre}" anio=${p.anio}`,
+        );
+      }
+    } catch (err) {
+      this.logger.error('checkExpiredPeriods falló', err as Error);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════
   // LIMPIEZA AUTOMÁTICA
   // ════════════════════════════════════════════════════════════
 
-  /**
-   * Job diario que elimina:
-   *  1. Las notificaciones cuyo `expires_at` ya pasó (14 días, set por trigger).
-   *  2. Las que tengan más de 30 días aunque no estén leídas (límite duro).
-   *
-   * Corre a las 03:00 hora Perú — fuera de pico de uso del colegio. El
-   * hard TTL protege contra crecimiento descontrolado si el trigger del
-   * schema fallara.
-   */
   @Cron('0 3 * * *', { timeZone: 'America/Lima' })
   async cleanupExpired(): Promise<void> {
     const expiredCutoff = new Date();

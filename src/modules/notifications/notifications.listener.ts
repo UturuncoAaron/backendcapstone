@@ -11,7 +11,9 @@ import type {
   AnnouncementCreatedEvent,
   TaskCreatedEvent,
   StudentAbsentEvent,
+  PeriodExpiredEvent,
 } from './events/notification-events.js';
+
 @Injectable()
 export class NotificationsListener {
   private readonly logger = new Logger(NotificationsListener.name);
@@ -32,14 +34,13 @@ export class NotificationsListener {
         timeStyle: 'short',
       });
 
-      // Notificar al convocado siempre.
       const targets = new Set<string>([ev.convocadoAId]);
-      // El convocador también recibe acuse para tener el ítem en su campana.
       if (ev.createdById !== ev.convocadoAId) targets.add(ev.createdById);
-      // El alumno **siempre** se entera si es distinto del convocado (caso
-      // típico: docente cita al padre por un asunto del hijo — el alumno
-      // también debe verlo en su campana).
-      if (ev.studentId && ev.studentId !== ev.convocadoAId && ev.studentId !== ev.createdById) {
+      if (
+        ev.studentId &&
+        ev.studentId !== ev.convocadoAId &&
+        ev.studentId !== ev.createdById
+      ) {
         targets.add(ev.studentId);
       }
 
@@ -64,6 +65,7 @@ export class NotificationsListener {
       this.logger.error('Error al notificar appointment.created', err as Error);
     }
   }
+
   @OnEvent(NOTIFICATION_EVENT_NAMES.APPOINTMENT_STATUS_CHANGED, { async: true })
   async onAppointmentStatusChanged(
     ev: AppointmentStatusChangedEvent,
@@ -124,8 +126,6 @@ export class NotificationsListener {
       );
       if (accountIds.length === 0) return;
 
-      // Bulk insert + SSE push usando las notificaciones reales (con
-      // sus IDs persistidos para que el FE pueda marcarlas como leídas).
       const created = await this.service.notifyBulk({
         accountIds,
         tipo: 'comunicado_nuevo',
@@ -145,6 +145,7 @@ export class NotificationsListener {
       );
     }
   }
+
   private async resolveAnnouncementTargets(
     destinatarios: string[],
   ): Promise<string[]> {
@@ -197,6 +198,7 @@ export class NotificationsListener {
       this.logger.error('Error al notificar task.created', err as Error);
     }
   }
+
   @OnEvent(NOTIFICATION_EVENT_NAMES.STUDENT_ABSENT, { async: true })
   async onStudentAbsent(ev: StudentAbsentEvent): Promise<void> {
     try {
@@ -224,6 +226,39 @@ export class NotificationsListener {
       }
     } catch (err) {
       this.logger.error('Error al notificar student.absent', err as Error);
+    }
+  }
+
+  // ── Periodo vencido ─────────────────────────────────────────────
+
+  /**
+   * Notifica a todos los admins que un periodo terminó y el siguiente
+   * debe activarse manualmente. Un clic desde la campana lleva directo
+   * a /academico/periodos.
+   */
+  @OnEvent(NOTIFICATION_EVENT_NAMES.PERIOD_EXPIRED, { async: true })
+  async onPeriodExpired(ev: PeriodExpiredEvent): Promise<void> {
+    try {
+      if (ev.adminAccountIds.length === 0) return;
+
+      const created = await this.service.notifyBulk({
+        accountIds: ev.adminAccountIds,
+        tipo: 'periodo_vencido',
+        titulo: `El ${ev.periodoNombre} ha terminado`,
+        cuerpo: `El ${ev.bimestre}° bimestre ${ev.anio} ya venció. Activa el siguiente periodo cuando corresponda.`,
+        referenceId: ev.periodoId,
+        referenceType: 'periodo',
+      });
+
+      for (const notif of created) {
+        this.gateway.pushNotification(notif.accountId, notif);
+      }
+
+      this.logger.log(
+        `period_expired_notified periodoId=${ev.periodoId} admins=${ev.adminAccountIds.length}`,
+      );
+    } catch (err) {
+      this.logger.error('Error al notificar period.expired', err as Error);
     }
   }
 }
