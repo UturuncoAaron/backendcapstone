@@ -101,36 +101,99 @@ export class CreateInformeDto {
     @IsUUID()
     studentId: string;
 
-    @IsEnum(INFORME_TIPOS)
-    tipo: InformeTipo;
-
-    @IsString()
-    @Length(1, 200)
-    titulo: string;
-
-    @IsString()
-    @Length(1, 4000)
-    motivo: string;
+    // Datos de filiación
+    @IsOptional()
+    @IsInt()
+    @Min(1)
+    @Max(99)
+    edadEvaluacion?: number;
 
     @IsOptional()
     @IsString()
-    @Length(0, 6000)
-    antecedentes?: string;
-
-    @IsString()
-    @Length(1, 10000)
-    observaciones: string;
+    motivoConsultaCorto?: string;
 
     @IsOptional()
     @IsString()
-    @Length(0, 4000)
-    recomendaciones?: string;
+    referente?: string;
+
+    @IsOptional()
+    @IsDateString()
+    fechaEvaluacionInicio?: string;
+
+    @IsOptional()
+    @IsDateString()
+    fechaEvaluacionFin?: string;
+
+    @IsOptional()
+    @IsDateString()
+    fechaInforme?: string;
 
     @IsOptional()
     @IsString()
-    @Length(0, 500)
-    derivadoA?: string;
+    tecnicasUtilizadas?: string;
 
+    @IsOptional()
+    @IsString()
+    instrumentosUtilizados?: string;
+
+    // Cuerpo
+    @IsOptional()
+    @IsString()
+    motivoConsulta?: string;
+
+    @IsOptional()
+    @IsString()
+    antecedentesFamilia?: string;
+
+    @IsOptional()
+    @IsString()
+    antecedentesAcademico?: string;
+
+    @IsOptional()
+    @IsString()
+    antecedentesEscolar?: string;
+
+    @IsOptional()
+    @IsString()
+    antecedentesAutopercepcion?: string;
+
+    @IsOptional()
+    @IsString()
+    observacionesConducta?: string;
+
+    @IsOptional()
+    @IsString()
+    resultadosCognitiva?: string;
+
+    @IsOptional()
+    @IsString()
+    resultadosEmocional?: string;
+
+    @IsOptional()
+    @IsString()
+    resultadosConductual?: string;
+
+    @IsOptional()
+    @IsString()
+    resultadosSocial?: string;
+
+    @IsOptional()
+    @IsString()
+    analisisResultados?: string;
+
+    @IsOptional()
+    @IsString()
+    conclusiones?: string;
+
+    @IsOptional()
+    @IsString()
+    recomendacionesInstitucion?: string;
+
+    @IsOptional()
+    @IsString()
+    recomendacionesFamilia?: string;
+
+    // Control
     @IsOptional()
     @IsBoolean()
     confidencial?: boolean;
@@ -142,38 +205,94 @@ export class CreateInformeDto {
 
 export class UpdateInformeDto {
     @IsOptional()
-    @IsEnum(INFORME_TIPOS)
-    tipo?: InformeTipo;
+    @IsInt()
+    @Min(1)
+    @Max(99)
+    edadEvaluacion?: number;
 
     @IsOptional()
     @IsString()
-    @Length(1, 200)
-    titulo?: string;
+    motivoConsultaCorto?: string;
 
     @IsOptional()
     @IsString()
-    @Length(1, 4000)
-    motivo?: string;
+    referente?: string;
+
+    @IsOptional()
+    @IsDateString()
+    fechaEvaluacionInicio?: string;
+
+    @IsOptional()
+    @IsDateString()
+    fechaEvaluacionFin?: string;
+
+    @IsOptional()
+    @IsDateString()
+    fechaInforme?: string;
 
     @IsOptional()
     @IsString()
-    @Length(0, 6000)
-    antecedentes?: string;
+    tecnicasUtilizadas?: string;
 
     @IsOptional()
     @IsString()
-    @Length(1, 10000)
-    observaciones?: string;
+    instrumentosUtilizados?: string;
 
     @IsOptional()
     @IsString()
-    @Length(0, 4000)
-    recomendaciones?: string;
+    motivoConsulta?: string;
 
     @IsOptional()
     @IsString()
-    @Length(0, 500)
-    derivadoA?: string;
+    antecedentesFamilia?: string;
+
+    @IsOptional()
+    @IsString()
+    antecedentesAcademico?: string;
+
+    @IsOptional()
+    @IsString()
+    antecedentesEscolar?: string;
+
+    @IsOptional()
+    @IsString()
+    antecedentesAutopercepcion?: string;
+
+    @IsOptional()
+    @IsString()
+    observacionesConducta?: string;
+
+    @IsOptional()
+    @IsString()
+    resultadosCognitiva?: string;
+
+    @IsOptional()
+    @IsString()
+    resultadosEmocional?: string;
+
+    @IsOptional()
+    @IsString()
+    resultadosConductual?: string;
+
+    @IsOptional()
+    @IsString()
+    resultadosSocial?: string;
+
+    @IsOptional()
+    @IsString()
+    analisisResultados?: string;
+
+    @IsOptional()
+    @IsString()
+    conclusiones?: string;
+
+    @IsOptional()
+    @IsString()
+    recomendacionesInstitucion?: string;
+
+    @IsOptional()
+    @IsString()
+    recomendacionesFamilia?: string;
 
     @IsOptional()
     @IsBoolean()

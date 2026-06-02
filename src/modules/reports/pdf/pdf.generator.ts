@@ -1,18 +1,30 @@
-// src/modules/reports/pdf/pdf.generator.ts
 import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 
-// ── Tipos de datos que recibe el generador ───────────────────────────────────
-
 export interface InformePdfData {
     informe: {
-        tipo: string;
-        titulo: string;
-        motivo: string;
-        antecedentes: string | null;
-        observaciones: string;
-        recomendaciones: string | null;
-        derivadoA: string | null;
+        edadEvaluacion: number | null;
+        motivoConsultaCorto: string | null;
+        referente: string | null;
+        fechaEvaluacionInicio: string | null;
+        fechaEvaluacionFin: string | null;
+        fechaInforme: string | null;
+        tecnicasUtilizadas: string | null;
+        instrumentosUtilizados: string | null;
+        motivoConsulta: string | null;
+        antecedentesFamilia: string | null;
+        antecedentesAcademico: string | null;
+        antecedentesEscolar: string | null;
+        antecedentesAutopercepcion: string | null;
+        observacionesConducta: string | null;
+        resultadosCognitiva: string | null;
+        resultadosEmocional: string | null;
+        resultadosConductual: string | null;
+        resultadosSocial: string | null;
+        analisisResultados: string | null;
+        conclusiones: string | null;
+        recomendacionesInstitucion: string | null;
+        recomendacionesFamilia: string | null;
         confidencial: boolean;
         estado: string;
         finalizadoAt: Date | null;
@@ -24,39 +36,20 @@ export interface InformePdfData {
         apellido_materno: string | null;
         codigo_estudiante: string | null;
     } | null;
-    parents: {
-        nombre: string;
-        apellido_paterno: string;
-        apellido_materno: string | null;
-        relacion: string;
-        codigo_acceso: string | null;
-    }[];
     psicologa: {
         nombre: string;
         apellido_paterno: string;
         apellido_materno: string | null;
         colegiatura: string | null;
     };
-    /** Buffer de la imagen de firma (PNG/JPG desde R2). Null si no configurada. */
     firmaBuffer: Buffer | null;
 }
 
-// ── Colores ──────────────────────────────────────────────────────────────────
-
-const PRIMARY = '#1a3a6b';
 const INK = '#1a1a1a';
 const MUTED = '#4a4a4a';
-const LIGHT = '#7a7a7a';
-const LINE = '#d0d0d0';
-
-const TIPO_LABELS: Record<string, string> = {
-    evaluacion: 'Evaluación psicológica',
-    seguimiento: 'Reporte de seguimiento',
-    derivacion_familia: 'Derivación a la familia',
-    derivacion_externa: 'Derivación externa',
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
+const LINE = '#c0c0c0';
+const L = 65;   // margen izquierdo
+const R = 65;   // margen derecho
 
 @Injectable()
 export class PdfGenerator {
@@ -64,218 +57,264 @@ export class PdfGenerator {
     async generateInformePdf(data: InformePdfData): Promise<Buffer> {
         return new Promise((resolve, reject) => {
             const chunks: Buffer[] = [];
-
             const doc = new PDFDocument({
                 size: 'A4',
-                margins: { top: 60, bottom: 60, left: 65, right: 65 },
-                info: {
-                    Title: `Informe Psicológico — ${data.informe.titulo}`,
-                    Author: `${data.psicologa.nombre} ${data.psicologa.apellido_paterno}`,
-                    Creator: 'EduAula',
-                },
+                margins: { top: 55, bottom: 55, left: L, right: R },
+                info: { Title: 'Informe Psicológico', Creator: 'EduAula' },
             });
-
-            doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+            doc.on('data', (c: Buffer) => chunks.push(c));
             doc.on('end', () => resolve(Buffer.concat(chunks)));
             doc.on('error', reject);
-
             this.build(doc, data);
             doc.end();
         });
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // ESTRUCTURA DEL DOCUMENTO
-    // ════════════════════════════════════════════════════════════════
+    private get W(): number { return 595.28 - L - R; }
 
     private build(doc: PDFKit.PDFDocument, data: InformePdfData): void {
-        const W = doc.page.width - 130; // ancho útil (margins: 65 + 65)
-
-        this.header(doc, W);
-        this.sectionDatos(doc, data, W);
-
-        if (data.informe.derivadoA) {
-            this.sectionTexto(doc, 'Derivado a', data.informe.derivadoA, W);
-        }
-
-        if (data.informe.tipo === 'derivacion_familia' && data.parents.length > 0) {
-            this.sectionDestinatarios(doc, data.parents, W);
-        }
-
-        this.sectionTexto(doc, 'Motivo de consulta', data.informe.motivo, W);
-
-        if (data.informe.antecedentes) {
-            this.sectionTexto(doc, 'Antecedentes', data.informe.antecedentes, W);
-        }
-
-        this.sectionTexto(doc, 'Observaciones y hallazgos', data.informe.observaciones, W);
-
-        if (data.informe.recomendaciones) {
-            this.sectionTexto(doc, 'Recomendaciones', data.informe.recomendaciones, W);
-        }
-
-        this.footer(doc, data, W);
+        this.header(doc);
+        this.seccionFiliacion(doc, data);
+        this.seccionTexto(doc, 'II. MOTIVO DE CONSULTA', data.informe.motivoConsulta);
+        this.seccionAntecedentes(doc, data.informe);
+        this.seccionTexto(doc, 'IV. OBSERVACIONES GENERALES Y DE CONDUCTA', data.informe.observacionesConducta);
+        this.seccionResultados(doc, data.informe);
+        this.seccionTexto(doc, 'VI. ANÁLISIS DE LOS RESULTADOS', data.informe.analisisResultados);
+        this.seccionTexto(doc, 'VII. CONCLUSIONES', data.informe.conclusiones);
+        this.seccionRecomendaciones(doc, data.informe);
+        this.footer(doc, data);
     }
 
-    // ── Encabezado minimalista ───────────────────────────────────────
+    // ── Encabezado ──────────────────────────────────────────────
 
-    private header(doc: PDFKit.PDFDocument, W: number): void {
-        const x = 65;
-
-        // Línea decorativa superior
-        doc.rect(x, 50, W, 3).fill(PRIMARY);
-
-        // Título principal
-        doc.font('Helvetica-Bold').fontSize(18).fillColor(INK)
-            .text('INFORME PSICOLÓGICO', x, 70, {
-                width: W, align: 'center', characterSpacing: 2,
-            });
-
-        doc.moveDown(1.5);
+    private header(doc: PDFKit.PDFDocument): void {
+        doc.font('Helvetica-Bold').fontSize(13).fillColor(INK)
+            .text('INFORME PSICOLÓGICO', L, doc.y, { width: this.W, align: 'center', underline: true });
+        doc.moveDown(1.2);
     }
 
-    // ── Sección: Datos de identificación ────────────────────────────
+    // ── I. Datos de filiación ────────────────────────────────────
 
-    private sectionDatos(doc: PDFKit.PDFDocument, data: InformePdfData, W: number): void {
-        this.secTitle(doc, 'Datos de identificación', W);
+    private seccionFiliacion(doc: PDFKit.PDFDocument, data: InformePdfData): void {
+        this.secTitle(doc, 'I. DATOS DE FILIACIÓN');
 
         const s = data.student;
-        const fullName = s
-            ? `${s.apellido_paterno} ${s.apellido_materno ?? ''}, ${s.nombre}`.trim()
+        const nombreCompleto = s
+            ? `${s.nombre} ${s.apellido_paterno}${s.apellido_materno ? ' ' + s.apellido_materno : ''}`
             : '—';
 
-        const fecha = this.fmtDate(data.informe.finalizadoAt ?? data.informe.createdAt);
+        // Rango de fechas de evaluación
+        let fechaEval = '—';
+        if (data.informe.fechaEvaluacionInicio && data.informe.fechaEvaluacionFin) {
+            fechaEval = `${this.fmtDate(data.informe.fechaEvaluacionInicio)} – ${this.fmtDate(data.informe.fechaEvaluacionFin)}`;
+        } else if (data.informe.fechaEvaluacionInicio) {
+            fechaEval = this.fmtDate(data.informe.fechaEvaluacionInicio);
+        }
 
-        const rows: [string, string][] = [
-            ['Apellidos y nombres', fullName],
-            ...(s?.codigo_estudiante ? [['Código', s.codigo_estudiante] as [string, string]] : []),
-            ['Tipo de informe', TIPO_LABELS[data.informe.tipo] ?? data.informe.tipo],
-            ['Fecha', fecha],
+        const filasFiliacion: [string, string][] = [
+            ['Nombres y apellidos', nombreCompleto],
+            ['Edad', data.informe.edadEvaluacion ? `${data.informe.edadEvaluacion} años` : '—'],
+            ['Motivo de consulta', data.informe.motivoConsultaCorto ?? '—'],
+            ['Referente', data.informe.referente ?? '—'],
+            ['Evaluador', `${data.psicologa.nombre} ${data.psicologa.apellido_paterno}${data.psicologa.apellido_materno ? ' ' + data.psicologa.apellido_materno : ''}`],
+            ['Fecha de Evaluación', fechaEval],
+            ['Fecha de Informe', this.fmtDate(data.informe.fechaInforme ?? data.informe.finalizadoAt ?? data.informe.createdAt)],
         ];
 
-        if (data.informe.confidencial) {
-            rows.push(['Confidencialidad', 'Documento confidencial']);
-        }
+        this.tabla2col(doc, filasFiliacion);
+        this.lineaSeparadora(doc);
 
-        const labelW = 145;
-        const valueX = 65 + labelW + 12;
-        const valueW = W - labelW - 12;
-
-        for (const [label, value] of rows) {
-            const rowY = doc.y;
-            doc.font('Helvetica').fontSize(8.5).fillColor(LIGHT)
-                .text(label, 65, rowY, { width: labelW });
-            doc.font('Helvetica').fontSize(10).fillColor(INK)
-                .text(value, valueX, rowY, { width: valueW });
-            doc.moveDown(0.3);
-        }
-
-        doc.moveDown(0.6);
+        const filasMetodo: [string, string][] = [
+            ['Técnicas Utilizadas', data.informe.tecnicasUtilizadas ?? '—'],
+            ['Instrumentos utilizados', data.informe.instrumentosUtilizados ?? '—'],
+        ];
+        this.tabla2col(doc, filasMetodo);
+        doc.moveDown(1);
     }
 
-    // ── Destinatarios (derivación a familia) ────────────────────────
+    // ── III. Antecedentes ────────────────────────────────────────
 
-    private sectionDestinatarios(
-        doc: PDFKit.PDFDocument,
-        parents: InformePdfData['parents'],
-        W: number,
-    ): void {
-        this.secTitle(doc, 'Destinatarios', W);
-        for (const p of parents) {
-            const name = `${p.apellido_paterno} ${p.apellido_materno ?? ''}, ${p.nombre}`.trim();
-            const relacion = p.relacion.charAt(0).toUpperCase() + p.relacion.slice(1);
-            doc.font('Helvetica').fontSize(10).fillColor(INK)
-                .text(`${relacion}: ${name}`, 65, doc.y, { width: W });
-            doc.moveDown(0.2);
+    private seccionAntecedentes(doc: PDFKit.PDFDocument, informe: InformePdfData['informe']): void {
+        const tieneAlgo = informe.antecedentesFamilia ||
+            informe.antecedentesAcademico ||
+            informe.antecedentesEscolar ||
+            informe.antecedentesAutopercepcion;
+        if (!tieneAlgo) return;
+
+        this.secTitle(doc, 'III. ANTECEDENTES');
+
+        if (informe.antecedentesFamilia) {
+            this.subTitle(doc, 'Dinámica familiar');
+            this.parrafo(doc, informe.antecedentesFamilia);
+        }
+        if (informe.antecedentesAcademico) {
+            this.subTitle(doc, 'Intereses académicos');
+            this.parrafo(doc, informe.antecedentesAcademico);
+        }
+        if (informe.antecedentesEscolar) {
+            this.subTitle(doc, 'Trayectoria escolar');
+            this.parrafo(doc, informe.antecedentesEscolar);
+        }
+        if (informe.antecedentesAutopercepcion) {
+            this.subTitle(doc, 'Autopercepción');
+            this.parrafo(doc, informe.antecedentesAutopercepcion);
         }
         doc.moveDown(0.5);
     }
 
-    // ── Sección de texto genérica ───────────────────────────────────
+    // ── V. Resultados ────────────────────────────────────────────
 
-    private sectionTexto(
-        doc: PDFKit.PDFDocument,
-        title: string,
-        content: string,
-        W: number,
-    ): void {
-        if (doc.y > doc.page.height - 140) doc.addPage();
-        this.secTitle(doc, title, W);
-        doc.font('Helvetica').fontSize(10).fillColor(INK)
-            .text(content, 65, doc.y, {
-                width: W,
-                align: 'justify',
-                lineGap: 3,
-            });
-        doc.moveDown(1);
+    private seccionResultados(doc: PDFKit.PDFDocument, informe: InformePdfData['informe']): void {
+        const tieneAlgo = informe.resultadosCognitiva ||
+            informe.resultadosEmocional ||
+            informe.resultadosConductual ||
+            informe.resultadosSocial;
+        if (!tieneAlgo) return;
+
+        this.secTitle(doc, 'V. RESULTADOS');
+
+        if (informe.resultadosCognitiva) {
+            this.subTitle(doc, 'Área Cognitiva');
+            this.parrafo(doc, informe.resultadosCognitiva);
+        }
+        if (informe.resultadosEmocional) {
+            this.subTitle(doc, 'Área Emocional');
+            this.parrafo(doc, informe.resultadosEmocional);
+        }
+        if (informe.resultadosConductual) {
+            this.subTitle(doc, 'Área Conductual');
+            this.parrafo(doc, informe.resultadosConductual);
+        }
+        if (informe.resultadosSocial) {
+            this.subTitle(doc, 'Área Social');
+            this.parrafo(doc, informe.resultadosSocial);
+        }
+        doc.moveDown(0.5);
     }
 
-    // ── Footer: firma + nombre + colegiatura ────────────────────────
+    // ── VIII. Recomendaciones ────────────────────────────────────
 
-    private footer(doc: PDFKit.PDFDocument, data: InformePdfData, W: number): void {
-        const neededH = data.firmaBuffer ? 130 : 80;
-        if (doc.y > doc.page.height - doc.page.margins.bottom - neededH) {
-            doc.addPage();
+    private seccionRecomendaciones(doc: PDFKit.PDFDocument, informe: InformePdfData['informe']): void {
+        if (!informe.recomendacionesInstitucion && !informe.recomendacionesFamilia) return;
+        this.secTitle(doc, 'VIII. RECOMENDACIONES');
+        if (informe.recomendacionesInstitucion) {
+            this.subTitle(doc, 'Para la Institución Educativa');
+            this.parrafo(doc, informe.recomendacionesInstitucion);
         }
+        if (informe.recomendacionesFamilia) {
+            this.subTitle(doc, 'Para la Familia');
+            this.parrafo(doc, informe.recomendacionesFamilia);
+        }
+        doc.moveDown(0.5);
+    }
+
+    // ── Footer / firma ───────────────────────────────────────────
+
+    private footer(doc: PDFKit.PDFDocument, data: InformePdfData): void {
+        const neededH = data.firmaBuffer ? 130 : 80;
+        if (doc.y > doc.page.height - doc.page.margins.bottom - neededH) doc.addPage();
 
         doc.moveDown(3);
 
-        // Firma centrada
         const sigW = 200;
-        const sigX = 65 + (W - sigW) / 2;
+        const sigX = L + (this.W - sigW) / 2;
         let sigY = doc.y;
 
         if (data.firmaBuffer) {
             try {
                 doc.image(data.firmaBuffer, sigX + (sigW - 160) / 2, sigY,
                     { width: 160, height: 70, fit: [160, 70] });
-            } catch { /* imagen corrupta — saltar */ }
+            } catch { /* imagen corrupta */ }
             sigY += 76;
         } else {
             sigY += 40;
         }
 
-        // Línea de firma
         doc.moveTo(sigX, sigY).lineTo(sigX + sigW, sigY)
             .strokeColor(INK).lineWidth(0.6).stroke();
 
-        // Nombre de la psicóloga
-        const fullName = `${data.psicologa.nombre} ${data.psicologa.apellido_paterno} ${data.psicologa.apellido_materno ?? ''}`.trim();
+        const fullName = [
+            data.psicologa.nombre,
+            data.psicologa.apellido_paterno,
+            data.psicologa.apellido_materno ?? '',
+        ].filter(Boolean).join(' ');
+
         doc.font('Helvetica-Bold').fontSize(9).fillColor(INK)
             .text(fullName, sigX, sigY + 8, { width: sigW, align: 'center' });
 
-        // Colegiatura
+        doc.font('Helvetica').fontSize(8).fillColor(MUTED)
+            .text('PSICÓLOGA', sigX, sigY + 20, { width: sigW, align: 'center' });
+
         if (data.psicologa.colegiatura) {
             doc.font('Helvetica').fontSize(8).fillColor(MUTED)
-                .text(`CPsP ${data.psicologa.colegiatura}`, sigX, sigY + 21,
+                .text(`CPsP ${data.psicologa.colegiatura}`, sigX, sigY + 31,
                     { width: sigW, align: 'center' });
         }
     }
 
-    // ── Helpers internos ────────────────────────────────────────────
+    // ── Helpers de layout ────────────────────────────────────────
 
-    private secTitle(doc: PDFKit.PDFDocument, title: string, W: number): void {
-        const y = doc.y;
-        // Línea separadora tenue
-        doc.moveTo(65, y).lineTo(65 + W, y)
+    private secTitle(doc: PDFKit.PDFDocument, title: string): void {
+        this.pageBreakIfNeeded(doc, 60);
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(INK)
+            .text(title, L, doc.y, { width: this.W });
+        doc.moveDown(0.5);
+    }
+
+    private subTitle(doc: PDFKit.PDFDocument, title: string): void {
+        this.pageBreakIfNeeded(doc, 40);
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(INK)
+            .text(title, L, doc.y, { width: this.W });
+        doc.moveDown(0.3);
+    }
+
+    private parrafo(doc: PDFKit.PDFDocument, text: string): void {
+        doc.font('Helvetica').fontSize(10).fillColor(INK)
+            .text(text, L, doc.y, { width: this.W, align: 'justify', lineGap: 2 });
+        doc.moveDown(0.8);
+    }
+
+    private seccionTexto(doc: PDFKit.PDFDocument, title: string, content: string | null): void {
+        if (!content) return;
+        this.pageBreakIfNeeded(doc, 60);
+        this.secTitle(doc, title);
+        this.parrafo(doc, content);
+    }
+
+    /** Tabla de dos columnas estilo "label : valor" del PDF original */
+    private tabla2col(doc: PDFKit.PDFDocument, filas: [string, string][]): void {
+        const labelW = 150;
+        const valueX = L + labelW + 10;
+        const valueW = this.W - labelW - 10;
+
+        for (const [label, value] of filas) {
+            this.pageBreakIfNeeded(doc, 20);
+            const rowY = doc.y;
+            doc.font('Helvetica').fontSize(10).fillColor(INK)
+                .text(label, L, rowY, { width: labelW, continued: false });
+            doc.font('Helvetica').fontSize(10).fillColor(INK)
+                .text(`: ${value}`, valueX, rowY, { width: valueW });
+            doc.moveDown(0.25);
+        }
+    }
+
+    private lineaSeparadora(doc: PDFKit.PDFDocument): void {
+        doc.moveDown(0.5);
+        doc.moveTo(L, doc.y).lineTo(L + this.W, doc.y)
             .strokeColor(LINE).lineWidth(0.5).stroke();
-        // Título de sección
-        doc.font('Helvetica-Bold').fontSize(9).fillColor(PRIMARY)
-            .text(title.toUpperCase(), 65, y + 7, {
-                width: W,
-                characterSpacing: 0.8,
-            });
-        doc.moveDown(0.7);
+        doc.moveDown(0.5);
+    }
+
+    private pageBreakIfNeeded(doc: PDFKit.PDFDocument, needed: number): void {
+        if (doc.y > doc.page.height - doc.page.margins.bottom - needed) doc.addPage();
     }
 
     private fmtDate(date: Date | string | null | undefined): string {
         if (!date) return '—';
-        const d = new Date(date);
+        const d = typeof date === 'string' ? new Date(date + 'T12:00:00') : new Date(date);
         if (isNaN(d.getTime())) return '—';
-        const months = [
-            'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-            'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
-        ];
-        return `${d.getDate()} de ${months[d.getMonth()]} de ${d.getFullYear()}`;
+        const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+            'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+        return `${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}`;
     }
 }

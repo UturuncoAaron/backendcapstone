@@ -342,20 +342,34 @@ export class PsychologyService {
     }
 
     // ── Informes ──────────────────────────────────────────────────
-
     async createInforme(psychologistId: string, dto: CreateInformeDto) {
         return this.dataSource.transaction(async (em) => {
             await this.upsertAssignment(em, psychologistId, dto.studentId);
             const informe = em.create(InformePsicologico, {
                 psychologistId,
                 studentId: dto.studentId,
-                tipo: dto.tipo,
-                titulo: dto.titulo,
-                motivo: dto.motivo,
-                antecedentes: dto.antecedentes ?? null,
-                observaciones: dto.observaciones,
-                recomendaciones: dto.recomendaciones ?? null,
-                derivadoA: dto.derivadoA ?? null,
+                edadEvaluacion: dto.edadEvaluacion ?? null,
+                motivoConsultaCorto: dto.motivoConsultaCorto ?? null,
+                referente: dto.referente ?? null,
+                fechaEvaluacionInicio: dto.fechaEvaluacionInicio ?? null,
+                fechaEvaluacionFin: dto.fechaEvaluacionFin ?? null,
+                fechaInforme: dto.fechaInforme ?? null,
+                tecnicasUtilizadas: dto.tecnicasUtilizadas ?? null,
+                instrumentosUtilizados: dto.instrumentosUtilizados ?? null,
+                motivoConsulta: dto.motivoConsulta ?? null,
+                antecedentesFamilia: dto.antecedentesFamilia ?? null,
+                antecedentesAcademico: dto.antecedentesAcademico ?? null,
+                antecedentesEscolar: dto.antecedentesEscolar ?? null,
+                antecedentesAutopercepcion: dto.antecedentesAutopercepcion ?? null,
+                observacionesConducta: dto.observacionesConducta ?? null,
+                resultadosCognitiva: dto.resultadosCognitiva ?? null,
+                resultadosEmocional: dto.resultadosEmocional ?? null,
+                resultadosConductual: dto.resultadosConductual ?? null,
+                resultadosSocial: dto.resultadosSocial ?? null,
+                analisisResultados: dto.analisisResultados ?? null,
+                conclusiones: dto.conclusiones ?? null,
+                recomendacionesInstitucion: dto.recomendacionesInstitucion ?? null,
+                recomendacionesFamilia: dto.recomendacionesFamilia ?? null,
                 confidencial: dto.confidencial ?? true,
                 citaId: dto.citaId ?? null,
                 estado: 'borrador',
@@ -368,16 +382,25 @@ export class PsychologyService {
         const informe = await this.assertInformeOwned(psychologistId, id);
         if (informe.estado === 'finalizado')
             throw new ForbiddenException('El informe ya está finalizado y no puede editarse');
-        Object.assign(informe, {
-            ...(dto.tipo !== undefined && { tipo: dto.tipo }),
-            ...(dto.titulo !== undefined && { titulo: dto.titulo }),
-            ...(dto.motivo !== undefined && { motivo: dto.motivo }),
-            ...(dto.antecedentes !== undefined && { antecedentes: dto.antecedentes }),
-            ...(dto.observaciones !== undefined && { observaciones: dto.observaciones }),
-            ...(dto.recomendaciones !== undefined && { recomendaciones: dto.recomendaciones }),
-            ...(dto.derivadoA !== undefined && { derivadoA: dto.derivadoA }),
-            ...(dto.confidencial !== undefined && { confidencial: dto.confidencial }),
-        });
+
+        const campos: (keyof UpdateInformeDto)[] = [
+            'edadEvaluacion', 'motivoConsultaCorto', 'referente',
+            'fechaEvaluacionInicio', 'fechaEvaluacionFin', 'fechaInforme',
+            'tecnicasUtilizadas', 'instrumentosUtilizados',
+            'motivoConsulta', 'antecedentesFamilia', 'antecedentesAcademico',
+            'antecedentesEscolar', 'antecedentesAutopercepcion',
+            'observacionesConducta', 'resultadosCognitiva', 'resultadosEmocional',
+            'resultadosConductual', 'resultadosSocial', 'analisisResultados',
+            'conclusiones', 'recomendacionesInstitucion', 'recomendacionesFamilia',
+            'confidencial',
+        ];
+
+        for (const campo of campos) {
+            if (dto[campo] !== undefined) {
+                (informe as any)[campo] = dto[campo];
+            }
+        }
+
         return this.informeRepo.save(informe);
     }
 
