@@ -20,9 +20,14 @@ export const DIAS_SEMANA = [
 ] as const;
 export type DiaSemana = (typeof DIAS_SEMANA)[number];
 
+export type AvailabilityTipo = 'weekly' | 'specific';
+
 @Entity('disponibilidad_cuenta')
 @Index('idx_disp_cuenta_activo', ['cuentaId', 'diaSemana'], {
   where: '"activo" = true',
+})
+@Index('idx_disp_cuenta_especifica', ['cuentaId', 'fechaEspecifica'], {
+  where: '"fecha_especifica" IS NOT NULL',
 })
 export class AccountAvailability {
   @PrimaryGeneratedColumn('uuid')
@@ -46,6 +51,12 @@ export class AccountAvailability {
 
   @Column({ default: true })
   activo: boolean;
+
+  @Column({ name: 'tipo', length: 10, default: 'weekly' })
+  tipo: AvailabilityTipo;
+
+  @Column({ name: 'fecha_especifica', type: 'date', nullable: true })
+  fechaEspecifica: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

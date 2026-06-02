@@ -258,6 +258,17 @@ export class SetAvailabilityDto {
   @IsString()
   @Matches(/^\d{2}:\d{2}$/, { message: 'Formato de hora inválido, usa HH:mm' })
   horaFin: string;
+
+  /** 'weekly' = recurrente cada semana (comportamiento actual, por defecto).
+   *  'specific' = aplica solo en la fecha exacta indicada en fechaEspecifica. */
+  @IsOptional()
+  @IsIn(['weekly', 'specific'])
+  tipo?: 'weekly' | 'specific';
+
+  /** Solo se usa cuando tipo='specific'. Formato YYYY-MM-DD. */
+  @IsOptional()
+  @IsDateString()
+  fechaEspecifica?: string;
 }
 export class ReplaceAvailabilityDto {
   @IsArray()

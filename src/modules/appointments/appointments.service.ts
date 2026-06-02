@@ -1550,6 +1550,96 @@ export class AppointmentsService {
     });
   }
 
+  /**
+   * Returns all availability blocks for a specific week (Monday–Sunday),
+   * applying the specific-overrides-weekly rule, plus appointments in that week.
+   *
+   * @param cuentaId  UUID of the account
+   * @param weekStart YYYY-MM-DD of the Monday of the target week
+   */
+  async getWeekAvailability(cuentaId: string, weekStart: string) {
+    if (!weekStart)
+      throw new BadRequestException(
+        'El parámetro weekStart es requerido (YYYY-MM-DD)',
+      );
+
+    const monday = parseLocalDate(weekStart);
+    if (isNaN(monday.getTime()))
+      throw new BadRequestException(
+        'Formato de fecha inválido para weekStart, usa YYYY-MM-DD',
+      );
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+
+    // ── 1. All SPECIFIC blocks for this week ──────────────────────────
+    const allSpecific = await this.availabilityRepo.find({
+      where: { cuentaId, activo: true },
+      order: { fechaEspecifica: 'ASC', horaInicio: 'ASC' },
+    });
+
+    const specificBlocksThisWeek = allSpecific.filter((b) => {
+      if (b.tipo !== 'specific' || !b.fechaEspecifica) return false;
+      const d = parseLocalDate(b.fechaEspecifica);
+      return d >= monday && d <= sunday;
+    });
+
+    // ── 2. Determine which week-days are overridden by specific blocks ─
+    const diasConEspecifica = new Set<string>();
+    for (const b of specificBlocksThisWeek) {
+      if (!b.fechaEspecifica) continue;
+      const d = parseLocalDate(b.fechaEspecifica);
+      const dow = d.getDay(); // 0=Sun … 6=Sat
+      const dia = DIAS_SEMANA_INDEXED[dow];
+      if (dia) diasConEspecifica.add(dia);
+    }
+
+    // ── 3. Weekly recurring blocks (exclude overridden days) ───────────
+    const allWeekly = await this.availabilityRepo.find({
+      where: { cuentaId, activo: true },
+      order: { diaSemana: 'ASC', horaInicio: 'ASC' },
+    });
+    const weeklyBlocksFiltered = allWeekly.filter(
+      (b) => b.tipo === 'weekly' && !diasConEspecifica.has(b.diaSemana),
+    );
+
+    // ── 4. Appointments this week ─────────────────────────────────────
+    const appts = await this.appointmentRepo
+      .createQueryBuilder('a')
+      .leftJoinAndSelect('a.student', 'student')
+      .where(
+        '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
+        { cuentaId },
+      )
+      .andWhere('a.estado IN (:...states)', {
+        states: ['pendiente', 'confirmada', 'realizada'],
+      })
+      .andWhere('a.fecha_hora >= :monday', { monday })
+      .andWhere('a.fecha_hora <= :sunday', { sunday })
+      .getMany();
+
+    return {
+      weekStart,
+      weeklyBlocks: weeklyBlocksFiltered,
+      specificBlocks: specificBlocksThisWeek,
+      appointments: appts.map((a) => ({
+        id: a.id,
+        scheduledAt: a.scheduledAt,
+        durationMin: a.durationMin,
+        estado: a.estado,
+        motivo: a.motivo,
+        isFollowUp:
+          (a.priorNotes?.toLowerCase().includes('seguimiento') ?? false) ||
+          (a.motivo?.toLowerCase().includes('seguimiento') ?? false),
+        studentName: a.student
+          ? `${a.student.nombre} ${a.student.apellido_paterno ?? ''}`.trim()
+          : null,
+      })),
+    };
+  }
+
   async getSlotsTaken(cuentaId: string, date: string) {
     if (!date)
       throw new BadRequestException(
@@ -1620,10 +1710,22 @@ export class AppointmentsService {
     const rule = role ? getAppointmentRule(role) : null;
     const effectiveSlot = slotMinutes ?? rule?.slotMinutes ?? 30;
 
-    const bloques = await this.availabilityRepo.find({
-      where: { cuentaId, diaSemana: dayName, activo: true },
+    // ── Specific-overrides-weekly logic ─────────────────────────────
+    const specificForDate = await this.availabilityRepo.find({
+      where: { cuentaId, fechaEspecifica: date, activo: true },
       order: { horaInicio: 'ASC' },
     });
+
+    let bloques: AccountAvailability[];
+    if (specificForDate.length > 0) {
+      // Specific blocks override weekly for this exact date
+      bloques = specificForDate;
+    } else {
+      bloques = await this.availabilityRepo.find({
+        where: { cuentaId, diaSemana: dayName, activo: true, tipo: 'weekly' as any },
+        order: { horaInicio: 'ASC' },
+      });
+    }
 
     let ranges: { s: number; e: number }[];
     if (bloques.length > 0) {
@@ -1780,11 +1882,22 @@ export class AppointmentsService {
     };
     if (!diaSemana) return empty;
 
-    // Bloques declarados (o el horario por defecto del rol).
-    const bloques = await this.availabilityRepo.find({
-      where: { cuentaId, diaSemana, activo: true },
+    // ── Specific-overrides-weekly: check exact date first ─────────────
+    const specificForDate = await this.availabilityRepo.find({
+      where: { cuentaId, fechaEspecifica: date, activo: true },
       order: { horaInicio: 'ASC' },
     });
+
+    // Bloques declarados (o el horario por defecto del rol).
+    let bloques: AccountAvailability[];
+    if (specificForDate.length > 0) {
+      bloques = specificForDate;
+    } else {
+      bloques = await this.availabilityRepo.find({
+        where: { cuentaId, diaSemana, activo: true, tipo: 'weekly' as any },
+        order: { horaInicio: 'ASC' },
+      });
+    }
 
     const toMin = (hhmm: string) => {
       const [h, m] = hhmm.split(':').map(Number);
@@ -1890,10 +2003,42 @@ export class AppointmentsService {
 
   async replaceAvailability(
     cuentaId: string,
-    items: { diaSemana: string; horaInicio: string; horaFin: string }[],
+    items: {
+      diaSemana: string;
+      horaInicio: string;
+      horaFin: string;
+      tipo?: string;
+      fechaEspecifica?: string;
+    }[],
   ): Promise<{ saved: AccountAvailability[]; cancelledCount: number }> {
     return this.dataSource.transaction(async (em) => {
-      await em.delete(AccountAvailability, { cuentaId });
+      // ── Separate items by tipo ────────────────────────────────────────
+      const weeklyItems = items.filter((it) => (it.tipo ?? 'weekly') === 'weekly');
+      const specificItems = items.filter((it) => it.tipo === 'specific');
+
+      // Collect unique fechaEspecifica values in the incoming specific items
+      const specificDates = new Set(
+        specificItems
+          .map((it) => it.fechaEspecifica)
+          .filter((d): d is string => !!d),
+      );
+
+      if (weeklyItems.length > 0 || specificItems.length === 0) {
+        // Delete all existing weekly blocks for this account using raw SQL
+        // (safer than QueryBuilder for filtered deletes with new columns)
+        await em.query(
+          `DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1 AND tipo = 'weekly'`,
+          [cuentaId],
+        );
+      }
+
+      // Delete existing specific blocks only for the incoming dates
+      for (const fecha of specificDates) {
+        await em.query(
+          `DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1 AND tipo = 'specific' AND fecha_especifica = $2`,
+          [cuentaId, fecha],
+        );
+      }
 
       let saved: AccountAvailability[] = [];
       if (items.length > 0) {
@@ -1905,15 +2050,22 @@ export class AppointmentsService {
               horaInicio: it.horaInicio,
               horaFin: it.horaFin,
               activo: true,
+              tipo: (it.tipo ?? 'weekly') as 'weekly' | 'specific',
+              fechaEspecifica: it.fechaEspecifica ?? null,
             }),
           ),
         );
       }
 
+      // Busca citas donde el profesional es convocador O convocado —
+      // en ambos casos su disponibilidad define el horario de la cita.
       const futureAppts = await em
         .getRepository(Appointment)
         .createQueryBuilder('a')
-        .where('a.convocado_a_id = :cuentaId', { cuentaId })
+        .where(
+          '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
+          { cuentaId },
+        )
         .andWhere('a.fecha_hora > NOW()')
         .andWhere('a.estado IN (:...states)', {
           states: ['pendiente', 'confirmada'],
@@ -1959,7 +2111,10 @@ export class AppointmentsService {
   async countFutureAppointments(cuentaId: string): Promise<number> {
     return this.appointmentRepo
       .createQueryBuilder('a')
-      .where('a.convocado_a_id = :cuentaId', { cuentaId })
+      .where(
+        '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
+        { cuentaId },
+      )
       .andWhere('a.fecha_hora > NOW()')
       .andWhere('a.estado IN (:...states)', {
         states: ['pendiente', 'confirmada'],
@@ -1993,10 +2148,15 @@ export class AppointmentsService {
       throw new ForbiddenException(
         'No puedes eliminar la disponibilidad de otra persona',
       );
+    // Buscar citas donde el profesional dueño del slot aparezca como convocador
+    // O como convocado — ambos casos usan su disponibilidad para fijar el horario.
     const affected = await this.appointmentRepo
       .createQueryBuilder('a')
       .leftJoinAndSelect('a.student', 'student')
-      .where('a.convocado_a_id = :cid', { cid: slot.cuentaId })
+      .where(
+        '(a.convocado_a_id = :cid OR a.convocado_por_id = :cid)',
+        { cid: slot.cuentaId },
+      )
       .andWhere('a.estado IN (:...states)', {
         states: ['pendiente', 'confirmada'],
       })
@@ -2151,14 +2311,24 @@ export class AppointmentsService {
     if (!acc || acc.rol === 'alumno' || acc.rol === 'padre') return null;
     const role = this.toAppointmentRole(acc);
     const rule = getAppointmentRule(role);
+    // availabilityBlockMin: tamaño del bloque que se muestra en el editor de
+    // disponibilidad del profesional.
+    //   docente  → 45 min (bloque con 3 sub-slots de 15 min, hasta 3 padres)
+    //   admin    → 15 min (slot indivisible, 1 padre por slot)
+    //   psicóloga → 30 min
+    const availabilityBlockMin =
+      role === 'docente' ? 45 : (rule.slotMinutes ?? 15);
+
     return {
       role,
       fixedDurationMin: rule.fixedDurationMin,
       maxDurationMin: rule.maxDurationMin,
       slotMinutes: rule.slotMinutes,
+      availabilityBlockMin,
       maxConsecutiveSlots: rule.maxConsecutiveSlots,
       allowedDays: [...rule.allowedDays],
       defaultHours: { ...rule.defaultHours },
+      attentionEnd: rule.attentionEnd ?? null,
       directBooking: rule.directBooking,
       label: rule.label,
     };
@@ -2481,10 +2651,22 @@ export class AppointmentsService {
     if (dayName === 'domingo')
       throw new BadRequestException('No se atiende los domingos');
 
-    const bloques = await this.availabilityRepo.find({
-      where: { cuentaId, diaSemana: dayName, activo: true },
+    // ── Specific-overrides-weekly: check exact date first ─────────────
+    const dateStr = this.toLocalDateStr(start);
+    const specificForDate = await this.availabilityRepo.find({
+      where: { cuentaId, fechaEspecifica: dateStr, activo: true },
       order: { horaInicio: 'ASC' },
     });
+
+    let bloques: AccountAvailability[];
+    if (specificForDate.length > 0) {
+      bloques = specificForDate;
+    } else {
+      bloques = await this.availabilityRepo.find({
+        where: { cuentaId, diaSemana: dayName, activo: true, tipo: 'weekly' as any },
+        order: { horaInicio: 'ASC' },
+      });
+    }
 
     const virtualBlocks =
       bloques.length > 0
@@ -2568,10 +2750,15 @@ export class AppointmentsService {
     const dt = new Date(appt.scheduledAt);
     const dia = DIAS_SEMANA_INDEXED[dt.getDay()];
     if (!dia) return false;
+    const apptDateStr = this.toLocalDateStr(dt); // YYYY-MM-DD
     const startMin = dt.getHours() * 60 + dt.getMinutes();
     const endMin = startMin + (appt.durationMin ?? 30);
     return availability.some((a) => {
       if (a.diaSemana !== dia) return false;
+      // Para bloques específicos, la fecha debe coincidir exactamente
+      if ((a as any).tipo === 'specific' && (a as any).fechaEspecifica !== apptDateStr) {
+        return false;
+      }
       const [hI, mI] = a.horaInicio.split(':').map(Number);
       const [hF, mF] = a.horaFin.split(':').map(Number);
       return startMin >= hI * 60 + mI && endMin <= hF * 60 + mF;
