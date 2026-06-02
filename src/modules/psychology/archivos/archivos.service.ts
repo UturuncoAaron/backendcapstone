@@ -109,9 +109,11 @@ export class PsychologyArchivosService {
 
     // ── Para el portal del alumno / padre ───────────────────────────
 
-    /** Alumno: ve todos sus archivos. */
     listForAlumno(alumnoId: string, categoria?: 'ficha' | 'test') {
-        const where: Record<string, unknown> = { studentId: alumnoId };
+        const where: Record<string, unknown> = {
+            studentId: alumnoId,
+            confidencial: false,
+        };
         if (categoria) where['categoria'] = categoria;
         return this.archivoRepo.find({ where, order: { createdAt: 'DESC' } });
     }

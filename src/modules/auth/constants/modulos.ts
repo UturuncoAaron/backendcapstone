@@ -13,6 +13,7 @@ export const MODULOS = {
     MI_ASISTENCIA: 'mi_asistencia',
     MIS_LIBRETAS: 'mis_libretas',
     MIS_CITAS: 'mis_citas',
+    MI_PSICOLOGIA: 'mi_psicologia',
 
     // ── Docente
     CURSOS_DOCENTE: 'cursos_docente',
@@ -52,7 +53,6 @@ export const MODULOS = {
     REPORTES_ACCESO: 'reportes_acceso',
 
     // ── Libretas padres
-    // Admin lo tiene en su base. Docente lo recibe vía permisos_extra.
     LIBRETAS_PADRE_ACCESO: 'libretas_padre_acceso',
 
     // ── Admin
@@ -79,6 +79,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
     alumno: [
         MODULOS.MIS_CURSOS, MODULOS.MIS_TAREAS, MODULOS.MIS_NOTAS,
         MODULOS.MI_ASISTENCIA, MODULOS.MIS_LIBRETAS, MODULOS.MIS_CITAS,
+        MODULOS.MI_PSICOLOGIA,
         MODULOS.FORO, MODULOS.CLASES_VIVO,
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,
@@ -91,11 +92,6 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,
     ],
-    // El auxiliar es un rol operativo dedicado a asistencias. NO participa
-    // del flujo de citas (ni como convocador, ni declarando disponibilidad,
-    // ni como convocable). Si en el futuro se quiere darle acceso a citas,
-    // hacerlo con un permiso explícito vía `permisos_extra`, no metiéndole
-    // de vuelta MODULOS.AGENDA_PROPIA en la base del rol.
     auxiliar: [
         MODULOS.ASIST_GENERAL,
         MODULOS.COMUNICADOS,
@@ -120,7 +116,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         MODULOS.HISTORICO_ALUMNOS,
         MODULOS.AGENDA_PROPIA,
         MODULOS.MENSAJES,
-        MODULOS.LIBRETAS_PADRE_ACCESO, // ← admin siempre puede subir libretas de padres
+        MODULOS.LIBRETAS_PADRE_ACCESO,
         ...COMUNES,
     ],
 };

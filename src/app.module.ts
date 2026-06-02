@@ -35,6 +35,7 @@ import { AssistsModule } from './modules/assists/assists.module.js';
 import { AppointmentsModule } from './modules/appointments/appointments.module.js';
 import { HistoricoModule } from './modules/historico/historico.module.js';
 import { AcademicYearModule } from './modules/academic-year/academic-year.module.js';
+import { StudentPortalModule } from './modules/student-portal/student-portal.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -106,6 +107,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
     // ── Parent portal ─────────────────────────────────────────────
     ParentPortalModule,
+    StudentPortalModule,
 
     // ── Admin ─────────────────────────────────────────────────────
     ImportModule,
