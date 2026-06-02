@@ -9,6 +9,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 
 async function bootstrap() {
+  // 1. FORZAR ZONA HORARIA DE PERÚ EN EL PROCESO DEL BACKEND
+  process.env.TZ = 'America/Lima';
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const logger = new Logger('Bootstrap');
 

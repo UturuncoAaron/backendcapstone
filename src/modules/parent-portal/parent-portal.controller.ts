@@ -2,14 +2,15 @@ import {
     Controller, Get, Param, ParseUUIDPipe, Query, Res, UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
- 
+
 import { ParentPortalService } from './parent-portal.service.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
-import { RolesGuard }   from '../auth/guards/roles.guard.js';
-import { Roles }        from '../auth/decorators/roles.decorator.js';
-import { CurrentUser }  from '../auth/decorators/current-user.decorator.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
- 
+import { AttendanceQueryDto, GradesQueryDto } from './dto/parent-portal-query.dto.js';
+
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('padre')
 @Controller('parent')
@@ -22,31 +23,24 @@ export class ParentPortalController {
         return this.service.getChildren(user.id);
     }
 
-    // GET /api/parent/children/:id/grades
+    // GET /api/parent/children/:id/grades?anio=2026&periodoId=uuid
     @Get('children/:id/grades')
     getChildGrades(
         @Param('id', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: AuthUser,
+        @Query() query: GradesQueryDto,
     ) {
-        return this.service.getChildGrades(user.id, alumnoId);
+        return this.service.getChildGrades(user.id, alumnoId, query);
     }
 
-    // GET /api/parent/children/:id/attendance
+    // GET /api/parent/children/:id/attendance?anio=2026&periodoId=uuid
     @Get('children/:id/attendance')
-    getChildAttendance(
-        @Param('id', ParseUUIDPipe) alumnoId: string,
-        @CurrentUser() user: AuthUser,
-    ) {
-        return this.service.getChildAttendance(user.id, alumnoId);
-    }
-
-    // GET /api/parent/children/:id/attendance-general
-    @Get('children/:id/attendance-general')
     getChildAttendanceGeneral(
         @Param('id', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: AuthUser,
+        @Query() query: AttendanceQueryDto,
     ) {
-        return this.service.getChildAttendanceGeneral(user.id, alumnoId);
+        return this.service.getChildAttendanceGeneral(user.id, alumnoId, query);
     }
 
     // GET /api/parent/children/:id/schedule
@@ -66,25 +60,27 @@ export class ParentPortalController {
     ) {
         return this.service.getChildLibretas(user.id, alumnoId);
     }
-      @Get('children/:id/psicologia/informes')
+
+    // GET /api/parent/children/:id/psicologia/informes
+    @Get('children/:id/psicologia/informes')
     getChildInformes(
         @Param('id', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: AuthUser,
     ) {
         return this.service.getChildInformes(user.id, alumnoId);
     }
- 
+
     // GET /api/parent/children/:id/psicologia/informes/:informeId/pdf
     @Get('children/:id/psicologia/informes/:informeId/pdf')
     getChildInformePdf(
-        @Param('id',        ParseUUIDPipe) alumnoId: string,
+        @Param('id', ParseUUIDPipe) alumnoId: string,
         @Param('informeId', ParseUUIDPipe) informeId: string,
         @CurrentUser() user: AuthUser,
         @Res() res: Response,
     ) {
         return this.service.getChildInformePdf(user.id, alumnoId, informeId, res);
     }
- 
+
     // GET /api/parent/children/:id/psicologia/archivos?categoria=ficha|test
     @Get('children/:id/psicologia/archivos')
     getChildArchivos(
@@ -94,12 +90,12 @@ export class ParentPortalController {
     ) {
         return this.service.getChildArchivos(user.id, alumnoId, categoria);
     }
- 
+
     // GET /api/parent/children/:id/psicologia/archivos/:archivoId/url
     @Get('children/:id/psicologia/archivos/:archivoId/url')
     getChildArchivoUrl(
-        @Param('id',         ParseUUIDPipe) alumnoId: string,
-        @Param('archivoId',  ParseUUIDPipe) archivoId: string,
+        @Param('id', ParseUUIDPipe) alumnoId: string,
+        @Param('archivoId', ParseUUIDPipe) archivoId: string,
         @CurrentUser() user: AuthUser,
     ) {
         return this.service.getChildArchivoUrl(user.id, alumnoId, archivoId);

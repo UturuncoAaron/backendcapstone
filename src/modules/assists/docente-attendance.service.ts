@@ -40,6 +40,8 @@ export class DocenteAttendanceService {
         }
 
         const docenteIds = dto.docentes.map(d => d.docente_id);
+
+        // Obtenemos todos los horarios de los docentes implicados para clonar los estados a nivel de bloque
         const horarios = await this.ds.query(
             `SELECT h.id AS horario_id, c.docente_id, h.hora_inicio::text
              FROM horarios h
@@ -62,7 +64,7 @@ export class DocenteAttendanceService {
         await qr.connect();
         await qr.startTransaction();
 
-        let bloquesRegistrados = 0;
+        let jornadasRegistradas = 0;
         const errores: any[] = [];
 
         try {
@@ -77,12 +79,37 @@ export class DocenteAttendanceService {
                     continue;
                 }
 
+                // 1. Insertar o actualizar la verdad única: La Jornada Diaria del Empleado
+                const resJornada = await qr.query(
+                    `INSERT INTO asistencias_jornada_docente
+                        (docente_id, fecha, estado_jornada, hora_llegada, motivo_justificacion, registrado_por)
+                     VALUES ($1, $2, $3, $4::time, $5, $6)
+                     ON CONFLICT (docente_id, fecha) DO UPDATE SET
+                        estado_jornada       = EXCLUDED.estado_jornada,
+                        hora_llegada         = EXCLUDED.hora_llegada,
+                        motivo_justificacion = EXCLUDED.motivo_justificacion,
+                        registrado_por       = EXCLUDED.registrado_por,
+                        updated_at           = NOW()
+                     RETURNING id`,
+                    [
+                        docente.docente_id,
+                        dto.fecha,
+                        docente.estado,
+                        docente.hora_llegada ?? null,
+                        docente.motivo_justificacion ?? null,
+                        user.id,
+                    ],
+                );
+
+                const jornadaId = resJornada[0].id;
+
+                // 2. Propagar de manera uniforme a cada bloque de clase mapeando la jerarquía
                 for (const bloque of bloques) {
                     await qr.query(
                         `INSERT INTO asistencias_docente
                             (horario_id, docente_id, fecha, estado, hora_llegada,
-                             motivo_justificacion, hubo_reemplazo, observacion, registrado_por)
-                         VALUES ($1, $2, $3, $4, $5::time, $6, $7, $8, $9)
+                             motivo_justificacion, hubo_reemplazo, observacion, registrado_por, jornada_id)
+                         VALUES ($1, $2, $3, $4, $5::time, $6, $7, $8, $9, $10)
                          ON CONFLICT (horario_id, fecha) DO UPDATE SET
                              estado               = EXCLUDED.estado,
                              hora_llegada         = EXCLUDED.hora_llegada,
@@ -90,6 +117,7 @@ export class DocenteAttendanceService {
                              hubo_reemplazo       = EXCLUDED.hubo_reemplazo,
                              observacion          = EXCLUDED.observacion,
                              registrado_por       = EXCLUDED.registrado_por,
+                             jornada_id           = EXCLUDED.jornada_id,
                              updated_at           = NOW()`,
                         [
                             bloque.horario_id,
@@ -101,17 +129,18 @@ export class DocenteAttendanceService {
                             docente.hubo_reemplazo ?? false,
                             docente.observacion ?? null,
                             user.id,
+                            jornadaId,
                         ],
                     );
-                    bloquesRegistrados++;
                 }
+                jornadasRegistradas++;
             }
 
             await qr.commitTransaction();
-            this.logger.log(`Asist. docente bulk: ${bloquesRegistrados} bloques | ${dto.fecha}`);
+            this.logger.log(`Jornadas docentes procesadas bulk: ${jornadasRegistradas} | ${dto.fecha}`);
             return {
                 procesados: dto.docentes.length - errores.length,
-                bloques_registrados: bloquesRegistrados,
+                jornadas_registradas: jornadasRegistradas,
                 errores,
             };
         } catch (error) {
@@ -126,7 +155,7 @@ export class DocenteAttendanceService {
         this.assertCanRegister(user);
 
         const rows = await this.ds.query(
-            `SELECT id, estado FROM asistencias_docente
+            `SELECT id, docente_id, estado FROM asistencias_docente
              WHERE horario_id = $1 AND fecha = $2::date
              LIMIT 1`,
             [dto.horario_id, dto.fecha],
@@ -138,7 +167,7 @@ export class DocenteAttendanceService {
             );
         }
 
-        const registro = rows[0] as { id: string; estado: string };
+        const registro = rows[0] as { id: string; docente_id: string; estado: string };
 
         if (!['presente', 'tardanza'].includes(registro.estado)) {
             throw new BadRequestException(
@@ -146,6 +175,7 @@ export class DocenteAttendanceService {
             );
         }
 
+        // Marcamos la salida en el bloque horario específico de la clase
         await this.ds.query(
             `UPDATE asistencias_docente
              SET hora_salida = $1::time, updated_at = NOW()
@@ -153,7 +183,15 @@ export class DocenteAttendanceService {
             [dto.hora_salida, registro.id],
         );
 
-        this.logger.verbose(`Salida marcada: horario ${dto.horario_id} | ${dto.fecha} | ${dto.hora_salida}`);
+        // Actualizamos también la jornada laboral general del docente con su último registro de salida
+        await this.ds.query(
+            `UPDATE asistencias_jornada_docente
+             SET hora_salida = $1::time, updated_at = NOW()
+             WHERE docente_id = $2 AND fecha = $3::date`,
+            [dto.hora_salida, registro.docente_id, dto.fecha],
+        );
+
+        this.logger.verbose(`Salida unificada guardada: horario ${dto.horario_id} | ${dto.fecha} | ${dto.hora_salida}`);
         return { ok: true, hora_salida: dto.hora_salida };
     }
 

@@ -11,9 +11,6 @@ const decimalToNumber = {
     to: (v: number | null | undefined) => v,
     from: (v: string | null) => (v == null ? null : parseFloat(v)),
 };
-
-// El tipo 'examen' fue retirado: hoy solo hay tareas (con o sin alternativas).
-// La migración 0001 reescribe filas históricas con tipo='examen' a tipo='tarea'.
 export const TIPOS_NOTA = [
     'tarea', 'practica',
     'participacion', 'proyecto', 'otro',
