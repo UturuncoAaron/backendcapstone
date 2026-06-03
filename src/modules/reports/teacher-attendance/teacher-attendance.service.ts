@@ -57,8 +57,8 @@ export class TeacherAttendanceService {
     }
 
     private assertCanViewReports(user: AuthUser): void {
-        if (user.rol !== 'auxiliar' && user.rol !== 'admin') {
-            throw new ForbiddenException('Acceso restringido a auxiliares y administradores');
+        if (user.rol !== 'staff' && user.rol !== 'admin') {
+            throw new ForbiddenException('Acceso restringido a staff y administradores');
         }
     }
 

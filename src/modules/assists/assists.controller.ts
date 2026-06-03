@@ -4,7 +4,6 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { AssistsService } from './assists.service.js';
-import { DocenteAttendanceService } from './docente-attendance.service.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
@@ -13,29 +12,24 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import {
     RegisterAsistenciaDto, BulkAsistenciaDto, UpdateAsistenciaDto,
     ListAsistenciasQueryDto, ReporteAsistenciaQueryDto, ScanQrDto,
-    HorariosDiaQueryDto, RegistrarAsistenciaDocenteBulkDiaDto,
-    MarcarSalidaDocenteDto,
 } from './dto/asistencia.dto.js';
 
 @Controller('asistencias')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AssistsController {
-    constructor(
-        private readonly svc: AssistsService,
-        private readonly docenteSvc: DocenteAttendanceService,
-    ) { }
+    constructor(private readonly svc: AssistsService) { }
 
-    // ── GENERAL (tutor de sección / auxiliar) ──
+    // ── GENERAL (tutor de sección / staff) ────────────────────────────────
 
     @Post('general/scan')
-    @Roles('auxiliar')
+    @Roles('staff')
     generalScan(
         @CurrentUser() user: AuthUser,
         @Body() dto: ScanQrDto,
     ) { return this.svc.generalScan(dto, user); }
 
     @Post('general/:seccionId')
-    @Roles('docente', 'auxiliar')
+    @Roles('docente', 'staff')
     generalRegister(
         @Param('seccionId', ParseUUIDPipe) seccionId: string,
         @CurrentUser() user: AuthUser,
@@ -43,7 +37,7 @@ export class AssistsController {
     ) { return this.svc.generalRegister(seccionId, dto, user); }
 
     @Post('general/:seccionId/bulk')
-    @Roles('docente', 'auxiliar')
+    @Roles('docente', 'staff')
     generalBulk(
         @Param('seccionId', ParseUUIDPipe) seccionId: string,
         @CurrentUser() user: AuthUser,
@@ -51,7 +45,7 @@ export class AssistsController {
     ) { return this.svc.generalBulk(seccionId, dto, user); }
 
     @Get('general/:seccionId')
-    @Roles('admin', 'docente', 'auxiliar', 'psicologa')
+    @Roles('admin', 'docente', 'staff', 'psicologa')
     generalList(
         @Param('seccionId', ParseUUIDPipe) seccionId: string,
         @Query() q: ListAsistenciasQueryDto,
@@ -65,7 +59,7 @@ export class AssistsController {
     ) { return this.svc.generalListByAlumno(alumnoId, q); }
 
     @Patch('general/:id')
-    @Roles('docente', 'auxiliar')
+    @Roles('docente', 'staff')
     generalUpdate(
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: AuthUser,
@@ -73,13 +67,13 @@ export class AssistsController {
     ) { return this.svc.generalUpdate(id, dto, user); }
 
     @Delete('general/:id') @HttpCode(HttpStatus.NO_CONTENT)
-    @Roles('docente', 'auxiliar')
+    @Roles('docente', 'staff')
     generalRemove(
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: AuthUser,
     ) { return this.svc.generalRemove(id, user); }
 
-    // ── POR CURSO (docente del curso) ──
+    // ── POR CURSO (docente del curso) ─────────────────────────────────────
 
     @Post('curso/:cursoId')
     @Roles('docente')
@@ -126,32 +120,7 @@ export class AssistsController {
         @CurrentUser() user: AuthUser,
     ) { return this.svc.classRemove(id, user); }
 
-    // ── DOCENTE (auxiliar / admin) ──
-
-    @Get('docente/dia')
-    @Roles('auxiliar', 'admin')
-    getDocentesDelDia(
-        @CurrentUser() user: AuthUser,
-        @Query() q: HorariosDiaQueryDto,
-    ) { return this.docenteSvc.getDocentesDelDia(user, q.fecha); }
-
-    @Post('docente/registrar')
-    @HttpCode(HttpStatus.OK)
-    @Roles('auxiliar', 'admin')
-    registrarDocenteBulk(
-        @CurrentUser() user: AuthUser,
-        @Body() dto: RegistrarAsistenciaDocenteBulkDiaDto,
-    ) { return this.docenteSvc.registrarBulk(user, dto); }
-
-    @Patch('docente/salida')
-    @HttpCode(HttpStatus.OK)
-    @Roles('auxiliar', 'admin')
-    marcarSalida(
-        @CurrentUser() user: AuthUser,
-        @Body() dto: MarcarSalidaDocenteDto,
-    ) { return this.docenteSvc.marcarSalida(user, dto); }
-
-    // ── REPORTE ──
+    // ── REPORTE ───────────────────────────────────────────────────────────
 
     @Get('reporte')
     @Roles('admin', 'docente')

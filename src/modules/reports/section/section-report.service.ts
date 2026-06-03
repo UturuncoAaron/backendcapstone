@@ -23,6 +23,7 @@ import type {
 @Injectable()
 export class SectionReportService {
     constructor(@InjectDataSource() private readonly ds: DataSource) { }
+
     async getSeccionResumen(
         user: AuthUser,
         seccionId: string,
@@ -31,6 +32,7 @@ export class SectionReportService {
         topInasistentesLimit = 10,
     ): Promise<SeccionResumenResponse> {
         await this.assertCanViewSeccion(user, seccionId);
+
         const [
             seccionRows,
             periodoRows,
@@ -41,9 +43,12 @@ export class SectionReportService {
             entregasPorTarea,
         ] = await Promise.all([
             this.ds.query(SQL_SECCION_INFO, [seccionId]),
-            this.ds.query(`SELECT id, nombre, anio, bimestre,
-                   fecha_inicio::text, fecha_fin::text, activo
-                   FROM periodos WHERE id = $1`, [periodoId]),
+            this.ds.query(
+                `SELECT id, nombre, anio, bimestre,
+                        fecha_inicio::text, fecha_fin::text, activo
+                   FROM periodos WHERE id = $1`,
+                [periodoId],
+            ),
             this.ds.query(SQL_TOP_Y_RIESGO, [seccionId, periodoId, umbral]) as Promise<TopRiesgoRow[]>,
             this.ds.query(SQL_SECCION_NOTAS, [seccionId, periodoId]) as Promise<SeccionNotasRow[]>,
             this.ds.query(SQL_RESUMEN_ASISTENCIA, [seccionId, periodoId]) as Promise<ResumenAsistenciaRow[]>,
@@ -51,12 +56,8 @@ export class SectionReportService {
             this.ds.query(SQL_ENTREGAS_POR_TAREA, [seccionId, periodoId]) as Promise<EntregasTareaRow[]>,
         ]);
 
-        if (seccionRows.length === 0) {
-            throw new NotFoundException(`Sección ${seccionId} no encontrada`);
-        }
-        if (periodoRows.length === 0) {
-            throw new NotFoundException(`Periodo ${periodoId} no encontrado`);
-        }
+        if (!seccionRows.length) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
+        if (!periodoRows.length) throw new NotFoundException(`Periodo ${periodoId} no encontrado`);
 
         return {
             seccion: seccionRows[0] as SeccionInfo,
@@ -68,10 +69,8 @@ export class SectionReportService {
             entregas_por_tarea: entregasPorTarea,
         };
     }
-    private async assertCanViewSeccion(
-        user: AuthUser,
-        seccionId: string,
-    ): Promise<void> {
+
+    private async assertCanViewSeccion(user: AuthUser, seccionId: string): Promise<void> {
         if (user.rol === 'admin') return;
 
         if (user.rol === 'docente') {
@@ -80,14 +79,10 @@ export class SectionReportService {
                 [seccionId, user.id],
             );
             if (rows.length > 0) return;
-            throw new ForbiddenException(
-                'Solo puedes ver el reporte de tu sección como tutor',
-            );
+            throw new ForbiddenException('Solo puedes ver el reporte de tu sección como tutor');
         }
 
-        if (user.rol === 'auxiliar') {
-            return;
-        }
+        if (user.rol === 'staff') return;
 
         throw new ForbiddenException('Sin acceso a reportes de sección');
     }

@@ -15,7 +15,7 @@ import { Docente } from './entities/docente.entity.js';
 import { Padre } from './entities/padre.entity.js';
 import { Admin } from './entities/admin.entity.js';
 import { Psicologa } from './entities/psicologa.entity.js';
-import { Auxiliar } from './entities/auxiliar.entity.js';
+import { Staff } from './entities/staff.entity.js';
 import { StorageService } from '../storage/storage.service.js';
 
 import {
@@ -24,7 +24,7 @@ import {
   CreatePadreDto,
   CreateAdminDto,
   CreatePsicologaDto,
-  CreateAuxiliarDto,
+  CreateStaffDto,
   LinkPadreAlumnoDto,
 } from './dto/users.dto.js';
 import { UpdateFullDto } from './dto/profile.dto.js';
@@ -44,9 +44,6 @@ export interface DocenteSelectItem {
   } | null;
 }
 
-// Fila cruda devuelta por `searchAlumnos` (después de getRawMany).
-// Los alias salen de la query — los mantenemos tipados para evitar
-// `any` aguas abajo.
 interface AlumnoSearchRow {
   id: string;
   nombre: string;
@@ -90,6 +87,7 @@ export interface AlumnoSearchResult {
     relacion: string | null;
   } | null;
 }
+
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const ROLE_PREFIX: Record<string, string> = {
@@ -98,7 +96,7 @@ const ROLE_PREFIX: Record<string, string> = {
   padre: 'PAD',
   admin: 'ADM',
   psicologa: 'PSI',
-  auxiliar: 'AUX',
+  staff: 'STF',
 };
 
 const PROFILE_FIELDS = [
@@ -127,14 +125,11 @@ export class UsersService {
   constructor(
     @InjectRepository(Cuenta) private readonly cuentaRepo: Repository<Cuenta>,
     @InjectRepository(Alumno) private readonly alumnoRepo: Repository<Alumno>,
-    @InjectRepository(Docente)
-    private readonly docenteRepo: Repository<Docente>,
+    @InjectRepository(Docente) private readonly docenteRepo: Repository<Docente>,
     @InjectRepository(Padre) private readonly padreRepo: Repository<Padre>,
     @InjectRepository(Admin) private readonly adminRepo: Repository<Admin>,
-    @InjectRepository(Psicologa)
-    private readonly psicologaRepo: Repository<Psicologa>,
-    @InjectRepository(Auxiliar)
-    private readonly auxiliarRepo: Repository<Auxiliar>,
+    @InjectRepository(Psicologa) private readonly psicologaRepo: Repository<Psicologa>,
+    @InjectRepository(Staff) private readonly staffRepo: Repository<Staff>,
     private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
   ) { }
@@ -184,7 +179,7 @@ export class UsersService {
       padre: this.padreRepo,
       admin: this.adminRepo,
       psicologa: this.psicologaRepo,
-      auxiliar: this.auxiliarRepo,
+      staff: this.staffRepo,
     };
     return map[rol] ?? null;
   }
@@ -209,173 +204,108 @@ export class UsersService {
   async createAlumno(dto: CreateAlumnoDto) {
     await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
     return this.dataSource.transaction(async (em) => {
-      const cuenta = await this.createCuenta(
-        em,
-        'alumno',
-        dto.tipo_documento,
-        dto.numero_documento,
-      );
-      return em.save(
-        em.create(Alumno, {
-          id: cuenta.id,
-          codigo_estudiante:
-            dto.codigo_estudiante ?? `EST-${cuenta.numero_documento}`,
-          nombre: dto.nombre,
-          apellido_paterno: dto.apellido_paterno,
-          apellido_materno: dto.apellido_materno ?? null,
-          fecha_nacimiento: new Date(dto.fecha_nacimiento),
-          email: dto.email ?? null,
-          telefono: dto.telefono ?? null,
-          inclusivo: dto.inclusivo === true,
-        }),
-      );
+      const cuenta = await this.createCuenta(em, 'alumno', dto.tipo_documento, dto.numero_documento);
+      return em.save(em.create(Alumno, {
+        id: cuenta.id,
+        codigo_estudiante: dto.codigo_estudiante ?? `EST-${cuenta.numero_documento}`,
+        nombre: dto.nombre,
+        apellido_paterno: dto.apellido_paterno,
+        apellido_materno: dto.apellido_materno ?? null,
+        fecha_nacimiento: new Date(dto.fecha_nacimiento),
+        email: dto.email ?? null,
+        telefono: dto.telefono ?? null,
+        inclusivo: dto.inclusivo === true,
+      }));
     });
   }
 
   async createDocente(dto: CreateDocenteDto) {
     await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
     return this.dataSource.transaction(async (em) => {
-      const cuenta = await this.createCuenta(
-        em,
-        'docente',
-        dto.tipo_documento,
-        dto.numero_documento,
-      );
-      return em.save(
-        em.create(Docente, {
-          id: cuenta.id,
-          nombre: dto.nombre,
-          apellido_paterno: dto.apellido_paterno,
-          apellido_materno: dto.apellido_materno ?? null,
-          especialidad: dto.especialidad ?? null,
-          titulo_profesional: dto.titulo_profesional ?? null,
-          email: dto.email ?? null,
-          telefono: dto.telefono ?? null,
-          fecha_nacimiento: dto.fecha_nacimiento
-            ? new Date(dto.fecha_nacimiento)
-            : null,
-          tipo_contrato: dto.tipo_contrato ?? 'contratado',
-          estado_contrato: dto.estado_contrato ?? 'activo',
-          fecha_inicio_contrato: dto.fecha_inicio_contrato
-            ? new Date(dto.fecha_inicio_contrato)
-            : null,
-          fecha_fin_contrato: dto.fecha_fin_contrato
-            ? new Date(dto.fecha_fin_contrato)
-            : null,
-        }),
-      );
+      const cuenta = await this.createCuenta(em, 'docente', dto.tipo_documento, dto.numero_documento);
+      return em.save(em.create(Docente, {
+        id: cuenta.id,
+        nombre: dto.nombre,
+        apellido_paterno: dto.apellido_paterno,
+        apellido_materno: dto.apellido_materno ?? null,
+        especialidad: dto.especialidad ?? null,
+        titulo_profesional: dto.titulo_profesional ?? null,
+        email: dto.email ?? null,
+        telefono: dto.telefono ?? null,
+        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+        tipo_contrato: dto.tipo_contrato ?? 'contratado',
+        estado_contrato: dto.estado_contrato ?? 'activo',
+        fecha_inicio_contrato: dto.fecha_inicio_contrato ? new Date(dto.fecha_inicio_contrato) : null,
+        fecha_fin_contrato: dto.fecha_fin_contrato ? new Date(dto.fecha_fin_contrato) : null,
+      }));
     });
   }
 
   async createPadre(dto: CreatePadreDto) {
     await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
     return this.dataSource.transaction(async (em) => {
-      const cuenta = await this.createCuenta(
-        em,
-        'padre',
-        dto.tipo_documento,
-        dto.numero_documento,
-      );
-      return em.save(
-        em.create(Padre, {
-          id: cuenta.id,
-          nombre: dto.nombre,
-          apellido_paterno: dto.apellido_paterno,
-          apellido_materno: dto.apellido_materno ?? null,
-          relacion: dto.relacion as any,
-          email: dto.email ?? null,
-          telefono: dto.telefono ?? null,
-          fecha_nacimiento: dto.fecha_nacimiento
-            ? new Date(dto.fecha_nacimiento)
-            : null,
-        }),
-      );
+      const cuenta = await this.createCuenta(em, 'padre', dto.tipo_documento, dto.numero_documento);
+      return em.save(em.create(Padre, {
+        id: cuenta.id,
+        nombre: dto.nombre,
+        apellido_paterno: dto.apellido_paterno,
+        apellido_materno: dto.apellido_materno ?? null,
+        relacion: dto.relacion as any,
+        email: dto.email ?? null,
+        telefono: dto.telefono ?? null,
+        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+      }));
     });
   }
 
   async createAdmin(dto: CreateAdminDto) {
     await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
     return this.dataSource.transaction(async (em) => {
-      const cuenta = await this.createCuenta(
-        em,
-        'admin',
-        dto.tipo_documento,
-        dto.numero_documento,
-      );
-      return em.save(
-        em.create(Admin, {
-          id: cuenta.id,
-          nombre: dto.nombre,
-          apellido_paterno: dto.apellido_paterno,
-          apellido_materno: dto.apellido_materno ?? null,
-          cargo: dto.cargo ?? null,
-          email: dto.email ?? null,
-          fecha_nacimiento: dto.fecha_nacimiento
-            ? new Date(dto.fecha_nacimiento)
-            : null,
-        }),
-      );
+      const cuenta = await this.createCuenta(em, 'admin', dto.tipo_documento, dto.numero_documento);
+      return em.save(em.create(Admin, {
+        id: cuenta.id,
+        nombre: dto.nombre,
+        apellido_paterno: dto.apellido_paterno,
+        apellido_materno: dto.apellido_materno ?? null,
+        cargo: dto.cargo ?? null,
+        email: dto.email ?? null,
+        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+      }));
     });
   }
 
   async createPsicologa(dto: CreatePsicologaDto) {
     await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
     return this.dataSource.transaction(async (em) => {
-      const cuenta = await this.createCuenta(
-        em,
-        'psicologa',
-        dto.tipo_documento,
-        dto.numero_documento,
-      );
-      return em.save(
-        em.create(Psicologa, {
-          id: cuenta.id,
-          nombre: dto.nombre,
-          apellido_paterno: dto.apellido_paterno,
-          apellido_materno: dto.apellido_materno ?? null,
-          especialidad: dto.especialidad ?? null,
-          colegiatura: dto.colegiatura ?? null,
-          email: dto.email ?? null,
-          telefono: dto.telefono ?? null,
-          fecha_nacimiento: dto.fecha_nacimiento
-            ? new Date(dto.fecha_nacimiento)
-            : null,
-        }),
-      );
+      const cuenta = await this.createCuenta(em, 'psicologa', dto.tipo_documento, dto.numero_documento);
+      return em.save(em.create(Psicologa, {
+        id: cuenta.id,
+        nombre: dto.nombre,
+        apellido_paterno: dto.apellido_paterno,
+        apellido_materno: dto.apellido_materno ?? null,
+        especialidad: dto.especialidad ?? null,
+        colegiatura: dto.colegiatura ?? null,
+        email: dto.email ?? null,
+        telefono: dto.telefono ?? null,
+        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+      }));
     });
   }
 
-  async createAuxiliar(dto: CreateAuxiliarDto) {
+  async createStaff(dto: CreateStaffDto) {
     await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
     return this.dataSource.transaction(async (em) => {
-      const cuenta = await this.createCuenta(
-        em,
-        'auxiliar',
-        dto.tipo_documento,
-        dto.numero_documento,
-      );
-      return em.save(
-        em.create(Auxiliar, {
-          id: cuenta.id,
-          nombre: dto.nombre,
-          apellido_paterno: dto.apellido_paterno,
-          apellido_materno: dto.apellido_materno ?? null,
-          cargo: dto.cargo ?? 'Auxiliar de Educación',
-          email: dto.email ?? null,
-          telefono: dto.telefono ?? null,
-          fecha_nacimiento: dto.fecha_nacimiento
-            ? new Date(dto.fecha_nacimiento)
-            : null,
-          tipo_contrato: dto.tipo_contrato ?? 'contratado',
-          estado_contrato: dto.estado_contrato ?? 'activo',
-          fecha_inicio_contrato: dto.fecha_inicio_contrato
-            ? new Date(dto.fecha_inicio_contrato)
-            : null,
-          fecha_fin_contrato: dto.fecha_fin_contrato
-            ? new Date(dto.fecha_fin_contrato)
-            : null,
-        }),
-      );
+      const cuenta = await this.createCuenta(em, 'staff', dto.tipo_documento, dto.numero_documento);
+      return em.save(em.create(Staff, {
+        id: cuenta.id,
+        nombre: dto.nombre,
+        apellido_paterno: dto.apellido_paterno,
+        apellido_materno: dto.apellido_materno ?? null,
+        cargo: dto.cargo ?? 'Personal de Apoyo',
+        email: dto.email ?? null,
+        telefono: dto.telefono ?? null,
+        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+      }));
     });
   }
 
@@ -410,8 +340,8 @@ export class UsersService {
       const q = `%${filters.q.trim()}%`;
       qb.andWhere(
         `(a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
-              OR a.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
-              OR a.cargo ILIKE :q)`,
+          OR a.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
+          OR a.cargo ILIKE :q)`,
         { q },
       );
     }
@@ -419,13 +349,7 @@ export class UsersService {
     const total = await qb.getCount();
     const rows = await qb.limit(limit).offset(offset).getRawMany();
     rows.forEach((r) => this.sanitize(r, true));
-    return {
-      data: rows,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findAlumnos(filters: {
@@ -446,9 +370,7 @@ export class UsersService {
                              WHERE mm.activo = true
                              ORDER BY mm.alumno_id, mm.created_at DESC)`;
 
-    const applyJoinsAndFilters = <T>(
-      qb: SelectQueryBuilder<T>,
-    ): SelectQueryBuilder<T> => {
+    const applyJoinsAndFilters = <T>(qb: SelectQueryBuilder<T>): SelectQueryBuilder<T> => {
       qb.innerJoin('cuentas', 'c', 'c.id = a.id')
         .leftJoin(SUB_MATRICULA, 'm', 'm.alumno_id = a.id')
         .leftJoin('secciones', 's', 's.id = m.seccion_id')
@@ -457,8 +379,6 @@ export class UsersService {
       if (filters.seccionId) {
         qb.andWhere('s.id = :seccionId', { seccionId: filters.seccionId });
       } else if (filters.gradoId) {
-        // g.id es UUID — no convertir a Number, rompía con
-        // "invalid input syntax for type uuid: NaN".
         qb.andWhere('g.id = :gradoId', { gradoId: filters.gradoId });
       }
 
@@ -470,10 +390,10 @@ export class UsersService {
         const q = `%${filters.q.trim()}%`;
         qb.andWhere(
           `(a.nombre           ILIKE :q
-                OR a.apellido_paterno ILIKE :q
-                OR a.apellido_materno ILIKE :q
-                OR c.numero_documento ILIKE :q
-                OR a.codigo_estudiante ILIKE :q)`,
+            OR a.apellido_paterno ILIKE :q
+            OR a.apellido_materno ILIKE :q
+            OR c.numero_documento ILIKE :q
+            OR a.codigo_estudiante ILIKE :q)`,
           { q },
         );
       }
@@ -481,19 +401,12 @@ export class UsersService {
       return qb;
     };
 
-    // Count: usamos COUNT(DISTINCT a.id) con un SELECT explícito y
-    // getRawOne() para evitar el wrapping inestable de .getCount().
-    const countRow = await applyJoinsAndFilters(
-      this.alumnoRepo.createQueryBuilder('a'),
-    )
+    const countRow = await applyJoinsAndFilters(this.alumnoRepo.createQueryBuilder('a'))
       .select('COUNT(DISTINCT a.id)', 'total')
       .getRawOne<{ total: string }>();
     const total = Number.parseInt(countRow?.total ?? '0', 10);
 
-    // Data: misma forma de query con SELECT de campos planos.
-    const rows = await applyJoinsAndFilters(
-      this.alumnoRepo.createQueryBuilder('a'),
-    )
+    const rows = await applyJoinsAndFilters(this.alumnoRepo.createQueryBuilder('a'))
       .select([
         'a.id                AS id',
         'a.codigo_estudiante AS codigo_estudiante',
@@ -512,7 +425,6 @@ export class UsersService {
         'g.id                AS grado_id',
         's.nombre            AS seccion',
         's.id                AS seccion_id',
-
       ])
       .orderBy('a.apellido_paterno', 'ASC')
       .addOrderBy('a.nombre', 'ASC')
@@ -562,26 +474,25 @@ export class UsersService {
       .addOrderBy('d.nombre', 'ASC');
 
     if (filters?.includeTutoria) {
-      qb
-        .leftJoin('secciones_tutores', 'st', 'st.docente_id = d.id AND st.activo = TRUE')
+      qb.leftJoin('secciones_tutores', 'st', 'st.docente_id = d.id AND st.activo = TRUE')
         .leftJoin('secciones', 's', 's.id = st.seccion_id')
         .leftJoin('grados', 'g', 'g.id = s.grado_id')
         .addSelect(`
-        CASE WHEN s.id IS NULL THEN NULL
-             ELSE jsonb_build_object(
-                 'seccion_id',    s.id::text,
-                 'seccion_label', g.nombre || ' – Sección ' || s.nombre
-             )
-        END AS tutoria_actual
-    `);
+          CASE WHEN s.id IS NULL THEN NULL
+               ELSE jsonb_build_object(
+                   'seccion_id',    s.id::text,
+                   'seccion_label', g.nombre || ' – Sección ' || s.nombre
+               )
+          END AS tutoria_actual
+        `);
     }
 
     if (filters?.q && filters.q.trim().length >= 2) {
       const q = `%${filters.q.trim()}%`;
       qb.andWhere(
         `(d.nombre ILIKE :q OR d.apellido_paterno ILIKE :q
-              OR d.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
-              OR d.especialidad ILIKE :q)`,
+          OR d.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
+          OR d.especialidad ILIKE :q)`,
         { q },
       );
     }
@@ -589,13 +500,7 @@ export class UsersService {
     const total = await qb.getCount();
     const rows = await qb.limit(limit).offset(offset).getRawMany();
     rows.forEach((r) => this.sanitize(r, true));
-    return {
-      data: rows,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findPadres(filters?: { q?: string; page?: number; limit?: number }) {
@@ -626,7 +531,7 @@ export class UsersService {
       const q = `%${filters.q.trim()}%`;
       qb.andWhere(
         `(p.nombre ILIKE :q OR p.apellido_paterno ILIKE :q
-              OR p.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q)`,
+          OR p.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q)`,
         { q },
       );
     }
@@ -634,20 +539,10 @@ export class UsersService {
     const total = await qb.getCount();
     const rows = await qb.limit(limit).offset(offset).getRawMany();
     rows.forEach((r) => this.sanitize(r, true));
-    return {
-      data: rows,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findPsicologas(filters?: {
-    q?: string;
-    page?: number;
-    limit?: number;
-  }) {
+  async findPsicologas(filters?: { q?: string; page?: number; limit?: number }) {
     const page = filters?.page ?? 1;
     const limit = filters?.limit ?? 20;
     const offset = (page - 1) * limit;
@@ -676,8 +571,8 @@ export class UsersService {
       const q = `%${filters.q.trim()}%`;
       qb.andWhere(
         `(p.nombre ILIKE :q OR p.apellido_paterno ILIKE :q
-              OR p.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
-              OR p.especialidad ILIKE :q)`,
+          OR p.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
+          OR p.especialidad ILIKE :q)`,
         { q },
       );
     }
@@ -685,52 +580,39 @@ export class UsersService {
     const total = await qb.getCount();
     const rows = await qb.limit(limit).offset(offset).getRawMany();
     rows.forEach((r) => this.sanitize(r, true));
-    return {
-      data: rows,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findAuxiliares(filters?: {
-    q?: string;
-    page?: number;
-    limit?: number;
-  }) {
+  async findStaff(filters?: { q?: string; page?: number; limit?: number }) {
     const page = filters?.page ?? 1;
     const limit = filters?.limit ?? 20;
     const offset = (page - 1) * limit;
 
-    const qb = this.auxiliarRepo
-      .createQueryBuilder('a')
-      .innerJoin('cuentas', 'c', 'c.id = a.id')
+    const qb = this.staffRepo
+      .createQueryBuilder('s')
+      .innerJoin('cuentas', 'c', 'c.id = s.id')
       .select([
-        'a.id                    AS id',
-        'a.nombre                AS nombre',
-        'a.apellido_paterno      AS apellido_paterno',
-        'a.apellido_materno      AS apellido_materno',
-        'a.cargo                 AS cargo',
-        'a.email                 AS email',
-        'a.telefono              AS telefono',
-        'a.foto_storage_key      AS foto_storage_key',
-        'a.tipo_contrato         AS tipo_contrato',
-        'a.estado_contrato       AS estado_contrato',
-        'a.fecha_inicio_contrato AS fecha_inicio_contrato',
-        'a.fecha_fin_contrato    AS fecha_fin_contrato',
-        'c.numero_documento      AS numero_documento',
-        'c.tipo_documento        AS tipo_documento',
-        'c.activo                AS activo',
+        's.id               AS id',
+        's.nombre           AS nombre',
+        's.apellido_paterno AS apellido_paterno',
+        's.apellido_materno AS apellido_materno',
+        's.cargo            AS cargo',
+        's.email            AS email',
+        's.telefono         AS telefono',
+        's.foto_storage_key AS foto_storage_key',
+        'c.numero_documento AS numero_documento',
+        'c.tipo_documento   AS tipo_documento',
+        'c.activo           AS activo',
       ])
-      .orderBy('a.apellido_paterno', 'ASC')
-      .addOrderBy('a.nombre', 'ASC');
+      .orderBy('s.apellido_paterno', 'ASC')
+      .addOrderBy('s.nombre', 'ASC');
 
     if (filters?.q && filters.q.trim().length >= 2) {
       const q = `%${filters.q.trim()}%`;
       qb.andWhere(
-        `(a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
-                  OR a.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q)`,
+        `(s.nombre ILIKE :q OR s.apellido_paterno ILIKE :q
+          OR s.apellido_materno ILIKE :q OR c.numero_documento ILIKE :q
+          OR s.cargo ILIKE :q)`,
         { q },
       );
     }
@@ -738,21 +620,14 @@ export class UsersService {
     const total = await qb.getCount();
     const rows = await qb.limit(limit).offset(offset).getRawMany();
     rows.forEach((r) => this.sanitize(r, true));
-    return {
-      data: rows,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // SELECTS / DIALOGS (sin paginación)
   // ══════════════════════════════════════════════════════════════════════════
-  async findDocentesForSelect(
-    includeTutoria = false,
-  ): Promise<DocenteSelectItem[]> {
+
+  async findDocentesForSelect(includeTutoria = false): Promise<DocenteSelectItem[]> {
     const qb = this.docenteRepo
       .createQueryBuilder('d')
       .innerJoin('cuentas', 'c', 'c.id = d.id AND c.activo = TRUE')
@@ -768,18 +643,17 @@ export class UsersService {
       .addOrderBy('d.nombre', 'ASC');
 
     if (includeTutoria) {
-      qb
-        .leftJoin('secciones_tutores', 'st', 'st.docente_id = d.id AND st.activo = TRUE')
+      qb.leftJoin('secciones_tutores', 'st', 'st.docente_id = d.id AND st.activo = TRUE')
         .leftJoin('secciones', 's', 's.id = st.seccion_id')
         .leftJoin('grados', 'g', 'g.id = s.grado_id')
         .addSelect(`
-        CASE WHEN s.id IS NULL THEN NULL
-             ELSE jsonb_build_object(
-                 'seccion_id',    s.id::text,
-                 'seccion_label', g.nombre || ' - Sección ' || s.nombre
-             )
-        END AS tutoria_actual
-    `);
+          CASE WHEN s.id IS NULL THEN NULL
+               ELSE jsonb_build_object(
+                   'seccion_id',    s.id::text,
+                   'seccion_label', g.nombre || ' - Sección ' || s.nombre
+               )
+          END AS tutoria_actual
+        `);
     }
 
     const rows = await qb.getRawMany();
@@ -797,16 +671,11 @@ export class UsersService {
       };
 
       if (includeTutoria) {
-        // TypeORM getRawMany puede devolver jsonb como string o como objeto
-        // dependiendo del driver — normalizamos explícitamente.
         if (r.tutoria_actual == null) {
           item.tutoria_actual = null;
         } else if (typeof r.tutoria_actual === 'string') {
-          try {
-            item.tutoria_actual = JSON.parse(r.tutoria_actual);
-          } catch {
-            item.tutoria_actual = null;
-          }
+          try { item.tutoria_actual = JSON.parse(r.tutoria_actual); }
+          catch { item.tutoria_actual = null; }
         } else {
           item.tutoria_actual = r.tutoria_actual;
         }
@@ -815,14 +684,7 @@ export class UsersService {
       return item;
     });
   }
-  /**
-   * @param incluirMatriculados
-   *   - `false` (default): excluye alumnos que ya tienen matrícula activa en el año.
-   *     Es el comportamiento que necesita el flujo de "Matricular".
-   *   - `true`: incluye TODOS los alumnos (sin filtro de matrícula).
-   *     Lo necesita el flujo de "Vínculo Padre-Hijo" porque ahí precisamente se
-   *     vincula a un alumno ya matriculado.
-   */
+
   async searchAlumnos(
     query: string,
     anio?: number,
@@ -830,7 +692,6 @@ export class UsersService {
   ): Promise<AlumnoSearchResult[]> {
     if (!query || query.trim().length < 2) return [];
 
-    // Año a usar para el filtro de matrícula — si no viene, usa el periodo activo
     let anioFinal = anio;
     if (!anioFinal) {
       const [periodo] = await this.dataSource.query<{ anio: number }[]>(
@@ -853,9 +714,9 @@ export class UsersService {
             .addSelect('p.relacion', 'padre_relacion')
             .addSelect(
               `ROW_NUMBER() OVER (
-              PARTITION BY pa.alumno_id
-              ORDER BY p.apellido_paterno NULLS LAST, p.nombre
-            )`,
+                PARTITION BY pa.alumno_id
+                ORDER BY p.apellido_paterno NULLS LAST, p.nombre
+              )`,
               'rn',
             )
             .from('padre_alumno', 'pa')
@@ -874,8 +735,6 @@ export class UsersService {
         'a.inclusivo         AS inclusivo',
         'c.numero_documento  AS numero_documento',
         'c.codigo_acceso     AS codigo_acceso',
-        // Grado/sección actuales (año corriente, no el que se busca matricular)
-        // Solo informativo para que el admin sepa dónde está el alumno hoy
         `(SELECT g.nombre FROM matriculas mx
           JOIN secciones sx ON sx.id = mx.seccion_id
           JOIN grados    g  ON g.id  = sx.grado_id
@@ -908,8 +767,6 @@ export class UsersService {
         { q: `%${query.trim()}%` },
       );
 
-    // Sólo aplicar el filtro de "no matriculado en este año" cuando el caller
-    // está buscando candidatos para una nueva matrícula.
     if (!incluirMatriculados) {
       rowsQb.andWhere(
         `NOT EXISTS (
@@ -928,33 +785,31 @@ export class UsersService {
       .limit(20)
       .getRawMany();
 
-    return rows.map(
-      (r): AlumnoSearchResult => ({
-        id: r.id,
-        nombre: r.nombre,
-        apellido_paterno: r.apellido_paterno,
-        apellido_materno: r.apellido_materno,
-        codigo_estudiante: r.codigo_estudiante,
-        foto_storage_key: r.foto_storage_key,
-        numero_documento: r.numero_documento,
-        codigo_acceso: r.codigo_acceso,
-        inclusivo: r.inclusivo === true,
-        grado: r.grado ?? null,
-        grado_id: r.grado_id ?? null,
-        seccion: r.seccion ?? null,
-        seccion_id: r.seccion_id ?? null,
-        padre:
-          r.padre_id && r.padre_nombre && r.padre_apellido_paterno
-            ? {
-              id: r.padre_id,
-              nombre: r.padre_nombre,
-              apellido_paterno: r.padre_apellido_paterno,
-              apellido_materno: r.padre_apellido_materno,
-              relacion: r.padre_relacion,
-            }
-            : null,
-      }),
-    );
+    return rows.map((r): AlumnoSearchResult => ({
+      id: r.id,
+      nombre: r.nombre,
+      apellido_paterno: r.apellido_paterno,
+      apellido_materno: r.apellido_materno,
+      codigo_estudiante: r.codigo_estudiante,
+      foto_storage_key: r.foto_storage_key,
+      numero_documento: r.numero_documento,
+      codigo_acceso: r.codigo_acceso,
+      inclusivo: r.inclusivo === true,
+      grado: r.grado ?? null,
+      grado_id: r.grado_id ?? null,
+      seccion: r.seccion ?? null,
+      seccion_id: r.seccion_id ?? null,
+      padre:
+        r.padre_id && r.padre_nombre && r.padre_apellido_paterno
+          ? {
+            id: r.padre_id,
+            nombre: r.padre_nombre,
+            apellido_paterno: r.padre_apellido_paterno,
+            apellido_materno: r.padre_apellido_materno,
+            relacion: r.padre_relacion,
+          }
+          : null,
+    }));
   }
 
   async searchDocentes(query: string) {
@@ -973,7 +828,7 @@ export class UsersService {
       ])
       .where(
         `d.nombre ILIKE :q OR d.apellido_paterno ILIKE :q
-                 OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
+         OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
         { q: `%${query.trim()}%` },
       )
       .limit(10)
@@ -996,29 +851,30 @@ export class UsersService {
       ])
       .where(
         `p.nombre ILIKE :q OR p.apellido_paterno ILIKE :q
-                 OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
+         OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
         { q: `%${query.trim()}%` },
       )
       .limit(10)
       .getRawMany();
   }
 
-  async searchAuxiliares(query: string) {
+  async searchStaff(query: string) {
     if (!query || query.trim().length < 2) return [];
-    return this.auxiliarRepo
-      .createQueryBuilder('a')
-      .innerJoin('cuentas', 'c', 'c.id = a.id')
+    return this.staffRepo
+      .createQueryBuilder('s')
+      .innerJoin('cuentas', 'c', 'c.id = s.id')
       .select([
-        'a.id               AS id',
-        'a.nombre           AS nombre',
-        'a.apellido_paterno AS apellido_paterno',
-        'a.apellido_materno AS apellido_materno',
+        's.id               AS id',
+        's.nombre           AS nombre',
+        's.apellido_paterno AS apellido_paterno',
+        's.apellido_materno AS apellido_materno',
+        's.cargo            AS cargo',
         'c.numero_documento AS numero_documento',
         'c.codigo_acceso    AS codigo_acceso',
       ])
       .where(
-        `a.nombre ILIKE :q OR a.apellido_paterno ILIKE :q
-                 OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
+        `s.nombre ILIKE :q OR s.apellido_paterno ILIKE :q
+         OR c.numero_documento ILIKE :q OR c.codigo_acceso ILIKE :q`,
         { q: `%${query.trim()}%` },
       )
       .limit(10)
@@ -1162,34 +1018,31 @@ export class UsersService {
     return row;
   }
 
-  async findAuxiliarById(id: string) {
-    const row = await this.auxiliarRepo
-      .createQueryBuilder('a')
-      .innerJoin('cuentas', 'c', 'c.id = a.id')
+  async findStaffById(id: string) {
+    const row = await this.staffRepo
+      .createQueryBuilder('s')
+      .innerJoin('cuentas', 'c', 'c.id = s.id')
       .select([
-        'a.id                    AS id',
-        'a.nombre                AS nombre',
-        'a.apellido_paterno      AS apellido_paterno',
-        'a.apellido_materno      AS apellido_materno',
-        'a.cargo                 AS cargo',
-        'a.email                 AS email',
-        'a.telefono              AS telefono',
-        'a.foto_storage_key      AS foto_storage_key',
-        'a.tipo_contrato         AS tipo_contrato',
-        'a.estado_contrato       AS estado_contrato',
-        'a.fecha_inicio_contrato AS fecha_inicio_contrato',
-        'a.fecha_fin_contrato    AS fecha_fin_contrato',
-        'c.numero_documento      AS numero_documento',
-        'c.tipo_documento        AS tipo_documento',
-        'c.codigo_acceso         AS codigo_acceso',
-        'c.activo                AS activo',
+        's.id               AS id',
+        's.nombre           AS nombre',
+        's.apellido_paterno AS apellido_paterno',
+        's.apellido_materno AS apellido_materno',
+        's.cargo            AS cargo',
+        's.email            AS email',
+        's.telefono         AS telefono',
+        's.foto_storage_key AS foto_storage_key',
+        'c.numero_documento AS numero_documento',
+        'c.tipo_documento   AS tipo_documento',
+        'c.codigo_acceso    AS codigo_acceso',
+        'c.activo           AS activo',
       ])
-      .where('a.id = :id', { id })
+      .where('s.id = :id', { id })
       .getRawOne();
-    if (!row) throw new NotFoundException(`Auxiliar ${id} no encontrado`);
+    if (!row) throw new NotFoundException(`Staff ${id} no encontrado`);
     this.sanitize(row);
     return row;
   }
+
   async getNombreById(id: string, rol: string): Promise<{
     nombre: string;
     apellido_paterno: string;
@@ -1208,32 +1061,18 @@ export class UsersService {
   // ACTIVAR / DESACTIVAR
   // ══════════════════════════════════════════════════════════════════════════
 
-  /**
-   * Desactiva la cuenta. Si es **docente**, además limpia el `docente_id` de
-   * todos los cursos donde estaba asignado (no borra los cursos: quedan
-   * "sin docente asignado" para que un admin pueda reasignarlos). Esto evita
-   * que un docente desactivado siga apareciendo como titular en grados/cursos.
-   */
   async deactivate(id: string): Promise<{ message: string }> {
     return this.dataSource.transaction(async (em) => {
       const cuenta = await em
         .getRepository(Cuenta)
         .findOne({ where: { id }, select: ['id', 'rol', 'activo'] });
       if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
-      if (!cuenta.activo)
-        throw new NotFoundException(`Cuenta ${id} ya inactiva`);
+      if (!cuenta.activo) throw new NotFoundException(`Cuenta ${id} ya inactiva`);
 
-      await em
-        .getRepository(Cuenta)
-        .update({ id }, { activo: false });
+      await em.getRepository(Cuenta).update({ id }, { activo: false });
 
       if (cuenta.rol === 'docente') {
-        // Cursos asignados → docente_id = NULL. El curso sigue vivo pero
-        // "sin docente"; el admin podrá reasignar.
-        await em.query(
-          `UPDATE cursos SET docente_id = NULL WHERE docente_id = $1`,
-          [id],
-        );
+        await em.query(`UPDATE cursos SET docente_id = NULL WHERE docente_id = $1`, [id]);
       }
 
       return { message: 'Usuario desactivado correctamente' };
@@ -1248,10 +1087,7 @@ export class UsersService {
       .where('id = :id AND activo = false', { id })
       .execute();
     if (!result.affected) {
-      const exists = await this.cuentaRepo.findOne({
-        where: { id },
-        select: ['id'],
-      });
+      const exists = await this.cuentaRepo.findOne({ where: { id }, select: ['id'] });
       if (!exists) throw new NotFoundException(`Cuenta ${id} no encontrada`);
       return { message: 'La cuenta ya estaba activa' };
     }
@@ -1269,21 +1105,12 @@ export class UsersService {
     });
     if (!cuenta) throw new NotFoundException(`Cuenta ${id} no encontrada`);
     const newHash = await bcrypt.hash(cuenta.numero_documento, 10);
-    await this.cuentaRepo.update(id, {
-      password_hash: newHash,
-      password_changed: false,
-    });
+    await this.cuentaRepo.update(id, { password_hash: newHash, password_changed: false });
     return { message: 'Contraseña reseteada al DNI correctamente' };
   }
 
   async updatePassword(id: string, newHash: string) {
-    await this.cuentaRepo.update(
-      { id },
-      {
-        password_hash: newHash,
-        password_changed: true,
-      },
-    );
+    await this.cuentaRepo.update({ id }, { password_hash: newHash, password_changed: true });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1306,14 +1133,8 @@ export class UsersService {
         .getOne(),
     ]);
 
-    if (!padre)
-      throw new NotFoundException(
-        `Padre con documento ${dto.padre_doc} no encontrado`,
-      );
-    if (!alumno)
-      throw new NotFoundException(
-        `Alumno con documento ${dto.alumno_doc} no encontrado`,
-      );
+    if (!padre) throw new NotFoundException(`Padre con documento ${dto.padre_doc} no encontrado`);
+    if (!alumno) throw new NotFoundException(`Alumno con documento ${dto.alumno_doc} no encontrado`);
 
     const [existing] = await this.dataSource.query(
       `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2`,
@@ -1332,23 +1153,16 @@ export class UsersService {
     };
   }
 
-  /**
-   * Últimos vínculos padre-alumno creados (panel "Vínculos recientes" del
-   * admin). Persistente — antes vivía solo en el state del componente y se
-   * perdía al recargar.
-   */
   async getRecentParentLinks(limit = 10) {
-    const rows = await this.dataSource.query<
-      Array<{
-        padre_id: string;
-        alumno_id: string;
-        created_at: Date;
-        padre_nombre: string;
-        padre_apellido: string;
-        alumno_nombre: string;
-        alumno_apellido: string;
-      }>
-    >(
+    const rows = await this.dataSource.query<Array<{
+      padre_id: string;
+      alumno_id: string;
+      created_at: Date;
+      padre_nombre: string;
+      padre_apellido: string;
+      alumno_nombre: string;
+      alumno_apellido: string;
+    }>>(
       `SELECT pa.padre_id, pa.alumno_id, pa.created_at,
               p.nombre  AS padre_nombre,  p.apellido_paterno AS padre_apellido,
               a.nombre  AS alumno_nombre, a.apellido_paterno AS alumno_apellido
@@ -1367,11 +1181,6 @@ export class UsersService {
     }));
   }
 
-  /**
-   * Padres vinculados a un alumno (mostrar en el perfil del alumno).
-   * Devuelve datos básicos sin email para no exponer PII innecesaria al
-   * docente o al propio alumno.
-   */
   async getPadresOfAlumno(alumnoId: string) {
     return this.dataSource.query(
       `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno,
@@ -1392,40 +1201,19 @@ export class UsersService {
   async findCuentaByCodigoAcceso(codigoAcceso: string) {
     return this.cuentaRepo
       .createQueryBuilder('c')
-      .select([
-        'c.id',
-        'c.rol',
-        'c.password_hash',
-        'c.codigo_acceso',
-        'c.password_changed',
-        'c.activo',
-      ])
-      .where('c.codigo_acceso = :codigo AND c.activo = true', {
-        codigo: codigoAcceso,
-      })
+      .select(['c.id', 'c.rol', 'c.password_hash', 'c.codigo_acceso', 'c.password_changed', 'c.activo'])
+      .where('c.codigo_acceso = :codigo AND c.activo = true', { codigo: codigoAcceso })
       .getOne();
   }
 
   async findCuentaByDocumento(tipo: string, numero: string) {
     return this.cuentaRepo
       .createQueryBuilder('c')
-      .select([
-        'c.id',
-        'c.rol',
-        'c.password_hash',
-        'c.tipo_documento',
-        'c.numero_documento',
-        'c.codigo_acceso',
-        'c.password_changed',
-        'c.activo',
-      ])
-      .where(
-        'c.tipo_documento = :tipo AND c.numero_documento = :numero AND c.activo = true',
-        {
-          tipo,
-          numero: numero.trim(),
-        },
-      )
+      .select(['c.id', 'c.rol', 'c.password_hash', 'c.tipo_documento', 'c.numero_documento', 'c.codigo_acceso', 'c.password_changed', 'c.activo'])
+      .where('c.tipo_documento = :tipo AND c.numero_documento = :numero AND c.activo = true', {
+        tipo,
+        numero: numero.trim(),
+      })
       .getOne();
   }
 
@@ -1446,23 +1234,14 @@ export class UsersService {
 
   async getProfileById(id: string, rol: string) {
     switch (rol) {
-      case 'alumno':
-        return this.findAlumnoById(id);
-      case 'docente':
-        return this.findDocenteById(id);
-      case 'padre':
-        return this.findPadreById(id);
-      case 'admin':
-        return this.findAdminById(id);
-      case 'psicologa':
-        return this.findPsicologaById(id);
-      case 'auxiliar':
-        return this.findAuxiliarById(id);
+      case 'alumno': return this.findAlumnoById(id);
+      case 'docente': return this.findDocenteById(id);
+      case 'padre': return this.findPadreById(id);
+      case 'admin': return this.findAdminById(id);
+      case 'psicologa': return this.findPsicologaById(id);
+      case 'staff': return this.findStaffById(id);
       default:
-        return this.cuentaRepo.findOne({
-          where: { id },
-          select: ['id', 'rol', 'activo'],
-        });
+        return this.cuentaRepo.findOne({ where: { id }, select: ['id', 'rol', 'activo'] });
     }
   }
 
@@ -1481,8 +1260,6 @@ export class UsersService {
       for (const k of PROFILE_FIELDS) {
         if (dto[k] !== undefined) profileData[k] = dto[k] || null;
       }
-      // Solo alumnos tienen `inclusivo`; aceptamos el flag en el DTO común
-      // y lo aplicamos exclusivamente cuando el target es un alumno.
       if (rol === 'alumno' && typeof dto.inclusivo === 'boolean') {
         profileData['inclusivo'] = dto.inclusivo;
       }
@@ -1493,8 +1270,7 @@ export class UsersService {
 
       if (!isSelf && (dto.tipo_documento || dto.numero_documento)) {
         const cuentaUpd: Record<string, any> = {};
-        if (dto.tipo_documento)
-          cuentaUpd['tipo_documento'] = dto.tipo_documento;
+        if (dto.tipo_documento) cuentaUpd['tipo_documento'] = dto.tipo_documento;
         if (dto.numero_documento) {
           const dni = dto.numero_documento.trim();
           const conflict = await em.getRepository(Cuenta).findOne({
@@ -1502,9 +1278,7 @@ export class UsersService {
             select: ['id'],
           });
           if (conflict && conflict.id !== id) {
-            throw new ConflictException(
-              `Ya existe un usuario con documento ${dni}`,
-            );
+            throw new ConflictException(`Ya existe un usuario con documento ${dni}`);
           }
           cuentaUpd['numero_documento'] = dni;
           cuentaUpd['codigo_acceso'] = this.buildCodigoAcceso(rol, dni);
@@ -1514,35 +1288,21 @@ export class UsersService {
 
       if (dto.new_password) {
         if (dto.new_password.length < 8) {
-          throw new BadRequestException(
-            'La contraseña debe tener al menos 8 caracteres',
-          );
+          throw new BadRequestException('La contraseña debe tener al menos 8 caracteres');
         }
         if (isSelf) {
           if (!dto.current_password) {
-            throw new BadRequestException(
-              'Debes ingresar tu contraseña actual para cambiarla',
-            );
+            throw new BadRequestException('Debes ingresar tu contraseña actual para cambiarla');
           }
           const cuenta = await em.getRepository(Cuenta).findOne({
             where: { id },
             select: ['id', 'password_hash'],
           });
           if (!cuenta) throw new NotFoundException('Cuenta no encontrada');
-          const ok = await bcrypt.compare(
-            dto.current_password,
-            cuenta.password_hash,
-          );
-          if (!ok)
-            throw new BadRequestException('La contraseña actual es incorrecta');
-          const isSame = await bcrypt.compare(
-            dto.new_password,
-            cuenta.password_hash,
-          );
-          if (isSame)
-            throw new BadRequestException(
-              'La nueva contraseña no puede ser igual a la actual',
-            );
+          const ok = await bcrypt.compare(dto.current_password, cuenta.password_hash);
+          if (!ok) throw new BadRequestException('La contraseña actual es incorrecta');
+          const isSame = await bcrypt.compare(dto.new_password, cuenta.password_hash);
+          if (isSame) throw new BadRequestException('La nueva contraseña no puede ser igual a la actual');
         }
         const newHash = await bcrypt.hash(dto.new_password, 10);
         await em.getRepository(Cuenta).update(id, {
@@ -1593,10 +1353,7 @@ export class UsersService {
   private async getFotoKey(id: string, rol: string): Promise<string | null> {
     const repo = this.repoByRol(rol);
     if (!repo) return null;
-    const r = await repo.findOne({
-      where: { id },
-      select: ['foto_storage_key'],
-    });
+    const r = await repo.findOne({ where: { id }, select: ['foto_storage_key'] });
     return r?.foto_storage_key ?? null;
   }
 
@@ -1610,44 +1367,22 @@ export class UsersService {
       try {
         let result: any;
         switch (rol) {
-          case 'alumno':
-            result = await this.createAlumno(dto);
-            break;
-          case 'docente':
-            result = await this.createDocente(dto);
-            break;
-          case 'padre':
-            result = await this.createPadre(dto);
-            break;
-          case 'admin':
-            result = await this.createAdmin(dto);
-            break;
-          case 'psicologa':
-            result = await this.createPsicologa(dto);
-            break;
-          case 'auxiliar':
-            result = await this.createAuxiliar(dto);
-            break;
+          case 'alumno': result = await this.createAlumno(dto); break;
+          case 'docente': result = await this.createDocente(dto); break;
+          case 'padre': result = await this.createPadre(dto); break;
+          case 'admin': result = await this.createAdmin(dto); break;
+          case 'psicologa': result = await this.createPsicologa(dto); break;
+          case 'staff': result = await this.createStaff(dto); break;
         }
-        results.push({
-          ok: true,
-          numero_documento: dto.numero_documento,
-          id: result?.id ?? null,
-        });
+        results.push({ ok: true, numero_documento: dto.numero_documento, id: result?.id ?? null });
       } catch (e: any) {
-        results.push({
-          ok: false,
-          numero_documento: dto.numero_documento,
-          error: e.message ?? 'Error desconocido',
-        });
+        results.push({ ok: false, numero_documento: dto.numero_documento, error: e.message ?? 'Error desconocido' });
       }
     }
     return results;
   }
 
   async findCuentaByNumeroDocumento(numero_documento: string) {
-    return this.cuentaRepo.findOne({
-      where: { numero_documento: numero_documento.trim() },
-    });
+    return this.cuentaRepo.findOne({ where: { numero_documento: numero_documento.trim() } });
   }
 }

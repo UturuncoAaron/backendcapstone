@@ -6,12 +6,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, Between } from 'typeorm';
 import { AttendanceGeneral } from './entities/attendance-general.entity.js';
 import { AttendanceClass } from './entities/attendance-class.entity.js';
-import { AttendanceDocente } from './entities/attendance-docente.entity.js';
 import type { EstadoAsistencia } from './entities/attendance-general.entity.js';
 import {
     RegisterAsistenciaDto, BulkAsistenciaDto, UpdateAsistenciaDto,
     ListAsistenciasQueryDto, ReporteAsistenciaQueryDto, ScanQrDto,
-
 } from './dto/asistencia.dto.js';
 import { QrService } from '../qr/qr.service.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
@@ -28,15 +26,9 @@ export class AssistsService {
         private readonly generalRepo: Repository<AttendanceGeneral>,
         @InjectRepository(AttendanceClass)
         private readonly classRepo: Repository<AttendanceClass>,
-        @InjectRepository(AttendanceDocente)
-        private readonly docenteRepo: Repository<AttendanceDocente>,
         private readonly dataSource: DataSource,
         private readonly qrService: QrService,
     ) { }
-
-    // ════════════════════════════════════════════════════════════
-    // HELPERS
-    // ════════════════════════════════════════════════════════════
 
     private requireAuth(user: AuthUser | undefined): asserts user is AuthUser {
         if (!user?.id) throw new UnauthorizedException('Usuario no autenticado');
@@ -55,7 +47,6 @@ export class AssistsService {
         }
     }
 
-    // 2. El método completo resolvePeriodoId
     private async resolvePeriodoId(fecha: string, periodoIdOpcional?: string): Promise<string> {
         if (periodoIdOpcional) return periodoIdOpcional;
 
@@ -69,8 +60,8 @@ export class AssistsService {
 
         const rows = await this.dataSource.query<{ id: string; fecha_inicio: string; fecha_fin: string }[]>(
             `SELECT id, fecha_inicio::text, fecha_fin::text FROM periodos
-         WHERE $1::date BETWEEN fecha_inicio AND fecha_fin
-         LIMIT 1`,
+             WHERE $1::date BETWEEN fecha_inicio AND fecha_fin
+             LIMIT 1`,
             [fecha],
         );
 
@@ -86,7 +77,6 @@ export class AssistsService {
             fecha_inicio: rows[0].fecha_inicio,
             fecha_fin: rows[0].fecha_fin,
         };
-        this.logger.log(`Cache período → id=${rows[0].id} [${rows[0].fecha_inicio} → ${rows[0].fecha_fin}]`);
         return rows[0].id;
     }
 
@@ -109,12 +99,8 @@ export class AssistsService {
         const rows = await this.dataSource.query<{ ok: number }[]>(
             `SELECT 1 AS ok
              FROM cursos c
-             JOIN matriculas m
-               ON m.seccion_id = c.seccion_id
-              AND m.anio = c.anio
-             WHERE c.id = $1
-               AND m.alumno_id = $2
-               AND m.activo = TRUE
+             JOIN matriculas m ON m.seccion_id = c.seccion_id AND m.anio = c.anio
+             WHERE c.id = $1 AND m.alumno_id = $2 AND m.activo = TRUE
              LIMIT 1`,
             [cursoId, alumnoId],
         );
@@ -123,10 +109,6 @@ export class AssistsService {
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────
-    // CORRECCIÓN: Uso estricto de QueryBuilder para evitar bugs 
-    // de serialización de arrays con ANY($2::uuid[]) en Postgres
-    // ─────────────────────────────────────────────────────────────────
     private async filtrarAlumnosEnSeccion(
         alumnoIds: string[], seccionId: string, fecha: string,
     ): Promise<{ validos: string[]; invalidos: string[] }> {
@@ -154,49 +136,27 @@ export class AssistsService {
     ): Promise<{ validos: string[]; invalidos: string[] }> {
         if (!alumnoIds.length) return { validos: [], invalidos: [] };
 
-        // 1. Obtener datos del curso
         const cursoInfo = await this.dataSource.query<{ seccion_id: string; anio: number }[]>(
             `SELECT seccion_id, anio FROM cursos WHERE id = $1 AND activo = TRUE LIMIT 1`,
-            [cursoId]
+            [cursoId],
         );
 
-        if (!cursoInfo.length) {
-            this.logger.error(`[DEBUG] El curso ${cursoId} NO existe o tiene activo = FALSE`);
-            return { validos: [], invalidos: alumnoIds };
-        }
+        if (!cursoInfo.length) return { validos: [], invalidos: alumnoIds };
 
         const { seccion_id, anio } = cursoInfo[0];
 
-        // --- LOG CLAVE 1 ---
-        this.logger.warn(`[DEBUG-1] Evaluando Curso -> seccion_id: ${seccion_id} | anio: ${anio}`);
-        this.logger.warn(`[DEBUG-2] Alumnos a evaluar: ${alumnoIds.length}`);
-
-        // 2. Consulta RAW a prueba de balas para Postgres
         const found = await this.dataSource.query<{ alumno_id: string }[]>(
-            `SELECT alumno_id 
-             FROM matriculas 
-             WHERE seccion_id = $1 
-               AND anio = $2 
-               AND activo = TRUE 
-               AND alumno_id = ANY($3::uuid[])`,
-            [seccion_id, anio, alumnoIds]
+            `SELECT alumno_id FROM matriculas
+             WHERE seccion_id = $1 AND anio = $2 AND activo = TRUE AND alumno_id = ANY($3::uuid[])`,
+            [seccion_id, anio, alumnoIds],
         );
 
-        // --- LOG CLAVE 3 ---
-        this.logger.warn(`[DEBUG-3] Matrículas válidas encontradas: ${found.length}`);
-
-        if (found.length === 0) {
-            this.logger.error(`[DEBUG-4] ¡Atención! Ningún alumno coincidió. Verifica si en la tabla 'matriculas' existe el anio=${anio} y seccion_id=${seccion_id} para estos alumnos.`);
-        }
-
         const validosSet = new Set(found.map(r => String(r.alumno_id).toLowerCase()));
-
         return {
             validos: alumnoIds.filter(id => validosSet.has(String(id).toLowerCase())),
             invalidos: alumnoIds.filter(id => !validosSet.has(String(id).toLowerCase())),
         };
     }
-    // ─────────────────────────────────────────────────────────────────
 
     private mapAlumnoScan(info: {
         alumno_id: string;
@@ -219,12 +179,8 @@ export class AssistsService {
         };
     }
 
-    // ════════════════════════════════════════════════════════════
-    // ASISTENCIA GENERAL
-    // ════════════════════════════════════════════════════════════
-
     private async assertTutorDeSeccion(seccionId: string, user: AuthUser) {
-        if (user.rol === 'admin' || user.rol === 'auxiliar') {
+        if (user.rol === 'admin' || user.rol === 'staff') {
             const rows = await this.dataSource.query<{ activo: boolean }[]>(
                 `SELECT activo FROM secciones WHERE id = $1`, [seccionId],
             );
@@ -233,17 +189,16 @@ export class AssistsService {
             return;
         }
         if (user.rol !== 'docente') {
-            throw new ForbiddenException('Solo docente-tutor, auxiliar o admin pueden registrar asistencia general');
+            throw new ForbiddenException('Solo docente-tutor, staff o admin pueden registrar asistencia general');
         }
 
-        // Buscar tutor en secciones_tutores para el año activo
         const anio = await this.getAnioActual();
         const rows = await this.dataSource.query<{ activo: boolean; docente_id: string | null }[]>(
             `SELECT s.activo, st.docente_id
-         FROM secciones s
-         LEFT JOIN secciones_tutores st
-           ON st.seccion_id = s.id AND st.anio = $2 AND st.activo = TRUE
-         WHERE s.id = $1`,
+             FROM secciones s
+             LEFT JOIN secciones_tutores st
+               ON st.seccion_id = s.id AND st.anio = $2 AND st.activo = TRUE
+             WHERE s.id = $1`,
             [seccionId, anio],
         );
         if (!rows[0]) throw new NotFoundException(`Sección ${seccionId} no encontrada`);
@@ -252,6 +207,7 @@ export class AssistsService {
             throw new ForbiddenException('Solo el tutor de la sección puede registrar asistencia general');
         }
     }
+
     async generalBulk(seccionId: string, dto: BulkAsistenciaDto, user: AuthUser) {
         this.requireAuth(user);
         await this.assertTutorDeSeccion(seccionId, user);
@@ -260,19 +216,13 @@ export class AssistsService {
         const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
         const alumnoIds = dto.alumnos.map(a => a.alumno_id);
 
-        const { validos, invalidos } = await this.filtrarAlumnosEnSeccion(
-            alumnoIds, seccionId, dto.fecha,
-        );
+        const { validos, invalidos } = await this.filtrarAlumnosEnSeccion(alumnoIds, seccionId, dto.fecha);
 
         if (invalidos.length) {
-            this.logger.warn(
-                `Bulk general: omitiendo ${invalidos.length} alumnos sin matrícula | sec ${seccionId}`,
-            );
+            this.logger.warn(`Bulk general: omitiendo ${invalidos.length} alumnos sin matrícula | sec ${seccionId}`);
         }
         if (!validos.length) {
-            throw new BadRequestException(
-                'Ningún alumno está matriculado en esta sección para el año actual.',
-            );
+            throw new BadRequestException('Ningún alumno está matriculado en esta sección para el año actual.');
         }
 
         const validosSet = new Set(validos);
@@ -289,10 +239,6 @@ export class AssistsService {
             }));
 
         await this.generalRepo.upsert(records, ['alumno_id', 'seccion_id', 'fecha']);
-
-        this.logger.log(
-            `Asist. general bulk: ${records.length} alumnos | sec ${seccionId} | ${dto.fecha}`,
-        );
         return { registrados: records.length, omitidos: invalidos.length };
     }
 
@@ -302,9 +248,7 @@ export class AssistsService {
         const verified = this.qrService.verifyAttendanceToken(dto.qr_token);
         if (!verified) throw new BadRequestException('QR inválido o no reconocido');
 
-        const fecha = dto.fecha ?? new Date().toLocaleDateString('en-CA', {
-            timeZone: 'America/Lima',
-        });
+        const fecha = dto.fecha ?? new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
         const anio = new Date(fecha + 'T12:00:00').getFullYear();
         const periodo_id = await this.resolvePeriodoId(fecha);
 
@@ -318,31 +262,18 @@ export class AssistsService {
             seccion_id: string;
             seccion_nombre: string;
         }[]>(
-            `SELECT
-                al.id              AS alumno_id,
-                al.nombre,
-                al.apellido_paterno,
-                al.apellido_materno,
-                al.codigo_estudiante,
-                al.foto_storage_key AS foto_url,
-                s.id               AS seccion_id,
-                s.nombre           AS seccion_nombre
+            `SELECT al.id AS alumno_id, al.nombre, al.apellido_paterno, al.apellido_materno,
+                    al.codigo_estudiante, al.foto_storage_key AS foto_url,
+                    s.id AS seccion_id, s.nombre AS seccion_nombre
              FROM alumnos al
-             JOIN matriculas m ON m.alumno_id = al.id
-                              AND m.anio = $2
-                              AND m.activo = TRUE
+             JOIN matriculas m ON m.alumno_id = al.id AND m.anio = $2 AND m.activo = TRUE
              JOIN secciones s ON s.id = m.seccion_id
-             WHERE al.id = $1
-             LIMIT 1`,
+             WHERE al.id = $1 LIMIT 1`,
             [verified.alumnoId, anio],
         );
 
         const info = rows[0];
-        if (!info) {
-            throw new NotFoundException(
-                'Alumno no encontrado o sin matrícula activa para el año actual',
-            );
-        }
+        if (!info) throw new NotFoundException('Alumno no encontrado o sin matrícula activa');
 
         await this.assertTutorDeSeccion(info.seccion_id, user);
 
@@ -351,20 +282,13 @@ export class AssistsService {
         });
 
         if (existing) {
-            return {
-                duplicate: true,
-                attendance: existing,
-                alumno: this.mapAlumnoScan(info),
-            };
+            return { duplicate: true, attendance: existing, alumno: this.mapAlumnoScan(info) };
         }
 
         const horaLima = new Date().toLocaleTimeString('en-GB', {
-            timeZone: 'America/Lima',
-            hour: '2-digit',
-            minute: '2-digit',
+            timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit',
         });
-        const estado: EstadoAsistencia =
-            horaLima <= this.HORA_LIMITE_ENTRADA ? 'asistio' : 'tardanza';
+        const estado: EstadoAsistencia = horaLima <= this.HORA_LIMITE_ENTRADA ? 'asistio' : 'tardanza';
 
         const record = {
             alumno_id: info.alumno_id,
@@ -377,16 +301,7 @@ export class AssistsService {
         };
 
         await this.generalRepo.upsert(record, ['alumno_id', 'seccion_id', 'fecha']);
-
-        this.logger.log(
-            `Scan QR ✓ alumno=${info.alumno_id} sec=${info.seccion_id} estado=${estado} hora=${horaLima}`,
-        );
-
-        return {
-            duplicate: false,
-            attendance: record,
-            alumno: this.mapAlumnoScan(info),
-        };
+        return { duplicate: false, attendance: record, alumno: this.mapAlumnoScan(info) };
     }
 
     async generalListBySeccion(seccionId: string, q: ListAsistenciasQueryDto) {
@@ -441,10 +356,6 @@ export class AssistsService {
         return { ok: true };
     }
 
-    // ════════════════════════════════════════════════════════════
-    // ASISTENCIA POR CURSO
-    // ════════════════════════════════════════════════════════════
-
     async classRegister(cursoId: string, dto: RegisterAsistenciaDto, user: AuthUser) {
         this.requireAuth(user);
         await this.assertDocenteDelCurso(cursoId, user);
@@ -495,8 +406,6 @@ export class AssistsService {
             }));
 
         await this.classRepo.upsert(records, ['alumno_id', 'curso_id', 'fecha']);
-
-        this.logger.log(`Asist. curso bulk: ${records.length} alumnos | curso ${cursoId} | ${dto.fecha}`);
         return { registrados: records.length, omitidos: invalidos.length };
     }
 
@@ -512,7 +421,7 @@ export class AssistsService {
         }
         const where: any = { curso_id: cursoId };
         if (q.desde && q.hasta) where.fecha = Between(q.desde, q.hasta);
-        if (q.periodo_id) where.periodo_id = q.periodo_id;   // ← agregar
+        if (q.periodo_id) where.periodo_id = q.periodo_id;
         return this.classRepo.find({
             where,
             relations: ['alumno'],
@@ -521,6 +430,7 @@ export class AssistsService {
             skip: q.offset ?? 0,
         });
     }
+
     async classListByAlumno(alumnoId: string, q: ListAsistenciasQueryDto & { cursoId?: string }) {
         const qb = this.classRepo.createQueryBuilder('a')
             .leftJoinAndSelect('a.curso', 'c')
@@ -552,75 +462,48 @@ export class AssistsService {
         await this.classRepo.remove(a);
         return { ok: true };
     }
-    // ════════════════════════════════════════════════════════════
-    // REPORTE
-    // ════════════════════════════════════════════════════════════
 
     async reporte(q: ReporteAsistenciaQueryDto) {
-        if (!q.seccion_id && !q.curso_id) {
-            throw new BadRequestException('Envía seccion_id o curso_id');
-        }
-        if (q.seccion_id && q.curso_id) {
-            throw new BadRequestException('Envía solo uno: seccion_id o curso_id, no ambos');
-        }
+        if (!q.seccion_id && !q.curso_id) throw new BadRequestException('Envía seccion_id o curso_id');
+        if (q.seccion_id && q.curso_id) throw new BadRequestException('Envía solo uno: seccion_id o curso_id');
 
         if (q.seccion_id) {
             return this.dataSource.query(
-                `SELECT
-                    a.alumno_id,
-                    al.codigo_estudiante,
-                    al.apellido_paterno,
-                    al.apellido_materno,
-                    al.nombre,
-                    SUM(CASE WHEN a.estado = 'asistio'     THEN 1 ELSE 0 END) AS asistio,
-                    SUM(CASE WHEN a.estado = 'falta'       THEN 1 ELSE 0 END) AS falta,
-                    SUM(CASE WHEN a.estado = 'tardanza'    THEN 1 ELSE 0 END) AS tardanza,
-                    SUM(CASE WHEN a.estado = 'justificado' THEN 1 ELSE 0 END) AS justificado,
-                    COUNT(*) AS total_dias,
-                    ROUND(
-                        100.0 * SUM(CASE WHEN a.estado IN ('asistio','tardanza','justificado') THEN 1 ELSE 0 END)
-                        / NULLIF(COUNT(*), 0), 2
-                    ) AS pct_asistencia
+                `SELECT a.alumno_id, al.codigo_estudiante,
+                        al.apellido_paterno, al.apellido_materno, al.nombre,
+                        SUM(CASE WHEN a.estado = 'asistio'     THEN 1 ELSE 0 END) AS asistio,
+                        SUM(CASE WHEN a.estado = 'falta'       THEN 1 ELSE 0 END) AS falta,
+                        SUM(CASE WHEN a.estado = 'tardanza'    THEN 1 ELSE 0 END) AS tardanza,
+                        SUM(CASE WHEN a.estado = 'justificado' THEN 1 ELSE 0 END) AS justificado,
+                        COUNT(*) AS total_dias,
+                        ROUND(100.0 * SUM(CASE WHEN a.estado IN ('asistio','tardanza','justificado') THEN 1 ELSE 0 END)
+                            / NULLIF(COUNT(*), 0), 2) AS pct_asistencia
                  FROM asistencias_generales a
                  JOIN alumnos al ON al.id = a.alumno_id
                  WHERE a.seccion_id = $1 AND a.periodo_id = $2
-                 GROUP BY a.alumno_id, al.codigo_estudiante,
-                          al.apellido_paterno, al.apellido_materno, al.nombre
+                 GROUP BY a.alumno_id, al.codigo_estudiante, al.apellido_paterno, al.apellido_materno, al.nombre
                  ORDER BY al.apellido_paterno, al.apellido_materno, al.nombre`,
                 [q.seccion_id, q.periodo_id],
             );
         }
 
         return this.dataSource.query(
-            `SELECT
-                a.alumno_id,
-                al.codigo_estudiante,
-                al.apellido_paterno,
-                al.apellido_materno,
-                al.nombre,
-                SUM(CASE WHEN a.estado = 'asistio'     THEN 1 ELSE 0 END) AS asistio,
-                SUM(CASE WHEN a.estado = 'falta'       THEN 1 ELSE 0 END) AS falta,
-                SUM(CASE WHEN a.estado = 'tardanza'    THEN 1 ELSE 0 END) AS tardanza,
-                SUM(CASE WHEN a.estado = 'justificado' THEN 1 ELSE 0 END) AS justificado,
-                COUNT(*) AS total_clases,
-                ROUND(
-                    100.0 * SUM(CASE WHEN a.estado IN ('asistio','tardanza','justificado') THEN 1 ELSE 0 END)
-                    / NULLIF(COUNT(*), 0), 2
-                ) AS pct_asistencia
+            `SELECT a.alumno_id, al.codigo_estudiante,
+                    al.apellido_paterno, al.apellido_materno, al.nombre,
+                    SUM(CASE WHEN a.estado = 'asistio'     THEN 1 ELSE 0 END) AS asistio,
+                    SUM(CASE WHEN a.estado = 'falta'       THEN 1 ELSE 0 END) AS falta,
+                    SUM(CASE WHEN a.estado = 'tardanza'    THEN 1 ELSE 0 END) AS tardanza,
+                    SUM(CASE WHEN a.estado = 'justificado' THEN 1 ELSE 0 END) AS justificado,
+                    COUNT(*) AS total_clases,
+                    ROUND(100.0 * SUM(CASE WHEN a.estado IN ('asistio','tardanza','justificado') THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(*), 0), 2) AS pct_asistencia
              FROM asistencias_curso a
              JOIN alumnos al ON al.id = a.alumno_id
              WHERE a.curso_id = $1 AND a.periodo_id = $2
-             GROUP BY a.alumno_id, al.codigo_estudiante,
-                      al.apellido_paterno, al.apellido_materno, al.nombre
+             GROUP BY a.alumno_id, al.codigo_estudiante, al.apellido_paterno, al.apellido_materno, al.nombre
              ORDER BY al.apellido_paterno, al.apellido_materno, al.nombre`,
             [q.curso_id, q.periodo_id],
         );
-    }
-    private async getAnioActual(): Promise<number> {
-        const [row] = await this.dataSource.query<{ anio: number }[]>(
-            `SELECT anio FROM anios_lectivos WHERE estado = 'en_curso' LIMIT 1`,
-        );
-        return row?.anio ?? new Date().getFullYear();
     }
 
     async generalRegister(seccionId: string, dto: RegisterAsistenciaDto, user: AuthUser) {
@@ -640,5 +523,12 @@ export class AssistsService {
         };
         await this.generalRepo.upsert(record, ['alumno_id', 'seccion_id', 'fecha']);
         return record;
+    }
+
+    private async getAnioActual(): Promise<number> {
+        const [row] = await this.dataSource.query<{ anio: number }[]>(
+            `SELECT anio FROM anios_lectivos WHERE estado = 'en_curso' LIMIT 1`,
+        );
+        return row?.anio ?? new Date().getFullYear();
     }
 }

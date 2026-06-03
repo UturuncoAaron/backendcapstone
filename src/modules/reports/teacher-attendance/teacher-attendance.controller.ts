@@ -14,25 +14,12 @@ import {
 } from '../dto/teacher-attendance.dto.js';
 import { workbookToBuffer, buildFilename } from '../excel/excel.helper.js';
 
-// ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
-    navy: '1E3A5F',
-    darkBlue: '1E3A8A',
-    white: 'FFFFFF',
-    paleBlue: 'EFF6FF',
-    gray900: '0F172A',
-    green: '166534',
-    amber: '92400E',
-    red: '991B1B',
-    blue: '1E40AF',
-    teal: '0F766E',
-    totalBg: 'E2E8F0',
-    dateBg: 'DBEAFE',
-    dateFont: '1E3A8A',
-    matrizP: 'D1FAE5',   // verde claro — Presente
-    matrizT: 'FEF3C7',   // ámbar claro — Tardanza
-    matrizF: 'FEE2E2',   // rojo claro  — Falta
-    matrizJ: 'DBEAFE',   // azul claro  — Justificado
+    navy: '1E3A5F', darkBlue: '1E3A8A', white: 'FFFFFF', paleBlue: 'EFF6FF',
+    gray900: '0F172A', green: '166534', amber: '92400E', red: '991B1B',
+    blue: '1E40AF', teal: '0F766E', totalBg: 'E2E8F0', dateBg: 'DBEAFE',
+    dateFont: '1E3A8A', matrizP: 'D1FAE5', matrizT: 'FEF3C7',
+    matrizF: 'FEE2E2', matrizJ: 'DBEAFE',
 };
 
 const HEADER_FILL: ExcelJS.FillPattern = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.navy } };
@@ -95,16 +82,9 @@ function addDataRow(ws: ExcelJS.Worksheet, row: ExcelRow, stripeIdx: number): vo
     const estado = String(row['estado'] ?? '');
     const motivo = estado === 'justificado' ? (row['motivo_justificacion'] ?? '') : '';
     const dataRow = ws.addRow([
-        buildNombre(row),
-        row['grado_nombre'] ?? '',
-        row['seccion_nombre'] ?? '',
-        row['curso_nombre'] ?? '',
-        row['hora_inicio'] ?? '',
-        row['hora_fin'] ?? '',
-        estado,
-        row['hora_llegada'] ?? '',
-        row['hora_salida'] ?? '',
-        motivo,
+        buildNombre(row), row['grado_nombre'] ?? '', row['seccion_nombre'] ?? '',
+        row['curso_nombre'] ?? '', row['hora_inicio'] ?? '', row['hora_fin'] ?? '',
+        estado, row['hora_llegada'] ?? '', row['hora_salida'] ?? '', motivo,
     ]);
     dataRow.height = 18;
     dataRow.eachCell(cell => { cell.font = DATA_FONT; cell.alignment = { vertical: 'middle' }; });
@@ -118,10 +98,8 @@ const DETALLE_LABELS = [
 ];
 const DETALLE_WIDTHS = [28, 22, 10, 22, 12, 12, 14, 13, 13, 30];
 
-// ── Hoja detalle — un solo día ────────────────────────────────────────────────
 function buildSheetDetalle(wb: ExcelJS.Workbook, rows: ExcelRow[], fecha: string): void {
     const ws = wb.addWorksheet('Detalle del día', { properties: { tabColor: { argb: C.darkBlue } } });
-
     ws.mergeCells('A1:J1');
     const title = ws.getCell('A1');
     title.value = `Asistencia de Docentes — ${fecha}`;
@@ -130,18 +108,14 @@ function buildSheetDetalle(wb: ExcelJS.Workbook, rows: ExcelRow[], fecha: string
     title.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 28;
     ws.addRow([]);
-
     addHeaderRow(ws, DETALLE_LABELS);
     rows.forEach((row, idx) => addDataRow(ws, row, idx));
-
     DETALLE_WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
     ws.views = [{ state: 'frozen', ySplit: 3 }];
 }
 
-// ── Hoja detalle — rango de fechas con separador por día ─────────────────────
 function buildSheetDetalleRango(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: string, fechaFin: string): void {
     const ws = wb.addWorksheet('Detalle por fecha', { properties: { tabColor: { argb: C.darkBlue } } });
-
     const rango = fechaInicio === fechaFin ? fechaInicio : `${fechaInicio} al ${fechaFin}`;
     ws.mergeCells('A1:J1');
     const title = ws.getCell('A1');
@@ -151,7 +125,6 @@ function buildSheetDetalleRango(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaIni
     title.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 28;
     ws.addRow([]);
-
     addHeaderRow(ws, DETALLE_LABELS);
 
     const porFecha = new Map<string, ExcelRow[]>();
@@ -166,24 +139,16 @@ function buildSheetDetalleRango(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaIni
         const dateRow = ws.addRow([formatFechaLabel(fecha)]);
         ws.mergeCells(`A${dateRow.number}:J${dateRow.number}`);
         dateRow.height = 18;
-        dateRow.eachCell(cell => {
-            cell.font = DATE_FONT;
-            cell.fill = DATE_FILL;
-            cell.alignment = { vertical: 'middle' };
-        });
-        for (const row of rowsDelDia) {
-            addDataRow(ws, row, stripeIdx++);
-        }
+        dateRow.eachCell(cell => { cell.font = DATE_FONT; cell.fill = DATE_FILL; cell.alignment = { vertical: 'middle' }; });
+        for (const row of rowsDelDia) addDataRow(ws, row, stripeIdx++);
     }
 
     DETALLE_WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
     ws.views = [{ state: 'frozen', ySplit: 3 }];
 }
 
-// ── Hoja resumen por docente ──────────────────────────────────────────────────
 function buildSheetResumen(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: string, fechaFin: string): void {
     const ws = wb.addWorksheet('Resumen por docente', { properties: { tabColor: { argb: C.green } } });
-
     const rango = fechaInicio === fechaFin ? fechaInicio : `${fechaInicio} al ${fechaFin}`;
     ws.mergeCells('A1:G1');
     const title = ws.getCell('A1');
@@ -195,12 +160,8 @@ function buildSheetResumen(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: 
     ws.addRow([]);
 
     const headers: Record<string, string> = {
-        docente_completo: 'Docente',
-        presentes: 'Presentes',
-        tardanzas: 'Tardanzas',
-        faltos: 'Faltas',
-        justificados: 'Justificados',
-        sin_registro: 'Sin registro',
+        docente_completo: 'Docente', presentes: 'Presentes', tardanzas: 'Tardanzas',
+        faltos: 'Faltas', justificados: 'Justificados', sin_registro: 'Sin registro',
         porcentaje_asistencia: '% Asistencia',
     };
     const keys = Object.keys(headers);
@@ -209,8 +170,7 @@ function buildSheetResumen(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: 
     const headerRow = ws.addRow(Object.values(headers));
     headerRow.height = 22;
     headerRow.eachCell(cell => {
-        cell.font = HEADER_FONT;
-        cell.fill = HEADER_FILL;
+        cell.font = HEADER_FONT; cell.fill = HEADER_FILL;
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
         cell.border = { bottom: { style: 'thin', color: { argb: C.darkBlue } } };
     });
@@ -253,8 +213,7 @@ function buildSheetResumen(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: 
         ]);
         totalRow.height = 20;
         totalRow.eachCell((cell, colNum) => {
-            cell.font = TOTAL_FONT;
-            cell.fill = TOTAL_FILL;
+            cell.font = TOTAL_FONT; cell.fill = TOTAL_FILL;
             cell.border = { top: { style: 'medium', color: { argb: C.navy } } };
             cell.alignment = { vertical: 'middle', horizontal: numCols.includes(keys[colNum - 1]) ? 'center' : 'left' };
         });
@@ -269,25 +228,19 @@ function buildSheetResumen(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: 
     ws.views = [{ state: 'frozen', ySplit: 3 }];
 }
 
-// ── Hoja Matriz: docentes × días, celdas P/T/F/J ────────────────────────────
-// Solo se incluye en el endpoint /resumen (rango), nunca en /diario
 function buildSheetMatriz(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: string, fechaFin: string): void {
     const ws = wb.addWorksheet('Matriz', { properties: { tabColor: { argb: C.teal } } });
 
-    // Recopilar fechas únicas en orden
     const fechasSet = new Set<string>();
     for (const r of rows) if (r['fecha']) fechasSet.add(String(r['fecha']));
     const fechas = [...fechasSet].sort();
 
-    // Recopilar docentes únicos (uno por nombre completo)
-    const docentesMap = new Map<string, string>(); // docente_id → nombre completo
+    const docentesMap = new Map<string, string>();
     for (const r of rows) {
         const id = String(r['docente_id'] ?? '');
         if (!docentesMap.has(id)) docentesMap.set(id, buildNombre(r));
     }
 
-    // Pivot: docente_id → fecha → estado dominante del día
-    // (si hay varias filas del mismo docente en el mismo día, priorizamos: falto > tardanza > justificado > presente)
     const prioridad: Record<string, number> = { falto: 4, justificado: 3, tardanza: 2, presente: 1, 'sin-registro': 0 };
     const pivot = new Map<string, Map<string, string>>();
     for (const r of rows) {
@@ -296,13 +249,10 @@ function buildSheetMatriz(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: s
         const estado = String(r['estado'] ?? 'sin-registro');
         if (!pivot.has(did)) pivot.set(did, new Map());
         const actual = pivot.get(did)!.get(fecha) ?? 'sin-registro';
-        if ((prioridad[estado] ?? 0) > (prioridad[actual] ?? 0)) {
-            pivot.get(did)!.set(fecha, estado);
-        }
+        if ((prioridad[estado] ?? 0) > (prioridad[actual] ?? 0)) pivot.get(did)!.set(fecha, estado);
     }
 
-    // ── Título ────────────────────────────────────────────────────────────
-    const totalCols = 1 + fechas.length + 1; // Docente + días + Resumen
+    const totalCols = 1 + fechas.length + 1;
     ws.mergeCells(1, 1, 1, totalCols);
     const titleCell = ws.getCell(1, 1);
     const rango = fechaInicio === fechaFin ? fechaInicio : `${fechaInicio} al ${fechaFin}`;
@@ -312,7 +262,6 @@ function buildSheetMatriz(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: s
     titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(1).height = 28;
 
-    // ── Leyenda ───────────────────────────────────────────────────────────
     ws.addRow([]);
     const leyendaRow = ws.addRow(['Leyenda:', 'P = Presente', 'T = Tardanza', 'F = Falta', 'J = Justificado', '— = Sin registro']);
     leyendaRow.height = 16;
@@ -323,24 +272,20 @@ function buildSheetMatriz(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: s
     leyendaRow.getCell(5).font = { size: 9, color: { argb: C.blue }, name: 'Calibri' };
     leyendaRow.getCell(6).font = { size: 9, name: 'Calibri', color: { argb: C.gray900 } };
 
-    // ── Cabecera ──────────────────────────────────────────────────────────
     const headerVals = ['Docente', ...fechas.map(f => formatFechaCorta(f)), '% Asist.'];
     const headerRow = ws.addRow(headerVals);
     headerRow.height = 22;
     headerRow.eachCell(cell => {
-        cell.font = HEADER_FONT;
-        cell.fill = HEADER_FILL;
+        cell.font = HEADER_FONT; cell.fill = HEADER_FILL;
         cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: false };
         cell.border = { bottom: { style: 'thin', color: { argb: C.darkBlue } } };
     });
     headerRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
 
-    // ── Filas de docentes ─────────────────────────────────────────────────
     let rowIdx = 0;
     for (const [did, nombre] of docentesMap) {
         const estadosPorFecha = pivot.get(did) ?? new Map<string, string>();
-
-        let presentes = 0, tardanzas = 0, faltos = 0, justificados = 0, total = 0;
+        let presentes = 0, tardanzas = 0, total = 0;
         const celdas: Array<{ valor: string; estado: string }> = [];
 
         for (const f of fechas) {
@@ -348,20 +293,18 @@ function buildSheetMatriz(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: s
             let letra = '—';
             if (est === 'presente') { letra = 'P'; presentes++; total++; }
             else if (est === 'tardanza') { letra = 'T'; tardanzas++; total++; }
-            else if (est === 'falto') { letra = 'F'; faltos++; total++; }
-            else if (est === 'justificado') { letra = 'J'; justificados++; total++; }
+            else if (est === 'falto') { letra = 'F'; total++; }
+            else if (est === 'justificado') { letra = 'J'; total++; }
             celdas.push({ valor: letra, estado: est });
         }
 
         const pct = total > 0 ? Math.round(100 * (presentes + tardanzas) / total) : null;
-
         const dataRow = ws.addRow([nombre, ...celdas.map(c => c.valor), pct !== null ? `${pct}%` : '—']);
         dataRow.height = 18;
         dataRow.getCell(1).font = DATA_FONT;
         dataRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
         if (rowIdx % 2 === 1) dataRow.getCell(1).fill = STRIPE_FILL;
 
-        // Colorear celdas de días
         celdas.forEach((c, i) => {
             const cell = dataRow.getCell(i + 2);
             cell.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -383,7 +326,6 @@ function buildSheetMatriz(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: s
             }
         });
 
-        // Celda % Asistencia
         const pctCell = dataRow.getCell(fechas.length + 2);
         pctCell.alignment = { vertical: 'middle', horizontal: 'center' };
         if (pct !== null) {
@@ -393,22 +335,18 @@ function buildSheetMatriz(wb: ExcelJS.Workbook, rows: ExcelRow[], fechaInicio: s
         } else {
             pctCell.font = { ...DATA_FONT, color: { argb: 'A0AEC0' } };
         }
-
         rowIdx++;
     }
 
-    // ── Anchos de columna ─────────────────────────────────────────────────
     ws.getColumn(1).width = 32;
     for (let i = 2; i <= fechas.length + 1; i++) ws.getColumn(i).width = 7;
     ws.getColumn(fechas.length + 2).width = 10;
     ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 4 }];
 }
 
-// ── Controller ────────────────────────────────────────────────────────────────
-
 @Controller('reports/docentes')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('auxiliar', 'admin')
+@Roles('staff', 'admin')
 export class TeacherAttendanceController {
     constructor(private readonly svc: TeacherAttendanceService) { }
 
@@ -419,14 +357,10 @@ export class TeacherAttendanceController {
         @Res() res: Response,
     ) {
         const rows = await this.svc.getReporteDiario(user, q.fecha);
-        if (q.format !== 'xlsx') {
-            res.json({ success: true, data: rows });
-            return;
-        }
+        if (q.format !== 'xlsx') { res.json({ success: true, data: rows }); return; }
         const resumen = await this.svc.getResumenRango(user, q.fecha, q.fecha);
         const wb = new ExcelJS.Workbook();
-        wb.creator = 'EduAula';
-        wb.created = new Date();
+        wb.creator = 'EduAula'; wb.created = new Date();
         buildSheetDetalle(wb, rows as unknown as ExcelRow[], q.fecha);
         buildSheetResumen(wb, resumen as unknown as ExcelRow[], q.fecha, q.fecha);
         await this.sendXlsx(res, wb, `asist_docentes_${q.fecha}`);
@@ -439,14 +373,10 @@ export class TeacherAttendanceController {
         @Res() res: Response,
     ) {
         const rows = await this.svc.getResumenRango(user, q.fecha_inicio, q.fecha_fin);
-        if (q.format !== 'xlsx') {
-            res.json({ success: true, data: rows });
-            return;
-        }
+        if (q.format !== 'xlsx') { res.json({ success: true, data: rows }); return; }
         const detalle = await this.svc.getReporteRango(user, q.fecha_inicio, q.fecha_fin);
         const wb = new ExcelJS.Workbook();
-        wb.creator = 'EduAula';
-        wb.created = new Date();
+        wb.creator = 'EduAula'; wb.created = new Date();
         buildSheetDetalleRango(wb, detalle as unknown as ExcelRow[], q.fecha_inicio, q.fecha_fin);
         buildSheetResumen(wb, rows as unknown as ExcelRow[], q.fecha_inicio, q.fecha_fin);
         buildSheetMatriz(wb, detalle as unknown as ExcelRow[], q.fecha_inicio, q.fecha_fin);

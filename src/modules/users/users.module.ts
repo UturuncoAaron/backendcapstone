@@ -9,12 +9,12 @@ import { Docente } from './entities/docente.entity.js';
 import { Padre } from './entities/padre.entity.js';
 import { Admin } from './entities/admin.entity.js';
 import { Psicologa } from './entities/psicologa.entity.js';
-import { Auxiliar } from './entities/auxiliar.entity.js';
+import { Staff } from './entities/staff.entity.js';
 import { StorageModule } from '../storage/storage.module.js';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([Cuenta, Alumno, Docente, Padre, Admin, Psicologa,Auxiliar]),
+        TypeOrmModule.forFeature([Cuenta, Alumno, Docente, Padre, Admin, Psicologa, Staff]),
         StorageModule,
     ],
     controllers: [UsersController, ProfileController],

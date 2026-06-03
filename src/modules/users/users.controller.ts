@@ -10,7 +10,7 @@ import {
     CreatePadreDto,
     CreateAdminDto,
     CreatePsicologaDto,
-    CreateAuxiliarDto,
+    CreateStaffDto,
     LinkPadreAlumnoDto,
     ResetPasswordDto,
 } from './dto/users.dto.js';
@@ -43,7 +43,7 @@ export class UsersController {
     }
 
     @Get('alumnos')
-    @Roles('admin', 'auxiliar', 'psicologa')
+    @Roles('admin', 'staff', 'psicologa')
     findAlumnos(
         @Query('q') q?: string,
         @Query('grado_id') gradoId?: string,
@@ -99,13 +99,13 @@ export class UsersController {
         });
     }
 
-    @Get('auxiliares')
-    findAuxiliares(
+    @Get('staff')
+    findStaff(
         @Query('q') q?: string,
         @Query('page') page = '1',
         @Query('limit') limit = '20',
     ) {
-        return this.usersService.findAuxiliares({
+        return this.usersService.findStaff({
             q,
             page: Math.max(1, parseInt(page)),
             limit: Math.min(100, parseInt(limit)),
@@ -121,9 +121,6 @@ export class UsersController {
     searchAlumnos(
         @Query('q') q: string,
         @Query('anio') anio?: string,
-        // `incluir_matriculados=true` → no filtra por matrícula del año (lo usa
-        // el flujo de "Vínculo Padre-Hijo", que precisamente busca alumnos ya
-        // matriculados). Por defecto se excluye matriculados (caso Matricular).
         @Query('incluir_matriculados') incluirMatriculados?: string,
     ) {
         return this.usersService.searchAlumnos(
@@ -148,9 +145,9 @@ export class UsersController {
         return this.usersService.findDocentesForSelect(include === 'tutoria');
     }
 
-    @Get('auxiliares/search')
-    searchAuxiliares(@Query('q') q: string) {
-        return this.usersService.searchAuxiliares(q);
+    @Get('staff/search')
+    searchStaff(@Query('q') q: string) {
+        return this.usersService.searchStaff(q);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -182,9 +179,9 @@ export class UsersController {
         return this.usersService.findPsicologaById(id);
     }
 
-    @Get('auxiliares/:id')
-    findAuxiliar(@Param('id', ParseUUIDPipe) id: string) {
-        return this.usersService.findAuxiliarById(id);
+    @Get('staff/:id')
+    findStaffById(@Param('id', ParseUUIDPipe) id: string) {
+        return this.usersService.findStaffById(id);
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -216,9 +213,9 @@ export class UsersController {
         return this.usersService.createPsicologa(dto);
     }
 
-    @Post('auxiliares')
-    createAuxiliar(@Body() dto: CreateAuxiliarDto) {
-        return this.usersService.createAuxiliar(dto);
+    @Post('staff')
+    createStaff(@Body() dto: CreateStaffDto) {
+        return this.usersService.createStaff(dto);
     }
 
     // ══════════════════════════════════════════════════════════════

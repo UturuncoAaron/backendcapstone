@@ -67,6 +67,9 @@ export const MODULOS = {
     IMPORTAR: 'importar',
     AJUSTES: 'ajustes',
     HISTORICO_ALUMNOS: 'historico_alumnos',
+
+    // ── Asistencia Personal
+    ASIST_PERSONAL: 'asist_personal',
 } as const;
 
 export type Modulo = (typeof MODULOS)[keyof typeof MODULOS];
@@ -92,8 +95,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         MODULOS.COMUNICADOS, MODULOS.MENSAJES,
         ...COMUNES,
     ],
-    auxiliar: [
-        MODULOS.ASIST_GENERAL,
+    staff: [
         MODULOS.COMUNICADOS,
         ...COMUNES,
     ],
@@ -117,6 +119,7 @@ export const MODULOS_POR_ROL: Record<string, Modulo[]> = {
         MODULOS.AGENDA_PROPIA,
         MODULOS.MENSAJES,
         MODULOS.LIBRETAS_PADRE_ACCESO,
+        MODULOS.ASIST_PERSONAL,
         ...COMUNES,
     ],
 };

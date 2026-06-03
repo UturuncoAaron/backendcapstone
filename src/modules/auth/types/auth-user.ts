@@ -4,7 +4,7 @@ export type Rol =
   | 'admin'
   | 'padre'
   | 'psicologa'
-  | 'auxiliar';
+  | 'staff';
 
 export interface AuthUser {
   id: string;

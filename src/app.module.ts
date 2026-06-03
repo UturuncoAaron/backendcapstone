@@ -25,8 +25,6 @@ import { ImportModule } from './modules/import/import.module.js';
 import { DashboardModule } from './modules/dashboard/dashboard.module.js';
 import { ScheduleModule } from './modules/schedule/schedule.module.js';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard.js';
-
-// ── New v6 modules ────────────────────────────────────────────
 import { PermissionsModule } from './modules/permissions/permissions.module.js';
 import { AttachmentsModule } from './modules/attachments/attachments.module.js';
 import { PsychologyModule } from './modules/psychology/psychology.module.js';
@@ -36,6 +34,7 @@ import { AppointmentsModule } from './modules/appointments/appointments.module.j
 import { HistoricoModule } from './modules/historico/historico.module.js';
 import { AcademicYearModule } from './modules/academic-year/academic-year.module.js';
 import { StudentPortalModule } from './modules/student-portal/student-portal.module.js';
+import { FichajeModule } from './modules/fichaje/fichaje.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -50,10 +49,6 @@ const isDev = process.env.NODE_ENV === 'development';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
 
-    // ── Infraestructura interna ───────────────────────────────────
-    // EventEmitter desacopla productores (citas/comunicados/tareas) de
-    // consumidores (NotificationsListener). ScheduleModule habilita los
-    // @Cron decorators usados para la limpieza de notificaciones.
     EventEmitterModule.forRoot({
       wildcard: true,
       delimiter: '.',
@@ -79,18 +74,15 @@ const isDev = process.env.NODE_ENV === 'development';
       }),
     }),
 
-    // ── Auth & Users ──────────────────────────────────────────────
     AuthModule,
     UsersModule,
 
-    // ── Academic ──────────────────────────────────────────────────
     AcademicModule,
     AcademicYearModule,
     CoursesModule,
     ScheduleModule,
     AssistsModule,
 
-    // ── Educational content ───────────────────────────────────────
     MaterialsModule,
     TasksModule,
     ForumModule,
@@ -98,30 +90,26 @@ const isDev = process.env.NODE_ENV === 'development';
     LiveClassesModule,
     LibretasModule,
 
-    // ── Communication ─────────────────────────────────────────────
     AnnouncementsModule,
 
-    // ── Psychology ────────────────────────────────────────────────
     PsychologyModule,
     AppointmentsModule,
 
-    // ── Parent portal ─────────────────────────────────────────────
     ParentPortalModule,
     StudentPortalModule,
 
-    // ── Admin ─────────────────────────────────────────────────────
     ImportModule,
     ReportsModule,
     HistoricoModule,
 
-    // ── Permissions & Notifications ───────────────────────────────
     PermissionsModule,
     AttachmentsModule,
     NotificationsModule,
 
-    // ── Infrastructure ────────────────────────────────────────────
     StorageModule,
     DashboardModule,
+
+    FichajeModule,
   ],
   providers: [
     {
@@ -130,4 +118,4 @@ const isDev = process.env.NODE_ENV === 'development';
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }

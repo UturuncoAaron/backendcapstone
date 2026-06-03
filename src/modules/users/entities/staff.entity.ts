@@ -1,13 +1,12 @@
 import {
     Entity, PrimaryColumn, Column,
     CreateDateColumn, UpdateDateColumn,
-    OneToOne, JoinColumn, Check,
+    OneToOne, JoinColumn,
 } from 'typeorm';
 import { Cuenta } from './cuenta.entity.js';
 
-@Entity('auxiliares')
-@Check(`"tipo_contrato" = 'nombrado' OR "fecha_fin_contrato" IS NULL OR "fecha_fin_contrato" > "fecha_inicio_contrato"`)
-export class Auxiliar {
+@Entity('staff')
+export class Staff {
     @PrimaryColumn({ type: 'uuid' })
     id: string;
 
@@ -27,8 +26,8 @@ export class Auxiliar {
     @Column({ name: 'fecha_nacimiento', type: 'date', nullable: true })
     fecha_nacimiento: Date | null;
 
-    @Column({ type: 'varchar', length: 100, default: 'Auxiliar de Educación', nullable: true })
-    cargo: string | null;
+    @Column({ type: 'varchar', length: 100, default: 'Personal de Apoyo' })
+    cargo: string;
 
     @Column({ name: 'foto_storage_key', type: 'text', nullable: true })
     foto_storage_key: string | null;
@@ -38,18 +37,6 @@ export class Auxiliar {
 
     @Column({ type: 'varchar', length: 20, nullable: true })
     telefono: string | null;
-
-    @Column({ name: 'tipo_contrato', type: 'varchar', length: 20, default: 'contratado' })
-    tipo_contrato: 'nombrado' | 'contratado';
-
-    @Column({ name: 'estado_contrato', type: 'varchar', length: 20, default: 'activo' })
-    estado_contrato: 'activo' | 'inactivo' | 'pendiente';
-
-    @Column({ name: 'fecha_inicio_contrato', type: 'date', nullable: true })
-    fecha_inicio_contrato: Date | null;
-
-    @Column({ name: 'fecha_fin_contrato', type: 'date', nullable: true })
-    fecha_fin_contrato: Date | null;
 
     @CreateDateColumn({ name: 'created_at' })
     created_at: Date;
