@@ -21,16 +21,9 @@ const PERMISO_A_MODULO: Array<{
     accion: string;
     modulo_jwt: Modulo;
 }> = [
-        {
-            modulo: 'reportes',
-            accion: 'ver_todos',
-            modulo_jwt: MODULOS.REPORTES_ACCESO,
-        },
-        {
-            modulo: 'libretas',
-            accion: 'subir_padre',
-            modulo_jwt: MODULOS.LIBRETAS_PADRE_ACCESO,
-        },
+        { modulo: 'reportes', accion: 'ver_todos', modulo_jwt: MODULOS.REPORTES_ACCESO },
+        { modulo: 'libretas', accion: 'subir_padre', modulo_jwt: MODULOS.LIBRETAS_PADRE_ACCESO },
+        { modulo: 'asistencias_general', accion: 'registrar', modulo_jwt: MODULOS.ASIST_GENERAL },
     ];
 
 @Injectable()
@@ -121,7 +114,7 @@ export class AuthService {
         rol: string,
         passwordChanged?: boolean,
     ) {
-        const rolesConPermisosExtra = ['docente', 'psicologa'];
+        const rolesConPermisosExtra = ['docente', 'psicologa', 'staff'];
 
         const [perfil, esTutorDe, permisosExtra] = await Promise.all([
             this.usersService.getProfileById(id, rol),

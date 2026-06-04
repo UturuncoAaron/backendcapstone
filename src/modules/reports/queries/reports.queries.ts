@@ -31,8 +31,8 @@ export const SQL_DOCENTES_DEL_DIA = `
     MIN(bh.hora_inicio)::text AS primera_clase,
     MAX(bh.hora_fin)::text AS ultima_clase,
     COUNT(bh.horario_id)::int AS total_bloques,
-    aj.estado_jornada AS estado_actual,
-    aj.hora_llegada::text,
+    aj.estado AS estado_actual,
+    aj.hora_entrada::text AS hora_llegada,
     aj.hora_salida::text,
     aj.motivo_justificacion AS motivo,
     (aj.id IS NOT NULL) AS ya_registrado,
@@ -45,7 +45,7 @@ export const SQL_DOCENTES_DEL_DIA = `
           'aula', bh.aula,
           'curso_nombre', bh.curso_nombre,
           'seccion_nombre', bh.seccion_nombre,
-          'estado_bloque', aj.estado_jornada,
+          'estado_bloque', aj.estado,
           'hora_salida', ad.hora_salida::text
         ) ORDER BY bh.hora_inicio
       ) FILTER (WHERE bh.horario_id IS NOT NULL), '[]'::json
@@ -53,9 +53,9 @@ export const SQL_DOCENTES_DEL_DIA = `
   FROM docentes d
   JOIN cuentas cu ON cu.id = d.id AND cu.activo = true
   JOIN bloques_hoy bh ON bh.docente_id = d.id
-  LEFT JOIN asistencias_jornada_docente aj ON aj.docente_id = d.id AND aj.fecha = $1::date
+  LEFT JOIN asistencias_personal aj ON aj.cuenta_id = d.id AND aj.fecha = $1::date
   LEFT JOIN asistencias_docente ad ON ad.horario_id = bh.horario_id AND ad.fecha = $1::date
-  GROUP BY d.id, d.nombre, d.apellido_paterno, d.apellido_materno, aj.id
+  GROUP BY d.id, d.nombre, d.apellido_paterno, d.apellido_materno, aj.id, aj.estado, aj.hora_entrada, aj.hora_salida, aj.motivo_justificacion
   ORDER BY d.apellido_paterno, d.nombre
 `;
 
@@ -70,19 +70,19 @@ export const SQL_HORARIOS_DEL_DIA_V2 = `
     END AS nombre_dia
   )
   SELECT
-    h.id                                              AS horario_id,
-    c.id                                              AS curso_id,
-    cc.nombre                                         AS curso_nombre,
-    s.nombre                                          AS seccion_nombre,
-    g.nombre                                          AS grado_nombre,
-    g.orden                                           AS grado_orden,
-    d.id                                              AS docente_id,
+    h.id                                               AS horario_id,
+    c.id                                               AS curso_id,
+    cc.nombre                                          AS curso_nombre,
+    s.nombre                                           AS seccion_nombre,
+    g.nombre                                           AS grado_nombre,
+    g.orden                                            AS grado_orden,
+    d.id                                               AS docente_id,
     d.nombre || ' ' || d.apellido_paterno             AS docente_nombre,
     h.dia_semana,
     h.hora_inicio::text,
     h.hora_fin::text,
     h.aula,
-    ad.id                                             AS asistencia_id,
+    ad.id                                              AS asistencia_id,
     COALESCE(ad.estado, 'sin-registro')               AS estado_actual,
     ad.hora_llegada::text,
     ad.hora_salida::text,
@@ -92,7 +92,7 @@ export const SQL_HORARIOS_DEL_DIA_V2 = `
   FROM horarios h
   JOIN cursos          c  ON c.id = h.curso_id AND c.activo = true
   JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
-  JOIN secciones       s  ON s.id = c.seccion_id AND s.activo = true
+  JOIN secciones        s  ON s.id = c.seccion_id AND s.activo = true
   JOIN grados          g  ON g.id = s.grado_id
   JOIN docentes        d  ON d.id = c.docente_id
   LEFT JOIN asistencias_docente ad
@@ -130,29 +130,23 @@ export const SQL_REPORTE_DIARIO_DOCENTES = `
     WHERE h.dia_semana = (SELECT nombre_dia FROM dia_es)
   )
   SELECT
-    MAX(ad.id::text)                                  AS asistencia_id, -- Corregido: conversión a texto
-    MAX(bh.horario_id::text)                          AS horario_id,    -- Corregido: conversión a texto
+    MAX(ad.id::text)                                  AS asistencia_id,
+    MAX(bh.horario_id::text)                          AS horario_id,
     d.id                                              AS docente_id,
     d.nombre                                          AS docente_nombre,
     d.apellido_paterno,
     d.apellido_materno,
-    
-    -- Agrupa los grados, secciones y cursos en una sola celda separados por comas
     string_agg(DISTINCT CASE 
       WHEN bh.grado_nombre ~ '^\\d+' THEN SUBSTRING(bh.grado_nombre FROM '^\\d+') || '°'
       ELSE bh.grado_nombre 
     END, ', ')                                        AS grado_nombre,
     string_agg(DISTINCT bh.seccion_nombre, ', ')      AS seccion_nombre,
     string_agg(DISTINCT bh.curso_nombre, ', ')        AS curso_nombre,
-    
-    -- Horarios generales de su jornada
     MIN(bh.hora_inicio)::text || ' - ' || MAX(bh.hora_fin)::text AS hora_inicio, 
     ''                                                AS hora_fin,
     string_agg(DISTINCT COALESCE(bh.aula, '—'), ', ') AS aula,
-    
-    -- Estado y marcas únicas de la Jornada Diaria
-    COALESCE(aj.estado_jornada, 'sin-registro')       AS estado,
-    aj.hora_llegada::text                             AS hora_llegada,
+    COALESCE(aj.estado, 'sin-registro')               AS estado,
+    aj.hora_entrada::text                             AS hora_llegada,
     aj.hora_salida::text                              AS hora_salida,
     aj.motivo_justificacion,
     bool_or(COALESCE(ad.hubo_reemplazo, false))       AS hubo_reemplazo,
@@ -160,10 +154,10 @@ export const SQL_REPORTE_DIARIO_DOCENTES = `
   FROM docentes d
   JOIN cuentas cu ON cu.id = d.id AND cu.activo = true
   JOIN bloques_hoy bh ON bh.docente_id = d.id
-  LEFT JOIN asistencias_jornada_docente aj ON aj.docente_id = d.id AND aj.fecha = $1::date
+  LEFT JOIN asistencias_personal aj ON aj.cuenta_id = d.id AND aj.fecha = $1::date
   LEFT JOIN asistencias_docente ad ON ad.horario_id = bh.horario_id AND ad.fecha = $1::date
   WHERE cu.activo = true
-  GROUP BY d.id, d.nombre, d.apellido_paterno, d.apellido_materno, aj.id
+  GROUP BY d.id, d.nombre, d.apellido_paterno, d.apellido_materno, aj.id, aj.estado, aj.hora_entrada, aj.hora_salida, aj.motivo_justificacion
   ORDER BY d.apellido_paterno, d.nombre
 `;
 
@@ -194,14 +188,14 @@ export const SQL_RESUMEN_DOCENTES_RANGO = `
     SELECT
       dc.docente_id,
       COUNT(*)::int AS total_esperados,
-      COUNT(aj.id) FILTER (WHERE aj.estado_jornada = 'presente')::int   AS presentes,
-      COUNT(aj.id) FILTER (WHERE aj.estado_jornada = 'tardanza')::int   AS tardanzas,
-      COUNT(aj.id) FILTER (WHERE aj.estado_jornada = 'falto')::int      AS faltos,
-      COUNT(aj.id) FILTER (WHERE aj.estado_jornada = 'justificado')::int AS justificados,
+      COUNT(aj.id) FILTER (WHERE aj.estado = 'presente')::int   AS presentes,
+      COUNT(aj.id) FILTER (WHERE aj.estado = 'tardanza')::int   AS tardanzas,
+      COUNT(aj.id) FILTER (WHERE aj.estado = 'falto')::int      AS faltos,
+      COUNT(aj.id) FILTER (WHERE aj.estado = 'justificado')::int AS justificados,
       COUNT(*) FILTER (WHERE aj.id IS NULL)::int                        AS sin_registro
     FROM docentes_con_clases dc
-    LEFT JOIN asistencias_jornada_docente aj 
-           ON aj.docente_id = dc.docente_id 
+    LEFT JOIN asistencias_personal aj 
+           ON aj.cuenta_id = dc.docente_id 
           AND aj.fecha = dc.fecha
     GROUP BY dc.docente_id
   )
@@ -339,7 +333,7 @@ export const SQL_TOP_Y_RIESGO = `
       AVG(n.nota)     AS promedio_curso
     FROM matriculas m
     JOIN alumnos    a ON a.id = m.alumno_id
-    JOIN cursos     c ON c.seccion_id = m.seccion_id
+    JOIN cursos      c ON c.seccion_id = m.seccion_id
                      AND c.anio = m.anio
                      AND c.activo = true
     LEFT JOIN notas n ON n.alumno_id = a.id
@@ -363,7 +357,7 @@ export const SQL_TOP_Y_RIESGO = `
       WHEN AVG(apc.promedio_curso) IS NULL THEN 'sin-datos'
       WHEN AVG(apc.promedio_curso) < $3    THEN 'riesgo'
       WHEN AVG(apc.promedio_curso) >= 18   THEN 'top'
-      ELSE                                      'normal'
+      ELSE                                                       'normal'
     END                                                             AS categoria
   FROM avg_por_curso apc
   JOIN alumnos a  ON a.id = apc.alumno_id
@@ -445,18 +439,18 @@ export const SQL_SECCION_NOTAS = `
       WHEN AVG(n.nota) >= 18   THEN 'AD'
       WHEN AVG(n.nota) >= 14   THEN 'A'
       WHEN AVG(n.nota) >= 11   THEN 'B'
-      ELSE                          'C'
+      ELSE                                                       'C'
     END                                                           AS escala
   FROM matriculas m
   JOIN alumnos         a  ON a.id = m.alumno_id
   JOIN cuentas         cu ON cu.id = a.id
   JOIN cursos          c  ON c.seccion_id = m.seccion_id
-                         AND c.anio = m.anio
-                         AND c.activo = true
+                          AND c.anio = m.anio
+                          AND c.activo = true
   JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
   LEFT JOIN notas      n  ON n.alumno_id = a.id
-                         AND n.curso_id  = c.id
-                         AND n.periodo_id = $2
+                          AND n.curso_id  = c.id
+                          AND n.periodo_id = $2
   WHERE m.seccion_id = $1
     AND m.anio = (SELECT anio FROM periodos WHERE id = $2)
     AND m.activo = true
@@ -467,16 +461,16 @@ export const SQL_SECCION_NOTAS = `
 
 export const SQL_ENTREGAS_POR_ALUMNO = `
   SELECT
-    a.id                              AS alumno_id,
-    cu.numero_documento               AS dni,
+    a.id                               AS alumno_id,
+    cu.numero_documento                AS dni,
     a.apellido_paterno,
     a.apellido_materno,
     a.nombre,
-    t.id                              AS tarea_id,
-    t.titulo                          AS tarea_titulo,
+    t.id                               AS tarea_id,
+    t.titulo                           AS tarea_titulo,
     t.fecha_limite,
-    (et.id IS NOT NULL)               AS entrego,
-    COALESCE(et.con_retraso, false)   AS con_retraso,
+    (et.id IS NOT NULL)                AS entrego,
+    COALESCE(et.con_retraso, false)    AS con_retraso,
     et.calificacion_final,
     et.fecha_entrega
   FROM matriculas m
@@ -513,7 +507,7 @@ export const SQL_REPORTE_RANGO_DOCENTES = `
     WHERE EXTRACT(DOW FROM d.fecha) BETWEEN 1 AND 5
   )
   SELECT
-    dl.fecha::text                                            AS fecha,
+    dl.fecha::text                                             AS fecha,
     d.id                                                      AS docente_id,
     d.nombre                                                  AS docente_nombre,
     d.apellido_paterno,
@@ -532,7 +526,7 @@ export const SQL_REPORTE_RANGO_DOCENTES = `
   JOIN horarios        h  ON h.dia_semana = dl.dia_semana
   JOIN cursos          c  ON c.id = h.curso_id AND c.activo = true
   JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
-  JOIN secciones       s  ON s.id = c.seccion_id AND s.activo = true
+  JOIN secciones        s  ON s.id = c.seccion_id AND s.activo = true
   JOIN grados          g  ON g.id = s.grado_id
   JOIN docentes        d  ON d.id = c.docente_id
   JOIN cuentas         cu ON cu.id = d.id AND cu.activo = true
@@ -540,4 +534,54 @@ export const SQL_REPORTE_RANGO_DOCENTES = `
          ON ad.horario_id = h.id
         AND ad.fecha      = dl.fecha
   ORDER BY dl.fecha, g.orden, s.nombre, d.apellido_paterno, h.hora_inicio
+`;
+
+export const SQL_RESUMEN_STAFF_RANGO = `
+  WITH dias AS (
+    SELECT generate_series($1::date, $2::date, '1 day'::interval)::date AS fecha
+  ),
+  dias_laborables AS (
+    SELECT d.fecha FROM dias d
+    WHERE EXTRACT(DOW FROM d.fecha) BETWEEN 1 AND 5
+  ),
+  universo_staff AS (
+    SELECT s.id AS staff_id, s.cargo, c.nombre, c.apellido_paterno, c.apellido_materno, dl.fecha
+    FROM staff s
+    JOIN cuentas c ON c.id = s.id AND c.activo = true
+    CROSS JOIN dias_laborables dl
+  ),
+  stats_staff AS (
+    SELECT
+      us.staff_id,
+      us.cargo,
+      us.nombre,
+      us.apellido_paterno,
+      us.apellido_materno,
+      COUNT(*)::int AS total_esperados,
+      COUNT(ap.id) FILTER (WHERE ap.estado = 'presente')::int AS presentes,
+      COUNT(ap.id) FILTER (WHERE ap.estado = 'tardanza')::int AS tardanzas,
+      COUNT(ap.id) FILTER (WHERE ap.estado = 'falto')::int AS faltos,
+      COUNT(ap.id) FILTER (WHERE ap.estado = 'justificado')::int AS justificados
+    FROM universo_staff us
+    LEFT JOIN asistencias_personal ap 
+           ON ap.cuenta_id = us.staff_id 
+          AND ap.fecha = us.fecha
+    GROUP BY us.staff_id, us.cargo, us.nombre, us.apellido_paterno, us.apellido_materno
+  )
+  SELECT 
+    staff_id,
+    cargo,
+    nombre AS staff_nombre,
+    apellido_paterno,
+    apellido_materno,
+    total_esperados,
+    presentes,
+    tardanzas,
+    faltos,
+    justificados,
+    CASE WHEN total_esperados = 0 THEN NULL ELSE
+      ROUND(100.0 * (presentes + tardanzas) / total_esperados, 2)
+    END AS porcentaje_asistencia
+  FROM stats_staff
+  ORDER BY cargo ASC, apellido_paterno ASC;
 `;

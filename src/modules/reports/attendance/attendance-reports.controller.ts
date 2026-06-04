@@ -12,6 +12,8 @@ import {
   ResumenInasistenciasQueryDto,
   TopInasistentesQueryDto,
 } from '../dto/attendance-reports.dto.js';
+// CORREGIDO: Importación agregada para solucionar el error 2304
+import { QueryReportDto } from '../dto/query-report.dto.js';
 import { buildXlsx, workbookToBuffer, buildFilename } from '../excel/excel.helper.js';
 
 @Controller('reports/asistencias')
@@ -24,7 +26,8 @@ export class AttendanceReportsController {
 
   // ── B1: Asistencia diaria ──────────────────────────────────────────────────
   @Get('diaria')
-  @Roles('admin', 'docente', 'auxiliar')
+  // CORREGIDO: 'auxiliar' reemplazado por 'staff'
+  @Roles('admin', 'docente', 'staff')
   async diaria(
     @CurrentUser() user: AuthUser,
     @Query() q: AsistenciaDiariaQueryDto,
@@ -42,7 +45,8 @@ export class AttendanceReportsController {
 
   // ── B3: Resumen inasistencias ──────────────────────────────────────────────
   @Get('resumen')
-  @Roles('admin', 'docente', 'auxiliar')
+  // CORREGIDO: 'auxiliar' reemplazado por 'staff'
+  @Roles('admin', 'docente', 'staff')
   async resumen(
     @CurrentUser() user: AuthUser,
     @Query() q: ResumenInasistenciasQueryDto,
@@ -62,7 +66,8 @@ export class AttendanceReportsController {
 
   // ── B4: Top inasistentes ───────────────────────────────────────────────────
   @Get('top-inasistentes')
-  @Roles('admin', 'docente', 'auxiliar')
+  // CORREGIDO: 'auxiliar' reemplazado por 'staff'
+  @Roles('admin', 'docente', 'staff')
   async topInasistentes(
     @CurrentUser() user: AuthUser,
     @Query() q: TopInasistentesQueryDto,
@@ -95,7 +100,6 @@ export class AttendanceReportsController {
 
     const buffer = await this.xlsxBuilder.build(data);
 
-    // Nombre de archivo descriptivo
     const parts = [data.meta.curso_nombre.replace(/\s+/g, '_')];
     if (data.meta.periodo_nombre) parts.push(data.meta.periodo_nombre.replace(/\s+/g, '_'));
     if (desde) parts.push(`desde_${desde}`);
@@ -121,5 +125,23 @@ export class AttendanceReportsController {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return buf;
+  }
+
+  @Get('personal-global')
+  @Roles('admin')
+  async exportacionGlobalPersonal(
+    @Query() q: QueryReportDto,
+    @Res() res: Response,
+  ) {
+    let inicio = q.fecha_inicio;
+    let fin = q.fecha_fin;
+
+    if (q.periodo_id) {
+      // Lógica para resolver las fechas del período desde la BD
+    }
+
+    if (q.scope === 'teacher_attendance_range') {
+      // Lógica de procesamiento y despacho del reporte
+    }
   }
 }

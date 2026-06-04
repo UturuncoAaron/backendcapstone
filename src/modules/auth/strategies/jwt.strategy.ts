@@ -14,11 +14,6 @@ export interface JwtPayload {
   numero_documento: string;
 }
 
-/**
- * Extractor que acepta token desde Authorization: Bearer o desde ?token=.
- * El query param es necesario para el stream SSE de notificaciones, ya que
- * EventSource (API nativa del navegador) no permite enviar headers custom.
- */
 const fromHeaderOrQuery: JwtFromRequestFunction = (req: Request) => {
   const auth = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
   if (auth) return auth;
@@ -50,10 +45,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!cuenta) {
       throw new UnauthorizedException('Token inválido o usuario inactivo');
     }
-
-    // Lo que queda disponible en @CurrentUser() y request.user
-    // Exponemos `id` y `sub` (alias) para compatibilidad con todos los módulos:
-    // unos usan user.id (psychology, announcements) y otros user.sub (assists, tasks, permissions).
     return {
       id: cuenta.id,
       sub: cuenta.id,

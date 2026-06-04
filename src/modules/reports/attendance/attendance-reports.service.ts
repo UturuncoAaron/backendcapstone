@@ -3,6 +3,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { AuthUser } from '../../auth/types/auth-user.js';
 import type { AsistenciaCursoExcelData } from './attendance-xlsx-builder.service.js';
+import {
+  SQL_RESUMEN_DOCENTES_RANGO,
+  SQL_RESUMEN_STAFF_RANGO
+} from '../queries/reports.queries.js';
 
 @Injectable()
 export class AttendanceReportsService {
@@ -112,7 +116,6 @@ export class AttendanceReportsService {
     desde?: string,
     hasta?: string,
   ): Promise<AsistenciaCursoExcelData> {
-    // Verificar acceso al curso
     if (user.rol === 'docente') {
       const rows = await this.ds.query<{ docente_id: string }[]>(
         `SELECT docente_id FROM cursos WHERE id = $1 AND activo = TRUE LIMIT 1`,
@@ -123,7 +126,6 @@ export class AttendanceReportsService {
       }
     }
 
-    // Construir condiciones dinámicas
     const params: string[] = [cursoId];
     const conditions: string[] = ['ac.curso_id = $1'];
 
@@ -141,9 +143,7 @@ export class AttendanceReportsService {
     }
     const where = conditions.join(' AND ');
 
-    // ── Datos del curso y periodo (para meta) ──
     const [metaRows, summaryRows, detalleRows] = await Promise.all([
-      // Meta: nombre del curso + periodo
       this.ds.query<{ curso_nombre: string; periodo_nombre: string | null }[]>(
         `SELECT
             c.nombre AS curso_nombre,
@@ -155,7 +155,6 @@ export class AttendanceReportsService {
         [cursoId, periodoId ?? null],
       ),
 
-      // Resumen agregado por alumno
       this.ds.query<{
         apellido_paterno: string;
         apellido_materno: string | null;
@@ -179,7 +178,7 @@ export class AttendanceReportsService {
             ROUND(
                 100.0 * COUNT(*) FILTER (WHERE ac.estado IN ('asistio','tardanza','justificado'))
                 / NULLIF(COUNT(*), 0), 1
-            )::float                                                    AS pct_asistencia
+            )::float                                                   AS pct_asistencia
          FROM asistencias_curso ac
          JOIN alumnos a ON a.id = ac.alumno_id
          WHERE ${where}
@@ -188,7 +187,6 @@ export class AttendanceReportsService {
         params,
       ),
 
-      // Detalle diario
       this.ds.query<{
         apellido_paterno: string;
         apellido_materno: string | null;
@@ -227,10 +225,22 @@ export class AttendanceReportsService {
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // Autorización
+  // REPORTES GLOBALES DE JORNADA (Docentes y Staff)
+  // ─────────────────────────────────────────────────────────────────────
+  async getResumenDocentesRango(desde: string, hasta: string) {
+    return this.ds.query(SQL_RESUMEN_DOCENTES_RANGO, [desde, hasta]);
+  }
+
+  async getResumenStaffRango(desde: string, hasta: string) {
+    return this.ds.query(SQL_RESUMEN_STAFF_RANGO, [desde, hasta]);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Autorización y Seguridad
   // ─────────────────────────────────────────────────────────────────────
   private async assertCanViewSeccion(user: AuthUser, seccionId: string) {
-    if (['admin', 'auxiliar', 'psicologa'].includes(user.rol)) return;
+    // CORREGIDO: 'auxiliar' migrado estrictamente a 'staff'
+    if (['admin', 'staff', 'psicologa'].includes(user.rol)) return;
     if (user.rol === 'docente') {
       const isTutor = await this.docenteIsTutor(user.id, seccionId);
       if (isTutor) return;
@@ -247,7 +257,6 @@ export class AttendanceReportsService {
   }
 }
 
-// ── Tipos exportados ─────────────────────────────────────────────────────────
 export interface AsistenciaDiariaRow {
   alumno_id: string; dni: string;
   apellido_paterno: string; apellido_materno: string | null; nombre: string;
