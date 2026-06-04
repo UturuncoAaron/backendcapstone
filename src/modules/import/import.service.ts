@@ -87,8 +87,10 @@ export class ImportService {
         };
 
         const [seccion] = await this.dataSource.query(
-            `SELECT id FROM secciones WHERE id = $1`, [query.seccion_id],
-        );
+            `SELECT id, capacidad FROM secciones WHERE id = $1`,
+            [query.seccion_id],
+        ) as { id: string; capacidad: number }[];
+
         if (!seccion) throw new BadRequestException(`Sección ${query.seccion_id} no existe`);
 
         const anio = Number(query.anio);
@@ -178,12 +180,25 @@ export class ImportService {
                     result.omitidos++;
                 }
 
-                // Constraint v6: UNIQUE (alumno_id, seccion_id, anio)
                 const yaMatriculado = await this.matriculaRepo.findOne({
                     where: { alumno_id: cuenta.id, anio },
                 });
 
                 if (!yaMatriculado) {
+                    const [{ count }] = await this.dataSource.query(
+                        `SELECT COUNT(*)::int AS count FROM matriculas WHERE seccion_id = $1 AND anio = $2 AND activo = TRUE`,
+                        [query.seccion_id, anio],
+                    ) as { count: number }[];
+
+                    if (count >= seccion.capacidad) {
+                        result.errores.push({
+                            fila,
+                            numero_documento: dni,
+                            motivo: `La sección ha alcanzado su capacidad máxima (${seccion.capacidad} alumnos)`,
+                        });
+                        continue;
+                    }
+
                     await this.matriculaRepo.save(this.matriculaRepo.create({
                         alumno_id: cuenta.id,
                         seccion_id: query.seccion_id,
@@ -210,7 +225,6 @@ export class ImportService {
         const wb = new ExcelJS.Workbook();
         const ws = wb.addWorksheet('Alumnos');
 
-        // Cabeceras — sin codigo_estudiante
         ws.columns = [
             { header: 'tipo_documento', key: 'tipo_documento', width: 18 },
             { header: 'numero_documento', key: 'numero_documento', width: 20 },
@@ -222,7 +236,6 @@ export class ImportService {
             { header: 'telefono', key: 'telefono', width: 16 },
         ];
 
-        // Fila de ejemplo
         ws.addRow({
             tipo_documento: 'dni',
             numero_documento: '12345678',
@@ -234,7 +247,6 @@ export class ImportService {
             telefono: '999888777',
         });
 
-        // Hoja de instrucciones
         const info = wb.addWorksheet('Instrucciones');
         info.getColumn(1).width = 70;
         [

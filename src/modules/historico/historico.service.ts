@@ -8,6 +8,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
 import { StorageService } from '../storage/storage.service.js';
+
 interface AlumnoHistoricoRow {
   id: string;
   codigo_estudiante: string;
@@ -44,16 +45,20 @@ export interface SeccionFiltroRow {
   orden: number;
 }
 
+export interface PeriodoFiltroRow {
+  id: string;
+  nombre: string;
+  bimestre: number;
+  fecha_inicio: string;
+  fecha_fin: string;
+}
+
 export type SeccionFiltroItem = Omit<SeccionFiltroRow, 'orden'>;
 
 @Injectable()
 export class HistoricoService {
   private readonly logger = new Logger(HistoricoService.name);
-  /**
-   * Algunos entornos pueden no tener todavía `alumnos.anio_ingreso`.
-   * Detectamos su existencia bajo demanda para que los endpoints
-   * sigan funcionando aunque la columna falte (devolveremos `null`).
-   */
+
   private anioIngresoExists: boolean | null = null;
 
   constructor(
@@ -81,9 +86,6 @@ export class HistoricoService {
     return this.anioIngresoExists;
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // Años disponibles: unión de alumnos.anio_ingreso y periodos.anio
-  // ─────────────────────────────────────────────────────────────
   async findAniosDisponibles(): Promise<{ anios: number[] }> {
     try {
       const hasAnio = await this.hasAnioIngreso();
@@ -104,44 +106,48 @@ export class HistoricoService {
       throw new InternalServerErrorException('No se pudieron obtener los años del histórico');
     }
   }
-  // ─────────────────────────────────────────────────────────────
-  // Filtros (grados y secciones) disponibles para un año
-  // ─────────────────────────────────────────────────────────────
+
   async findFiltrosPorAnio(anio: number) {
     if (!Number.isFinite(anio)) {
       throw new BadRequestException('Parámetro "anio" inválido');
     }
 
     try {
-      const grados = await this.dataSource.query<GradoFiltroRow[]>(
-        `
-      SELECT DISTINCT g.id, g.nombre, g.orden
-        FROM grados g
-        JOIN secciones  s ON s.grado_id   = g.id
-        JOIN matriculas m ON m.seccion_id = s.id
-       WHERE m.anio = $1
-         -- FIX: quitar AND m.activo = TRUE
-         -- En años pasados las matrículas están inactivas (activo=false)
-         -- pero igual queremos mostrarlas en el histórico
-       ORDER BY g.orden ASC, g.nombre ASC
-      `,
-        [anio],
-      );
-
-      const seccionesRaw = await this.dataSource.query<SeccionFiltroRow[]>(
-        `
-      SELECT DISTINCT s.id, s.nombre, s.grado_id,
-                      g.nombre AS grado_nombre,
-                      g.orden  AS orden
-        FROM secciones  s
-        JOIN grados     g ON g.id         = s.grado_id
-        JOIN matriculas m ON m.seccion_id = s.id
-       WHERE m.anio = $1
-         -- FIX: quitar AND m.activo = TRUE (mismo motivo)
-       ORDER BY g.orden ASC, s.nombre ASC
-      `,
-        [anio],
-      );
+      const [grados, seccionesRaw, periodos] = await Promise.all([
+        this.dataSource.query<GradoFiltroRow[]>(
+          `
+          SELECT DISTINCT g.id, g.nombre, g.orden
+            FROM grados g
+            JOIN secciones  s ON s.grado_id   = g.id
+            JOIN matriculas m ON m.seccion_id = s.id
+           WHERE m.anio = $1
+           ORDER BY g.orden ASC, g.nombre ASC
+          `,
+          [anio],
+        ),
+        this.dataSource.query<SeccionFiltroRow[]>(
+          `
+          SELECT DISTINCT s.id, s.nombre, s.grado_id,
+                          g.nombre AS grado_nombre,
+                          g.orden  AS orden
+            FROM secciones  s
+            JOIN grados     g ON g.id         = s.grado_id
+            JOIN matriculas m ON m.seccion_id = s.id
+           WHERE m.anio = $1
+           ORDER BY g.orden ASC, s.nombre ASC
+          `,
+          [anio],
+        ),
+        this.dataSource.query<PeriodoFiltroRow[]>(
+          `
+          SELECT id, nombre, bimestre, fecha_inicio, fecha_fin
+            FROM periodos
+           WHERE anio = $1
+           ORDER BY bimestre ASC
+          `,
+          [anio],
+        ),
+      ]);
 
       const secciones: SeccionFiltroItem[] = seccionesRaw.map((s) => ({
         id: s.id,
@@ -150,7 +156,7 @@ export class HistoricoService {
         grado_nombre: s.grado_nombre,
       }));
 
-      return { grados, secciones };
+      return { grados, secciones, periodos };
     } catch (err) {
       this.logger.error(
         `findFiltrosPorAnio(${anio}) falló`,

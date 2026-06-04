@@ -1,9 +1,3 @@
-// Ubicación: src/modules/reports/alumno-report/alumno-report.service.ts
-//
-// Servicio agregador del reporte general de un alumno. Consulta todas
-// las fuentes relevantes y devuelve un único JSON listo para renderizar
-// en la vista imprimible del frontend.
-
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -173,30 +167,16 @@ export interface CitaResumen extends CitaResumenRow {
 }
 
 const EMPTY_ASISTENCIA_TOTAL: AsistenciaTotalRow = {
-    total: 0,
-    asistio: 0,
-    tardanza: 0,
-    justificado: 0,
-    falta: 0,
+    total: 0, asistio: 0, tardanza: 0, justificado: 0, falta: 0,
 };
 
 const EMPTY_CITAS: CitaResumen = {
-    total: 0,
-    pendientes: 0,
-    confirmadas: 0,
-    realizadas: 0,
-    canceladas: 0,
-    ultimas: [],
+    total: 0, pendientes: 0, confirmadas: 0, realizadas: 0, canceladas: 0, ultimas: [],
 };
 
 @Injectable()
 export class AlumnoReportService {
     private readonly logger = new Logger(AlumnoReportService.name);
-
-    /**
-     * `alumnos.anio_ingreso` puede no existir en algunos entornos.
-     * Detectamos su presencia una sola vez y cacheamos el resultado.
-     */
     private anioIngresoExists: boolean | null = null;
 
     constructor(
@@ -217,9 +197,12 @@ export class AlumnoReportService {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // ENTRYPOINT: arma el reporte completo del alumno
+    // ENTRYPOINT
+    // anio      → filtra todo al año indicado
+    // periodoId → filtra notas/asistencia/libretas al bimestre
+    //             específico (tiene precedencia sobre anio en esos bloques)
     // ─────────────────────────────────────────────────────────────
-    async buildReport(alumnoId: string, anio?: number) {
+    async buildReport(alumnoId: string, anio?: number, periodoId?: string) {
         const personal = await this.fetchPersonal(alumnoId);
         if (!personal) {
             throw new NotFoundException(`Alumno ${alumnoId} no encontrado`);
@@ -236,9 +219,9 @@ export class AlumnoReportService {
         ] = await Promise.all([
             this.fetchMatriculas(alumnoId, anio),
             this.fetchPadres(alumnoId),
-            this.fetchLibretas(alumnoId, anio),
-            this.fetchNotasResumen(alumnoId, anio),
-            this.fetchAsistenciaResumen(alumnoId, anio),
+            this.fetchLibretas(alumnoId, anio, periodoId),
+            this.fetchNotasResumen(alumnoId, anio, periodoId),
+            this.fetchAsistenciaResumen(alumnoId, anio, periodoId),
             this.fetchPsicologiaResumen(alumnoId),
             this.fetchCitasResumen(alumnoId, anio),
         ]);
@@ -246,6 +229,7 @@ export class AlumnoReportService {
         return {
             generado_en: new Date().toISOString(),
             anio_filtro: anio ?? null,
+            periodo_filtro: periodoId ?? null,
             personal,
             matriculas,
             padres,
@@ -258,9 +242,8 @@ export class AlumnoReportService {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Bloques individuales
+    // PERSONAL
     // ─────────────────────────────────────────────────────────────
-
     private async fetchPersonal(
         alumnoId: string,
     ): Promise<(AlumnoBase & { foto_url: string | null }) | null> {
@@ -298,6 +281,9 @@ export class AlumnoReportService {
         };
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // MATRÍCULAS — siempre por año completo (período no aplica aquí)
+    // ─────────────────────────────────────────────────────────────
     private async fetchMatriculas(
         alumnoId: string,
         anio?: number,
@@ -308,7 +294,7 @@ export class AlumnoReportService {
             params.push(anio);
             extra = `AND m.anio = $${params.length}`;
         }
-        return this.ds.query<MatriculaReportRow[]>(
+        return (this.ds.query(
             `
             SELECT m.id,
                    m.activo,
@@ -328,27 +314,32 @@ export class AlumnoReportService {
               FROM matriculas m
               JOIN secciones s ON s.id = m.seccion_id
               JOIN grados    g ON g.id = s.grado_id
-              LEFT JOIN docentes t ON t.id = s.tutor_id
+              LEFT JOIN secciones_tutores st
+                     ON st.seccion_id = s.id
+                    AND st.anio       = m.anio
+                    AND st.activo     = TRUE
+              LEFT JOIN docentes t ON t.id = st.docente_id
              WHERE m.alumno_id = $1
-               AND m.activo = true
-             ${extra}
+               ${extra}
              ORDER BY m.anio DESC, g.orden ASC
             `,
             params,
-        );
+        ) as Promise<MatriculaReportRow[]>);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // PADRES — sin filtro temporal
+    // ─────────────────────────────────────────────────────────────
     private async fetchPadres(alumnoId: string): Promise<PadreReportRow[]> {
-        return this.ds
-            .query<PadreReportRow[]>(
-                `
+        return this.ds.query<PadreReportRow[]>(
+            `
             SELECT p.id,
                    p.nombre,
                    p.apellido_paterno,
                    p.apellido_materno,
                    p.email,
                    p.telefono,
-                   pa.relacion,
+                   p.relacion,
                    c.numero_documento,
                    c.tipo_documento
               FROM padre_alumno pa
@@ -358,39 +349,28 @@ export class AlumnoReportService {
                AND c.activo = TRUE
              ORDER BY p.apellido_paterno, p.nombre
             `,
-                [alumnoId],
-            )
-            .catch((err) => {
-                // pa.relacion no siempre existe — fallback sin la columna.
-                this.logger.warn(
-                    `fetchPadres con 'relacion' falló (${(err as Error).message}); reintentando sin esa columna.`,
-                );
-                return this.ds.query<PadreReportRow[]>(
-                    `
-                SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno,
-                       p.email, p.telefono, NULL AS relacion,
-                       c.numero_documento, c.tipo_documento
-                  FROM padre_alumno pa
-                  JOIN padres  p ON p.id = pa.padre_id
-                  JOIN cuentas c ON c.id = p.id
-                 WHERE pa.alumno_id = $1 AND c.activo = TRUE
-                 ORDER BY p.apellido_paterno, p.nombre
-                `,
-                    [alumnoId],
-                );
-            });
+            [alumnoId],
+        );
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // LIBRETAS — período tiene precedencia sobre año
+    // ─────────────────────────────────────────────────────────────
     private async fetchLibretas(
         alumnoId: string,
         anio?: number,
+        periodoId?: string,
     ): Promise<LibretaReportItem[]> {
         const params: (string | number)[] = [alumnoId];
         let extra = '';
-        if (anio !== undefined) {
+        if (periodoId) {
+            params.push(periodoId);
+            extra = `AND l.periodo_id = $${params.length}`;
+        } else if (anio !== undefined) {
             params.push(anio);
             extra = `AND p.anio = $${params.length}`;
         }
+
         const rows = await this.ds.query<LibretaReportRow[]>(
             `
             SELECT l.id,
@@ -412,28 +392,26 @@ export class AlumnoReportService {
             params,
         );
 
-        // Generamos URLs firmadas en paralelo (las libretas son
-        // archivos privados en storage, así que necesitan firma).
-        const items: LibretaReportItem[] = await Promise.all(
-            rows.map(async (r): Promise<LibretaReportItem> => {
-                const url = await this.buildSignedUrl(r.storage_key);
-                return { ...r, url };
-            }),
+        return Promise.all(
+            rows.map(async (r): Promise<LibretaReportItem> => ({
+                ...r,
+                url: await this.buildSignedUrl(r.storage_key),
+            })),
         );
-        return items;
     }
 
     private async buildSignedUrl(storageKey: string): Promise<string | null> {
-        try {
-            return await this.storage.getSignedUrl(storageKey);
-        } catch {
-            return null;
-        }
+        try { return await this.storage.getSignedUrl(storageKey); }
+        catch { return null; }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // NOTAS — período tiene precedencia sobre año
+    // ─────────────────────────────────────────────────────────────
     private async fetchNotasResumen(
         alumnoId: string,
         anio?: number,
+        periodoId?: string,
     ): Promise<{
         por_curso_bimestre: NotaCursoBimestreRow[];
         por_bimestre: NotaBimestreRow[];
@@ -441,32 +419,43 @@ export class AlumnoReportService {
     }> {
         const params: (string | number)[] = [alumnoId];
         let extra = '';
-        if (anio !== undefined) {
+        if (periodoId) {
+            params.push(periodoId);
+            extra = `AND n.periodo_id = $${params.length}`;
+        } else if (anio !== undefined) {
             params.push(anio);
             extra = `AND p.anio = $${params.length}`;
         }
+
         const [porCursoBimestre, porBimestre, detalle] = await Promise.all([
-            this.ds.query<NotaCursoBimestreRow[]>(
+            (this.ds.query(
                 `
-                SELECT p.anio, p.bimestre, p.nombre AS periodo_nombre,
-                       c.id AS curso_id, c.nombre AS curso, c.color,
-                       AVG(n.nota)::numeric(5,2) AS promedio,
-                       COUNT(n.id)::int AS cantidad
+                SELECT p.anio,
+                       p.bimestre,
+                       p.nombre                       AS periodo_nombre,
+                       c.id                           AS curso_id,
+                       cc.nombre                      AS curso,
+                       cc.color,
+                       AVG(n.nota)::numeric(5,2)      AS promedio,
+                       COUNT(n.id)::int               AS cantidad
                   FROM notas n
-                  JOIN cursos   c ON c.id = n.curso_id
-                  JOIN periodos p ON p.id = n.periodo_id
+                  JOIN cursos          c  ON c.id  = n.curso_id
+                  JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
+                  JOIN periodos        p  ON p.id  = n.periodo_id
                  WHERE n.alumno_id = $1
                    AND n.nota IS NOT NULL
                    ${extra}
-                 GROUP BY p.anio, p.bimestre, p.nombre, c.id, c.nombre, c.color
-                 ORDER BY p.anio DESC, p.bimestre ASC, c.nombre ASC
+                 GROUP BY p.anio, p.bimestre, p.nombre, c.id, cc.nombre, cc.color
+                 ORDER BY p.anio DESC, p.bimestre ASC, cc.nombre ASC
                 `,
                 params,
-            ),
-            this.ds.query<NotaBimestreRow[]>(
+            ) as Promise<NotaCursoBimestreRow[]>),
+            (this.ds.query(
                 `
-                SELECT p.anio, p.bimestre, p.nombre AS periodo_nombre,
-                       AVG(n.nota)::numeric(5,2) AS promedio_general,
+                SELECT p.anio,
+                       p.bimestre,
+                       p.nombre                       AS periodo_nombre,
+                       AVG(n.nota)::numeric(5,2)      AS promedio_general,
                        COUNT(DISTINCT n.curso_id)::int AS cursos
                   FROM notas n
                   JOIN periodos p ON p.id = n.periodo_id
@@ -477,41 +466,42 @@ export class AlumnoReportService {
                  ORDER BY p.anio DESC, p.bimestre ASC
                 `,
                 params,
-            ),
-            this.ds.query<NotaDetalleRow[]>(
+            ) as Promise<NotaBimestreRow[]>),
+            (this.ds.query(
                 `
                 SELECT n.id,
                        p.anio,
                        p.bimestre,
-                       p.nombre AS periodo_nombre,
-                       c.nombre AS curso,
+                       p.nombre                  AS periodo_nombre,
+                       cc.nombre                 AS curso,
                        n.titulo,
                        n.tipo,
-                       n.nota::numeric(5,2) AS nota,
+                       n.nota::numeric(5,2)       AS nota,
                        n.observaciones,
                        n.fecha
                   FROM notas n
-                  JOIN cursos   c ON c.id = n.curso_id
-                  JOIN periodos p ON p.id = n.periodo_id
+                  JOIN cursos          c  ON c.id  = n.curso_id
+                  JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
+                  JOIN periodos        p  ON p.id  = n.periodo_id
                  WHERE n.alumno_id = $1
                    ${extra}
                  ORDER BY p.anio DESC, p.bimestre ASC,
-                          c.nombre ASC, n.fecha DESC NULLS LAST, n.titulo ASC
+                          cc.nombre ASC, n.fecha DESC NULLS LAST, n.titulo ASC
                 `,
                 params,
-            ),
+            ) as Promise<NotaDetalleRow[]>),
         ]);
 
-        return {
-            por_curso_bimestre: porCursoBimestre,
-            por_bimestre: porBimestre,
-            detalle,
-        };
+        return { por_curso_bimestre: porCursoBimestre, por_bimestre: porBimestre, detalle };
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // ASISTENCIA — período tiene precedencia sobre año
+    // ─────────────────────────────────────────────────────────────
     private async fetchAsistenciaResumen(
         alumnoId: string,
         anio?: number,
+        periodoId?: string,
     ): Promise<{
         total: AsistenciaTotalRow;
         por_bimestre: AsistenciaBimestreRow[];
@@ -520,21 +510,25 @@ export class AlumnoReportService {
     }> {
         const params: (string | number)[] = [alumnoId];
         let extra = '';
-        if (anio !== undefined) {
+        if (periodoId) {
+            params.push(periodoId);
+            extra = `AND ag.periodo_id = $${params.length}`;
+        } else if (anio !== undefined) {
             params.push(anio);
             extra = `AND p.anio = $${params.length}`;
         }
+
         const porBimestrePromise = this.ds
             .query<AsistenciaBimestreRow[]>(
                 `
             SELECT p.anio,
                    p.bimestre,
                    p.nombre AS periodo_nombre,
-                   COUNT(*)::int                                    AS total,
-                   COUNT(*) FILTER (WHERE ag.estado = 'asistio')::int    AS asistio,
-                   COUNT(*) FILTER (WHERE ag.estado = 'tardanza')::int   AS tardanza,
-                   COUNT(*) FILTER (WHERE ag.estado = 'justificado')::int AS justificado,
-                   COUNT(*) FILTER (WHERE ag.estado = 'falta')::int      AS falta
+                   COUNT(*)::int                                             AS total,
+                   COUNT(*) FILTER (WHERE ag.estado = 'asistio')::int       AS asistio,
+                   COUNT(*) FILTER (WHERE ag.estado = 'tardanza')::int      AS tardanza,
+                   COUNT(*) FILTER (WHERE ag.estado = 'justificado')::int   AS justificado,
+                   COUNT(*) FILTER (WHERE ag.estado = 'falta')::int         AS falta
               FROM asistencias_generales ag
               JOIN periodos p ON p.id = ag.periodo_id
              WHERE ag.alumno_id = $1
@@ -545,20 +539,18 @@ export class AlumnoReportService {
                 params,
             )
             .catch((err) => {
-                this.logger.warn(
-                    `asistencias_generales falló (${(err as Error).message})`,
-                );
+                this.logger.warn(`asistencias_generales falló (${(err as Error).message})`);
                 return [];
             });
 
         const totalRowsPromise = this.ds
             .query<AsistenciaTotalRow[]>(
                 `
-            SELECT COUNT(*)::int                                    AS total,
-                   COUNT(*) FILTER (WHERE ag.estado = 'asistio')::int    AS asistio,
-                   COUNT(*) FILTER (WHERE ag.estado = 'tardanza')::int   AS tardanza,
-                   COUNT(*) FILTER (WHERE ag.estado = 'justificado')::int AS justificado,
-                   COUNT(*) FILTER (WHERE ag.estado = 'falta')::int      AS falta
+            SELECT COUNT(*)::int                                             AS total,
+                   COUNT(*) FILTER (WHERE ag.estado = 'asistio')::int       AS asistio,
+                   COUNT(*) FILTER (WHERE ag.estado = 'tardanza')::int      AS tardanza,
+                   COUNT(*) FILTER (WHERE ag.estado = 'justificado')::int   AS justificado,
+                   COUNT(*) FILTER (WHERE ag.estado = 'falta')::int         AS falta
               FROM asistencias_generales ag
               JOIN periodos p ON p.id = ag.periodo_id
              WHERE ag.alumno_id = $1
@@ -575,15 +567,15 @@ export class AlumnoReportService {
                    ag.fecha,
                    ag.estado,
                    ag.observacion,
-                   p.nombre AS periodo_nombre,
-                   p.anio AS periodo_anio,
+                   p.nombre   AS periodo_nombre,
+                   p.anio     AS periodo_anio,
                    p.bimestre AS periodo_bimestre,
-                   g.nombre AS grado,
-                   s.nombre AS seccion
+                   g.nombre   AS grado,
+                   s.nombre   AS seccion
               FROM asistencias_generales ag
-              JOIN periodos p ON p.id = ag.periodo_id
+              JOIN periodos   p ON p.id = ag.periodo_id
               LEFT JOIN secciones s ON s.id = ag.seccion_id
-              LEFT JOIN grados g ON g.id = s.grado_id
+              LEFT JOIN grados    g ON g.id = s.grado_id
              WHERE ag.alumno_id = $1
                ${extra}
              ORDER BY ag.fecha DESC
@@ -591,75 +583,44 @@ export class AlumnoReportService {
                 params,
             )
             .catch((err) => {
-                this.logger.warn(
-                    `detalle de asistencias_generales falló (${(err as Error).message})`,
-                );
+                this.logger.warn(`detalle asistencias falló (${(err as Error).message})`);
                 return [];
             });
 
         const [porBimestre, totalRows, detalle] = await Promise.all([
-            porBimestrePromise,
-            totalRowsPromise,
-            detallePromise,
+            porBimestrePromise, totalRowsPromise, detallePromise,
         ]);
 
         const total = totalRows[0] ?? EMPTY_ASISTENCIA_TOTAL;
-        const porcentajeAsistencia =
-            total.total > 0
-                ? Math.round(((total.asistio + total.tardanza) / total.total) * 1000) /
-                10
-                : null;
+        const porcentajeAsistencia = total.total > 0
+            ? Math.round(((total.asistio + total.tardanza) / total.total) * 1000) / 10
+            : null;
 
-        return {
-            total,
-            por_bimestre: porBimestre,
-            detalle,
-            porcentaje_asistencia: porcentajeAsistencia,
-        };
+        return { total, por_bimestre: porBimestre, detalle, porcentaje_asistencia: porcentajeAsistencia };
     }
 
-    private async fetchPsicologiaResumen(
-        alumnoId: string,
-    ): Promise<PsicologiaResumen> {
+    // ─────────────────────────────────────────────────────────────
+    // PSICOLOGÍA — siempre historial completo
+    // ─────────────────────────────────────────────────────────────
+    private async fetchPsicologiaResumen(alumnoId: string): Promise<PsicologiaResumen> {
         const empty: PsicologiaResumen = {
-            asignaciones: 0,
-            fichas: 0,
-            ultima_ficha: null,
-            categorias: [],
+            asignaciones: 0, fichas: 0, ultima_ficha: null, categorias: [],
         };
-
         try {
             const [asignacionesRows, fichasRows, categorias] = await Promise.all([
                 this.ds.query<{ total: number }[]>(
-                    `
-                    SELECT COUNT(*)::int AS total
-                      FROM psicologa_alumno
-                     WHERE alumno_id = $1
-                       AND activo = TRUE
-                    `,
+                    `SELECT COUNT(*)::int AS total FROM psicologa_alumno WHERE alumno_id = $1 AND activo = TRUE`,
                     [alumnoId],
                 ),
                 this.ds.query<{ total: number; ultima_ficha: string | null }[]>(
-                    `
-                    SELECT COUNT(*)::int AS total,
-                           MAX(created_at) AS ultima_ficha
-                      FROM fichas_psicologia
-                     WHERE alumno_id = $1
-                    `,
+                    `SELECT COUNT(*)::int AS total, MAX(created_at) AS ultima_ficha FROM fichas_psicologia WHERE alumno_id = $1`,
                     [alumnoId],
                 ),
                 this.ds.query<PsicologiaCategoriaRow[]>(
-                    `
-                    SELECT categoria, COUNT(*)::int AS cantidad
-                      FROM fichas_psicologia
-                     WHERE alumno_id = $1
-                     GROUP BY categoria
-                     ORDER BY cantidad DESC, categoria ASC
-                    `,
+                    `SELECT categoria, COUNT(*)::int AS cantidad FROM fichas_psicologia WHERE alumno_id = $1 GROUP BY categoria ORDER BY cantidad DESC, categoria ASC`,
                     [alumnoId],
                 ),
             ]);
-
             return {
                 asignaciones: asignacionesRows[0]?.total ?? 0,
                 fichas: fichasRows[0]?.total ?? 0,
@@ -667,67 +628,47 @@ export class AlumnoReportService {
                 categorias,
             };
         } catch (err) {
-            this.logger.warn(
-                `psicología no disponible para reporte (${(err as Error).message})`,
-            );
+            this.logger.warn(`psicología no disponible (${(err as Error).message})`);
             return empty;
         }
     }
 
-    private async fetchCitasResumen(
-        alumnoId: string,
-        anio?: number,
-    ): Promise<CitaResumen> {
+    // ─────────────────────────────────────────────────────────────
+    // CITAS — filtra por año (no por período, las citas no tienen bimestre)
+    // ─────────────────────────────────────────────────────────────
+    private async fetchCitasResumen(alumnoId: string, anio?: number): Promise<CitaResumen> {
         const params: (string | number)[] = [alumnoId];
         let extra = '';
         if (anio !== undefined) {
             params.push(anio);
             extra = `AND EXTRACT(YEAR FROM c.fecha_hora)::int = $${params.length}`;
         }
-
         try {
             const [resumenRows, ultimas] = await Promise.all([
-                this.ds.query<CitaResumenRow[]>(
+                (this.ds.query(
                     `
                     SELECT COUNT(*)::int AS total,
-                           COUNT(*) FILTER (WHERE c.estado = 'pendiente')::int AS pendientes,
+                           COUNT(*) FILTER (WHERE c.estado = 'pendiente')::int  AS pendientes,
                            COUNT(*) FILTER (WHERE c.estado = 'confirmada')::int AS confirmadas,
-                           COUNT(*) FILTER (WHERE c.estado = 'realizada')::int AS realizadas,
-                           COUNT(*) FILTER (WHERE c.estado = 'cancelada')::int AS canceladas
-                      FROM citas c
-                     WHERE c.alumno_id = $1
-                       ${extra}
+                           COUNT(*) FILTER (WHERE c.estado = 'realizada')::int  AS realizadas,
+                           COUNT(*) FILTER (WHERE c.estado = 'cancelada')::int  AS canceladas
+                      FROM citas c WHERE c.alumno_id = $1 ${extra}
                     `,
                     params,
-                ),
-                this.ds.query<CitaUltimaRow[]>(
+                ) as Promise<CitaResumenRow[]>),
+                (this.ds.query(
                     `
-                    SELECT c.id,
-                           c.tipo,
-                           c.modalidad,
-                           c.motivo,
-                           c.estado,
-                           c.fecha_hora,
-                           c.notas_previas,
-                           c.notas_posteriores
-                      FROM citas c
-                     WHERE c.alumno_id = $1
-                       ${extra}
-                     ORDER BY c.fecha_hora DESC
-                     LIMIT 10
+                    SELECT c.id, c.tipo, c.modalidad, c.motivo, c.estado,
+                           c.fecha_hora, c.notas_previas, c.notas_posteriores
+                      FROM citas c WHERE c.alumno_id = $1 ${extra}
+                     ORDER BY c.fecha_hora DESC LIMIT 10
                     `,
                     params,
-                ),
+                ) as Promise<CitaUltimaRow[]>),
             ]);
-
-            return {
-                ...(resumenRows[0] ?? EMPTY_CITAS),
-                ultimas,
-            };
+            return { ...(resumenRows[0] ?? EMPTY_CITAS), ultimas };
         } catch (err) {
-            this.logger.warn(
-                `citas no disponibles para reporte (${(err as Error).message})`,
-            );
+            this.logger.warn(`citas no disponibles (${(err as Error).message})`);
             return EMPTY_CITAS;
         }
     }
