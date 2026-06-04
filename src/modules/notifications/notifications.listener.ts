@@ -155,7 +155,7 @@ export class NotificationsListener {
       docentes: 'docente',
       padres: 'padre',
       psicologas: 'psicologa',
-      auxiliares: 'auxiliar',
+      staff: 'staff',
       admins: 'admin',
     };
 
@@ -229,13 +229,6 @@ export class NotificationsListener {
     }
   }
 
-  // ── Periodo vencido ─────────────────────────────────────────────
-
-  /**
-   * Notifica a todos los admins que un periodo terminó y el siguiente
-   * debe activarse manualmente. Un clic desde la campana lleva directo
-   * a /academico/periodos.
-   */
   @OnEvent(NOTIFICATION_EVENT_NAMES.PERIOD_EXPIRED, { async: true })
   async onPeriodExpired(ev: PeriodExpiredEvent): Promise<void> {
     try {

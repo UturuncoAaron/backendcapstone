@@ -1,10 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AlumnoDashboardProvider } from './providers/alumno-dashboard.provider';
-import { DocenteDashboardProvider } from './providers/docente-dashboard.provider';
-import { PadreDashboardProvider } from './providers/padre-dashboard.provider';
-import { AdminDashboardProvider } from './providers/admin-dashboard.provider';
-import { PsicologaDashboardProvider } from './providers/psicologa-dashboard.provider';
-import { AuxiliarDashboardProvider } from './providers/auxiliar-dashboard.provider';
+import { AlumnoDashboardProvider } from './providers/alumno-dashboard.provider.js';
+import { DocenteDashboardProvider } from './providers/docente-dashboard.provider.js';
+import { PadreDashboardProvider } from './providers/padre-dashboard.provider.js';
+import { AdminDashboardProvider } from './providers/admin-dashboard.provider.js';
+import { PsicologaDashboardProvider } from './providers/psicologa-dashboard.provider.js';
+import { StaffDashboardProvider } from './providers/staff-dashboard.provider.js';
 
 @Injectable()
 export class DashboardService {
@@ -14,7 +14,7 @@ export class DashboardService {
         private readonly padre: PadreDashboardProvider,
         private readonly admin: AdminDashboardProvider,
         private readonly psicologa: PsicologaDashboardProvider,
-        private readonly auxiliar: AuxiliarDashboardProvider,
+        private readonly staff: StaffDashboardProvider,
     ) { }
 
     getResumen(rol: string, userId: string) {
@@ -24,7 +24,7 @@ export class DashboardService {
             case 'padre': return this.padre.getResumen(userId);
             case 'admin': return this.admin.getResumen();
             case 'psicologa': return this.psicologa.getResumen(userId);
-            case 'auxiliar': return this.auxiliar.getResumen(userId);
+            case 'staff': return this.staff.getResumen(userId);
             default: throw new BadRequestException(`Rol desconocido: ${rol}`);
         }
     }

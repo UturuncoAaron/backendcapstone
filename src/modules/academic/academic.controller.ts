@@ -21,6 +21,7 @@ export class AcademicController {
     findAllGrados() {
         return this.academicService.findAllGrados();
     }
+
     @Get('grados/:id')
     @Roles('admin', 'docente')
     findGrado(@Param('id', ParseUUIDPipe) id: string) {
@@ -28,7 +29,6 @@ export class AcademicController {
     }
 
     // ── SECCIONES ────────────────────────────────────────────────
-
 
     @Get('secciones')
     @Roles('admin', 'docente', 'psicologa')
@@ -56,6 +56,7 @@ export class AcademicController {
             body.capacidad,
         );
     }
+
     @Patch('secciones/:id')
     @Roles('admin')
     updateSeccion(
@@ -87,7 +88,8 @@ export class AcademicController {
     // ── PERIODOS ─────────────────────────────────────────────────
 
     @Get('periodos')
-    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa','auxiliar')
+    // CORREGIDO: Único lugar donde estaba 'auxiliar', reemplazado estrictamente por 'staff'
+    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa', 'staff')
     findAllPeriodos() {
         return this.academicService.findAllPeriodos();
     }

@@ -20,7 +20,7 @@ const DEST_VALID_PATTERNS = [
   /^alumnos$/,
   /^padres$/,
   /^docentes$/,
-  /^auxiliares$/,
+  /^staff$/,
   /^psicologas$/,
   /^grado:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
   /^seccion:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
@@ -56,7 +56,6 @@ export class AnnouncementsService {
       throw new BadRequestException(`Destinatarios inválidos: ${invalid.join(', ')}`);
     }
 
-    // Verificar que grados y secciones existen
     for (const d of dests) {
       if (d.startsWith('grado:')) {
         const id = d.split(':')[1];
@@ -75,7 +74,6 @@ export class AnnouncementsService {
   // ══════════════════════════════════════════════════════════════
 
   async create(user: { id: string; rol: string }, dto: CreateAnnouncementDto) {
-    // Inferir periodo_id
     let periodoId = dto.periodo_id ?? null;
     if (!periodoId) {
       const [activo] = await this.ds.query<{ id: string }[]>(
@@ -84,7 +82,6 @@ export class AnnouncementsService {
       periodoId = activo?.id ?? null;
     }
 
-    // Solo admin puede fijar
     const fijado = user.rol === 'admin' ? (dto.fijado ?? false) : false;
     const fijadoHasta = fijado ? (dto.fijado_hasta ?? null) : null;
 
@@ -121,22 +118,23 @@ export class AnnouncementsService {
     paramOffset: number,
     params: any[],
   ): string {
-    if (rol === 'admin') return 'TRUE'; // admin ve todo
+    if (rol === 'admin') return 'TRUE';
 
     const parts: string[] = [];
 
-    // Siempre visible si destinatarios contiene el rol directo o 'todos'
     parts.push(`('todos' = ANY(c.destinatarios))`);
     if (rol !== 'admin') {
       const rolPlural: Record<string, string> = {
-        alumno: 'alumnos', docente: 'docentes', padre: 'padres',
-        psicologa: 'psicologas', auxiliar: 'auxiliares',
+        alumno: 'alumnos',
+        docente: 'docentes',
+        padre: 'padres',
+        psicologa: 'psicologas',
+        staff: 'staff',
       };
       const plural = rolPlural[rol];
       if (plural) parts.push(`('${plural}' = ANY(c.destinatarios))`);
     }
 
-    // Alumno: ver si está en grado/sección/alumno específico
     if (rol === 'alumno') {
       params.push(userId);
       const p = paramOffset + params.length;
@@ -156,7 +154,6 @@ export class AnnouncementsService {
       parts.push(`('alumno:' || $${p2}::text = ANY(c.destinatarios))`);
     }
 
-    // Padre: ver hijos
     if (rol === 'padre') {
       params.push(userId);
       const p = paramOffset + params.length;
@@ -228,16 +225,16 @@ export class AnnouncementsService {
              (SELECT COUNT(*) FROM attachments a
               WHERE a.owner_type = 'announcement' AND a.owner_id = c.id) AS total_archivos,
              cu.rol AS autor_rol,
-             COALESCE(adm.nombre, doc.nombre, psi.nombre, aux.nombre) AS autor_nombre,
-             COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, aux.apellido_paterno) AS autor_apellido,
+             COALESCE(adm.nombre, doc.nombre, psi.nombre, ax.nombre) AS autor_nombre,
+             COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, ax.apellido_paterno) AS autor_apellido,
              adm.foto_storage_key AS autor_foto
       FROM comunicados c
       LEFT JOIN periodos p ON p.id = c.periodo_id
       INNER JOIN cuentas cu ON cu.id = c.created_by
-      LEFT JOIN admins adm ON adm.id = c.created_by
-      LEFT JOIN docentes doc ON doc.id = c.created_by
+      LEFT JOIN admins     adm ON adm.id = c.created_by
+      LEFT JOIN docentes   doc ON doc.id = c.created_by
       LEFT JOIN psicologas psi ON psi.id = c.created_by
-      LEFT JOIN auxiliares aux ON aux.id = c.created_by
+      LEFT JOIN staff      ax  ON ax.id  = c.created_by
       WHERE c.activo = TRUE
         AND ${visibilidad}
         ${whereExtra}
@@ -284,7 +281,7 @@ export class AnnouncementsService {
         rol: r.autor_rol,
         foto_url: r.autor_foto ? this.storage.getPublicUrl(r.autor_foto) : null,
       },
-      archivos: (attachmentsMap.get(r.id) ?? []).map(a => ({
+      archivos: (attachmentsMap.get(r.id) ?? []).map((a: any) => ({
         id: a.id,
         original_name: a.original_name,
         mime_type: a.mime_type,
@@ -346,18 +343,18 @@ export class AnnouncementsService {
              (SELECT COUNT(*) FROM attachments a
               WHERE a.owner_type = 'announcement' AND a.owner_id = c.id) AS total_archivos,
              cu.rol AS autor_rol,
-             COALESCE(adm.nombre, doc.nombre, psi.nombre, aux.nombre) AS autor_nombre,
-             COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, aux.apellido_paterno) AS autor_apellido,
+             COALESCE(adm.nombre, doc.nombre, psi.nombre, ax.nombre) AS autor_nombre,
+             COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, ax.apellido_paterno) AS autor_apellido,
              adm.foto_storage_key AS autor_foto,
              (SELECT COUNT(*) FROM comunicados_lecturas cl
               WHERE cl.comunicado_id = c.id) AS lecturas_total
       FROM comunicados c
       LEFT JOIN periodos p ON p.id = c.periodo_id
       INNER JOIN cuentas cu ON cu.id = c.created_by
-      LEFT JOIN admins adm ON adm.id = c.created_by
-      LEFT JOIN docentes doc ON doc.id = c.created_by
+      LEFT JOIN admins     adm ON adm.id = c.created_by
+      LEFT JOIN docentes   doc ON doc.id = c.created_by
       LEFT JOIN psicologas psi ON psi.id = c.created_by
-      LEFT JOIN auxiliares aux ON aux.id = c.created_by
+      LEFT JOIN staff      ax  ON ax.id  = c.created_by
       WHERE c.id = $1
     `;
     const rows = await this.repo.query(sql, [id]);
@@ -366,14 +363,12 @@ export class AnnouncementsService {
     const r = rows[0];
     const archivos = await this.attachments.listByOwner('announcement', id);
 
-    // Marcar como leído (upsert)
     if (userId) {
       await this.ds.query(
         `INSERT INTO comunicados_lecturas (comunicado_id, cuenta_id)
          VALUES ($1, $2) ON CONFLICT DO NOTHING`,
         [id, userId],
       );
-      // Incrementar vistas atómicamente
       await this.ds.query(`UPDATE comunicados SET vistas = vistas + 1 WHERE id = $1`, [id]);
     }
 
@@ -399,7 +394,7 @@ export class AnnouncementsService {
         rol: r.autor_rol,
         foto_url: r.autor_foto ? this.storage.getPublicUrl(r.autor_foto) : null,
       },
-      archivos: archivos.map(a => ({
+      archivos: archivos.map((a: any) => ({
         id: a.id,
         original_name: a.original_name,
         mime_type: a.mime_type,
@@ -477,17 +472,17 @@ export class AnnouncementsService {
   async getLecturas(id: string) {
     const rows = await this.ds.query(
       `SELECT cl.cuenta_id, cu.rol,
-              COALESCE(adm.nombre, doc.nombre, psi.nombre, aux.nombre, al.nombre, pa.nombre) AS nombre,
-              COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, aux.apellido_paterno, al.apellido_paterno, pa.apellido_paterno) AS apellido,
+              COALESCE(adm.nombre, doc.nombre, psi.nombre, ax.nombre, al.nombre, pa.nombre) AS nombre,
+              COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, ax.apellido_paterno, al.apellido_paterno, pa.apellido_paterno) AS apellido,
               cl.leido_en
        FROM comunicados_lecturas cl
        JOIN cuentas cu ON cu.id = cl.cuenta_id
-       LEFT JOIN admins adm ON adm.id = cl.cuenta_id
-       LEFT JOIN docentes doc ON doc.id = cl.cuenta_id
+       LEFT JOIN admins     adm ON adm.id = cl.cuenta_id
+       LEFT JOIN docentes   doc ON doc.id = cl.cuenta_id
        LEFT JOIN psicologas psi ON psi.id = cl.cuenta_id
-       LEFT JOIN auxiliares aux ON aux.id = cl.cuenta_id
-       LEFT JOIN alumnos al ON al.id = cl.cuenta_id
-       LEFT JOIN padres pa ON pa.id = cl.cuenta_id
+       LEFT JOIN staff      ax  ON ax.id  = cl.cuenta_id
+       LEFT JOIN alumnos    al  ON al.id  = cl.cuenta_id
+       LEFT JOIN padres     pa  ON pa.id  = cl.cuenta_id
        WHERE cl.comunicado_id = $1
        ORDER BY cl.leido_en DESC`,
       [id],
@@ -543,17 +538,17 @@ export class AnnouncementsService {
              (SELECT COUNT(*) FROM attachments a
               WHERE a.owner_type = 'announcement' AND a.owner_id = c.id) AS total_archivos,
              cu.rol AS autor_rol,
-             COALESCE(adm.nombre, doc.nombre, psi.nombre, aux.nombre) AS autor_nombre,
-             COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, aux.apellido_paterno) AS autor_apellido,
+             COALESCE(adm.nombre, doc.nombre, psi.nombre, ax.nombre) AS autor_nombre,
+             COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, ax.apellido_paterno) AS autor_apellido,
              (SELECT COUNT(*) FROM comunicados_lecturas cl
               WHERE cl.comunicado_id = c.id) AS lecturas_total
       FROM comunicados c
       LEFT JOIN periodos p ON p.id = c.periodo_id
       INNER JOIN cuentas cu ON cu.id = c.created_by
-      LEFT JOIN admins adm ON adm.id = c.created_by
-      LEFT JOIN docentes doc ON doc.id = c.created_by
+      LEFT JOIN admins     adm ON adm.id = c.created_by
+      LEFT JOIN docentes   doc ON doc.id = c.created_by
       LEFT JOIN psicologas psi ON psi.id = c.created_by
-      LEFT JOIN auxiliares aux ON aux.id = c.created_by
+      LEFT JOIN staff      ax  ON ax.id  = c.created_by
       WHERE 1=1 ${whereExtra}
       ORDER BY ${orderClause}
       LIMIT $${params.length + 1}
@@ -590,7 +585,7 @@ export class AnnouncementsService {
           ? `${r.autor_nombre} ${r.autor_apellido}` : 'Desconocido',
         rol: r.autor_rol,
       },
-      archivos: (attachmentsMap.get(r.id) ?? []).map(a => ({
+      archivos: (attachmentsMap.get(r.id) ?? []).map((a: any) => ({
         id: a.id,
         original_name: a.original_name,
         mime_type: a.mime_type,

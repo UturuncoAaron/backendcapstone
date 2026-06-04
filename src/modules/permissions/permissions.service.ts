@@ -10,10 +10,6 @@ import { CreatePermisoDto, UpdatePermisoDto } from './dto/permissions.dto.js';
 @Injectable()
 export class PermissionsService {
 
-    // ── Caché en memoria ──────────────────────────────────────────
-    // Clave: "cuentaId:modulo:accion" → { value, expiresAt }
-    // TTL 90 s: suficiente para un colegio; se invalida de inmediato
-    // al otorgar/revocar, así que nunca hay lecturas "sucias".
     private cache = new Map<string, { value: boolean; expiresAt: number }>();
     private readonly TTL_MS = 90_000;
 
@@ -23,8 +19,6 @@ export class PermissionsService {
         @InjectDataSource()
         private readonly ds: DataSource,
     ) { }
-
-    // ── Helpers de caché ─────────────────────────────────────────
 
     private cacheKey(cuentaId: string, modulo: string, accion: string) {
         return `${cuentaId}:${modulo}:${accion}`;
@@ -43,12 +37,10 @@ export class PermissionsService {
     ) {
         await this.ds.query(
             `INSERT INTO log_permisos (cuenta_id, modulo, accion, operacion, hecho_por)
-       VALUES ($1, $2, $3, $4, $5)`,
+             VALUES ($1, $2, $3, $4, $5)`,
             [cuentaId, modulo, accion, operacion, hechoBy],
         );
     }
-
-    // ── Verificación rápida (hot path) ────────────────────────────
 
     async hasPermiso(cuentaId: string, modulo: string, accion: string): Promise<boolean> {
         const key = this.cacheKey(cuentaId, modulo, accion);
@@ -72,15 +64,12 @@ export class PermissionsService {
         }
     }
 
-    // ── CRUD ──────────────────────────────────────────────────────
-
     async create(dto: CreatePermisoDto, otorgadoPorId: string): Promise<PermisoExtra> {
         const existing = await this.repo.findOne({
             where: { cuentaId: dto.cuentaId, modulo: dto.modulo, accion: dto.accion },
         });
 
         if (existing) {
-            // Reactivar si estaba inactivo, en vez de duplicar
             existing.activo = true;
             existing.otorgadoPorId = otorgadoPorId;
             const saved = await this.repo.save(existing);
@@ -96,41 +85,36 @@ export class PermissionsService {
         return saved;
     }
 
-    /**
-     * Devuelve los permisos activos de una cuenta con info de auditoría:
-     * quién otorgó + cuándo + última operación del log.
-     * Usado por el diálogo de gestión de permisos.
-     */
     async findByCuenta(cuentaId: string) {
         return this.ds.query(
             `SELECT
-         pe.id,
-         pe.cuenta_id          AS "cuentaId",
-         pe.modulo,
-         pe.accion,
-         pe.activo,
-         pe.created_at         AS "createdAt",
-         COALESCE(
-           adm.nombre || ' ' || adm.apellido_paterno,
-           psi.nombre || ' ' || psi.apellido_paterno,
-           doc.nombre || ' ' || doc.apellido_paterno,
-           aux.nombre || ' ' || aux.apellido_paterno
-         )                     AS "otorgadoPorNombre",
-         (SELECT operacion
-          FROM   log_permisos lp
-          WHERE  lp.cuenta_id = pe.cuenta_id
-            AND  lp.modulo    = pe.modulo
-            AND  lp.accion    = pe.accion
-          ORDER  BY lp.created_at DESC
-          LIMIT  1)            AS "ultimaOperacion"
-       FROM  permisos_extra pe
-       LEFT  JOIN admins     adm ON adm.id = pe.otorgado_por
-       LEFT  JOIN psicologas psi ON psi.id = pe.otorgado_por
-       LEFT  JOIN docentes   doc ON doc.id = pe.otorgado_por
-       LEFT  JOIN auxiliares aux ON aux.id = pe.otorgado_por
-       WHERE  pe.cuenta_id = $1
-         AND  pe.activo    = TRUE
-       ORDER  BY pe.modulo, pe.accion`,
+               pe.id,
+               pe.cuenta_id          AS "cuentaId",
+               pe.modulo,
+               pe.accion,
+               pe.activo,
+               pe.created_at         AS "createdAt",
+               COALESCE(
+                 adm.nombre || ' ' || adm.apellido_paterno,
+                 psi.nombre || ' ' || psi.apellido_paterno,
+                 doc.nombre || ' ' || doc.apellido_paterno,
+                 ax.nombre  || ' ' || ax.apellido_paterno
+               )                     AS "otorgadoPorNombre",
+               (SELECT operacion
+                FROM   log_permisos lp
+                WHERE  lp.cuenta_id = pe.cuenta_id
+                  AND  lp.modulo    = pe.modulo
+                  AND  lp.accion    = pe.accion
+                ORDER  BY lp.created_at DESC
+                LIMIT  1)            AS "ultimaOperacion"
+             FROM  permisos_extra pe
+             LEFT  JOIN admins     adm ON adm.id = pe.otorgado_por
+             LEFT  JOIN psicologas psi ON psi.id = pe.otorgado_por
+             LEFT  JOIN docentes   doc ON doc.id = pe.otorgado_por
+             LEFT  JOIN staff      ax  ON ax.id  = pe.otorgado_por
+             WHERE  pe.cuenta_id = $1
+               AND  pe.activo    = TRUE
+             ORDER  BY pe.modulo, pe.accion`,
             [cuentaId],
         );
     }

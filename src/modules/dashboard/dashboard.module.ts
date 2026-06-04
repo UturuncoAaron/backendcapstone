@@ -7,7 +7,7 @@ import { DocenteDashboardProvider } from './providers/docente-dashboard.provider
 import { PadreDashboardProvider } from './providers/padre-dashboard.provider';
 import { AdminDashboardProvider } from './providers/admin-dashboard.provider';
 import { PsicologaDashboardProvider } from './providers/psicologa-dashboard.provider';
-import { AuxiliarDashboardProvider } from './providers/auxiliar-dashboard.provider';
+import { StaffDashboardProvider } from './providers/staff-dashboard.provider';
 import { StorageModule } from '../storage/storage.module';
 
 @Module({
@@ -21,7 +21,7 @@ import { StorageModule } from '../storage/storage.module';
         PadreDashboardProvider,
         AdminDashboardProvider,
         PsicologaDashboardProvider,
-        AuxiliarDashboardProvider,
+        StaffDashboardProvider,
     ],
 })
 export class DashboardModule { }

@@ -137,7 +137,7 @@ export class AppointmentsService {
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
     private readonly events: EventEmitter2,
-  ) {}
+  ) { }
 
   private async appendStatusLog(
     appointmentId: string,
@@ -162,8 +162,7 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `appendStatusLog falló para cita ${appointmentId}: ${
-          err instanceof Error ? err.message : String(err)
+        `appendStatusLog falló para cita ${appointmentId}: ${err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -218,7 +217,7 @@ export class AppointmentsService {
          LEFT JOIN padres     p  ON p.id  = c.id
          LEFT JOIN psicologas ps ON ps.id = c.id
          LEFT JOIN admins     ad ON ad.id = c.id
-         LEFT JOIN auxiliares ax ON ax.id = c.id
+         LEFT JOIN staff      ax ON ax.id = c.id
         WHERE l.cita_id = $1
         ORDER BY l.changed_at ASC, l.id ASC`,
       [appointmentId],
@@ -230,10 +229,9 @@ export class AppointmentsService {
       nextStatus: r.next_status,
       changedById: r.changed_by_id,
       changedByName: r.changed_by_nombre
-        ? `${r.changed_by_nombre}${
-            r.changed_by_apellido_paterno
-              ? ' ' + r.changed_by_apellido_paterno
-              : ''
+        ? `${r.changed_by_nombre}${r.changed_by_apellido_paterno
+            ? ' ' + r.changed_by_apellido_paterno
+            : ''
           }`.trim()
         : null,
       changedByRole: r.changed_by_rol,
@@ -285,7 +283,6 @@ export class AppointmentsService {
       }
     }
 
-    // Reglas centralizadas: quién puede citar a quién.
     if (!canInvite(caller.rol as CallerRol, convocadoA.rol as CallerRol)) {
       const permitidos = allowedRecipientsFor(caller.rol as CallerRol);
       const detalle = permitidos.length
@@ -294,19 +291,16 @@ export class AppointmentsService {
       throw new ForbiddenException(detalle);
     }
 
-    // Caller que SIEMPRE requiere alumno (docente, admin, auxiliar).
     if (callerRequiresStudent(caller.rol as CallerRol) && !dto.studentId)
       throw new BadRequestException(
         'Debes indicar el alumno al que corresponde la cita',
       );
 
-    // Para psicóloga / padre / alumno se mantiene la regla previa: al menos uno.
     if (!dto.studentId && !dto.parentId)
       throw new BadRequestException(
         'Debe indicar al menos un alumno o un padre/tutor',
       );
 
-    // Autocompletar padre cuando psicóloga cita al alumno y no envió parentId.
     let availableParents: ProfileRow[] | undefined;
     if (
       caller.rol === 'psicologa' &&
@@ -323,7 +317,6 @@ export class AppointmentsService {
       await this.assertCanInvolveStudent(caller, dto.studentId);
     if (dto.parentId && dto.studentId)
       await this.assertParentBelongsToStudent(dto.parentId, dto.studentId);
-    // Aviso (no bloqueante): la psicóloga no tiene vínculo activo con el alumno.
     if (convocadoA.rol === 'psicologa' && dto.studentId)
       await this.warnIfPsicologaNotLinked(convocadoA.id, dto.studentId);
     if (caller.rol === 'psicologa' && dto.studentId)
@@ -385,14 +378,6 @@ export class AppointmentsService {
 
       if (conflict) throw new ConflictException('Ese horario ya está ocupado');
 
-      // Matriz de estado inicial (spec Aarón 2026-05):
-      //   padre → psi          confirmada
-      //   alumno → psi         confirmada
-      //   psi → alumno         confirmada (sin padre vinculado)
-      //   psi → alumno + padre pendiente
-      //   psi → padre          pendiente
-      //   docente → padre      pendiente
-      //   admin → padre        pendiente
       const initialStatus = resolveInitialStatus({
         caller: caller.rol as CallerRol,
         recipient: convocadoA.rol as CallerRol,
@@ -445,9 +430,6 @@ export class AppointmentsService {
         convocadoARole: convocadoA.rol,
       } satisfies AppointmentCreatedEvent);
 
-      // Adjuntamos availableParents si la psicóloga generó la cita sin parentId
-      // y el alumno tiene más de un padre vinculado, para que el FE pueda
-      // ofrecer la opción al usuario.
       if (availableParents) {
         (
           saved as Appointment & { availableParents?: ProfileRow[] }
@@ -475,8 +457,7 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `autoFinalizePastAppointments falló: ${
-          err instanceof Error ? err.message : String(err)
+        `autoFinalizePastAppointments falló: ${err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -513,7 +494,6 @@ export class AppointmentsService {
     ).getCount();
     if (!total) return { data: [], total: 0, page, limit, totalPages: 0 };
 
-    // Paso 1: IDs paginados sin relaciones (sin bug)
     const idRows = await applyFilters(
       this.appointmentRepo.createQueryBuilder('a').select('a.id'),
     )
@@ -532,7 +512,6 @@ export class AppointmentsService {
         totalPages: Math.ceil(total / limit),
       };
 
-    // Paso 2: entidades completas con relaciones, sin skip/take (sin bug)
     const items = await this.baseAppointmentQuery()
       .where('a.id IN (:...ids)', { ids })
       .orderBy('a.fecha_hora', order)
@@ -552,7 +531,7 @@ export class AppointmentsService {
     studentId: string,
     q: ListAppointmentsQueryDto,
   ) {
-    if (!['admin', 'psicologa', 'docente', 'auxiliar'].includes(caller.rol))
+    if (!['admin', 'psicologa', 'docente', 'staff'].includes(caller.rol))
       throw new ForbiddenException('Tu rol no puede ver citas por alumno');
 
     const page = q.page ?? 1;
@@ -614,10 +593,6 @@ export class AppointmentsService {
     const [enriched] = await this.enrichWithProfileNames([appt]);
     return enriched;
   }
-
-  // ════════════════════════════════════════════════════════════════
-  // UPDATE / CANCEL
-  // ════════════════════════════════════════════════════════════════
 
   async updateAppointment(
     caller: CallerContext,
@@ -718,8 +693,6 @@ export class AppointmentsService {
         `No se puede cancelar una cita ${appt.estado}`,
       );
 
-    // Spec (Aarón, 2026-05): el motivo de cancelación es OBLIGATORIO y
-    // queda persistido para que ambas partes sepan por qué se canceló.
     const motivo = (dto.motivo ?? '').trim();
     if (motivo.length < 3)
       throw new BadRequestException(
@@ -749,10 +722,6 @@ export class AppointmentsService {
     return saved;
   }
 
-  // ════════════════════════════════════════════════════════════════
-  // ACEPTAR / RECHAZAR
-  // ════════════════════════════════════════════════════════════════
-
   async acceptAppointment(
     caller: CallerContext,
     id: string,
@@ -764,11 +733,6 @@ export class AppointmentsService {
         `Solo se pueden aceptar citas pendientes (estado actual: ${appt.estado})`,
       );
 
-    // Spec (Aarón, 2026-05): cuando una cita queda `pendiente` por un
-    // aplazamiento, la parte que NO aplazó debe ser quien confirme. Si
-    // la última transición fue `aplazar` por `caller.id`, no puede
-    // auto-confirmar su propia propuesta — la confirmación debe venir
-    // del otro lado de la cita.
     const lastPostpone = await this.statusLogRepo.findOne({
       where: { appointmentId: id, nextStatus: 'pendiente' },
       order: { changedAt: 'DESC' },
@@ -783,13 +747,6 @@ export class AppointmentsService {
         'No puedes confirmar un aplazamiento que tú mismo propusiste — debe aceptarlo la otra parte de la cita.',
       );
 
-    // Quién puede aceptar: el convocado original, o — si el aplazamiento
-    // lo hizo el convocado — el convocador. Admin siempre puede.
-    //
-    // Cita mixta (Psicóloga → Alumno + Padre): el convocado formal es el
-    // alumno, pero la cita depende ENTERAMENTE del padre. El padre vinculado
-    // (`parentId`) es quien debe presionar "Confirmar" para que la cita pase
-    // a `confirmada` para todas las partes (spec Aarón, 2026-05).
     const isConvocador = appt.createdById === caller.id;
     const isConvocado = appt.convocadoAId === caller.id;
     const isParent = appt.parentId !== null && appt.parentId === caller.id;
@@ -798,9 +755,6 @@ export class AppointmentsService {
       lastPostpone.changedById === appt.convocadoAId &&
       lastPostpone.previousStatus !== null;
 
-    // Spec (Aarón, 2026-06): si la cita tiene un padre/tutor vinculado, la
-    // confirmación depende ENTERAMENTE de él. Ni el alumno convocado ni la
-    // psicóloga que aplazó pueden confirmarla; solo el padre (o admin).
     let canAccept: boolean;
     if (appt.parentId !== null) {
       canAccept = caller.rol === 'admin' || isParent;
@@ -843,9 +797,6 @@ export class AppointmentsService {
   ): Promise<Appointment> {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new NotFoundException('Cita no encontrada');
-    // El convocado puede rechazar; en citas mixtas (convocado = alumno) el
-    // padre/tutor vinculado (parentId) también puede rechazar la cita
-    // pendiente que se le propuso o que la psicóloga aplazó.
     const isParent = appt.parentId !== null && appt.parentId === caller.id;
     if (
       caller.rol !== 'admin' &&
@@ -918,10 +869,6 @@ export class AppointmentsService {
     const nuevaFecha = new Date(dto.nuevaFechaHora);
     this.assertScheduledAtIsValid(nuevaFecha);
 
-    // ── Validar disponibilidad según quién aplaza ────────────────
-    // El nuevo horario SIEMPRE debe caer en el calendario del convocador
-    // (es su agenda la que se respeta). Mantenemos también la duración
-    // original de la cita.
     const convocadorAccount = await this.loadAccountSummary(appt.createdById);
     if (convocadorAccount && hasAvailability(convocadorAccount.rol)) {
       const convocadorRule = getAppointmentRule(
@@ -972,7 +919,6 @@ export class AppointmentsService {
     return saved;
   }
 
-  /** La psicóloga marca la cita como realizada (cierre administrativo). */
   async markAsRealizada(
     caller: CallerContext,
     id: string,
@@ -1062,7 +1008,6 @@ export class AppointmentsService {
       null,
     );
 
-    // Notificación inasistencia_alumno al padre vinculado.
     if (saved.studentId) {
       const padres = await this.findParentsOfStudent(saved.studentId);
       if (padres.length > 0) {
@@ -1084,10 +1029,6 @@ export class AppointmentsService {
     }
     return saved;
   }
-
-  // ════════════════════════════════════════════════════════════════
-  // DERIVACIÓN docente → psicóloga
-  // ════════════════════════════════════════════════════════════════
 
   async deriveToPsicologa(
     caller: CallerContext,
@@ -1124,8 +1065,6 @@ export class AppointmentsService {
       rule.defaultHours,
     );
 
-    // Nombre legible del docente que deriva (para mostrarlo en el detalle de
-    // la derivación en lugar del UUID).
     const docenteRows = await this.dataSource.query<
       { nombre: string; apellido_paterno: string; apellido_materno: string | null }[]
     >(
@@ -1204,14 +1143,6 @@ export class AppointmentsService {
     });
   }
 
-  // ════════════════════════════════════════════════════════════════
-  // CIERRE CLÍNICO + SEGUIMIENTO INTELIGENTE (Psicología)
-  // ════════════════════════════════════════════════════════════════
-
-  /**
-   * Resuelve la psicóloga participante de una cita (la que creó la cita o el
-   * convocado, según el flujo). Devuelve `null` si ninguna parte es psicóloga.
-   */
   private async resolvePsychologistOf(
     appt: Appointment,
   ): Promise<string | null> {
@@ -1241,13 +1172,11 @@ export class AppointmentsService {
       );
   }
 
-  /** YYYY-MM-DD en hora local. */
   private toLocalDateStr(d: Date): string {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
-  /** Avanza la fecha al siguiente día permitido por la regla (lun–vie psi). */
   private advanceToAllowedDay(d: Date, rule: AppointmentRoleRule): Date {
     const result = new Date(d);
     for (let i = 0; i < 7; i++) {
@@ -1257,11 +1186,6 @@ export class AppointmentsService {
     return result;
   }
 
-  /**
-   * Plan de Seguimiento Inteligente: para la cita indicada, calcula la fecha
-   * recomendada de la próxima sesión (según el `tipo` de cita) y precarga los
-   * slots libres de la psicóloga en esa fecha.
-   */
   async getFollowUpSuggestion(caller: CallerContext, appointmentId: string) {
     const appt = await this.appointmentRepo.findOne({
       where: { id: appointmentId },
@@ -1307,13 +1231,6 @@ export class AppointmentsService {
     };
   }
 
-  /**
-   * Cierre clínico en una sola transacción:
-   *   1. Marca la cita actual como `realizada` (+ notas posteriores).
-   *   2. Guarda notas clínicas como ficha privada (fichas_psicologia).
-   *   3. (Opcional) Crea la cita de seguimiento aplicando la matriz de estado:
-   *      psi → alumno = confirmada · psi → alumno + padre = pendiente.
-   */
   async closeSessionWithFollowUp(
     caller: CallerContext,
     appointmentId: string,
@@ -1334,7 +1251,6 @@ export class AppointmentsService {
         ? caller.id
         : await this.resolvePsychologistOf(appt);
 
-    // ── Pre-validación del seguimiento (fuera de la transacción) ──────
     const rule = getAppointmentRule('psicologa');
     let followUpPlan: {
       scheduledAt: Date;
@@ -1359,7 +1275,6 @@ export class AppointmentsService {
         );
       const durationMin = this.resolveDuration(rule, seg.durationMin);
 
-      // Padre: explícito, autocompletado, o ninguno.
       let parentId: string | null = null;
       if (seg.incluirPadre) {
         if (seg.parentId) {
@@ -1404,7 +1319,6 @@ export class AppointmentsService {
     }
 
     return this.dataSource.transaction('SERIALIZABLE', async (em) => {
-      // 1. Cerrar cita actual.
       const current = await em.findOne(Appointment, {
         where: { id: appointmentId },
       });
@@ -1423,7 +1337,6 @@ export class AppointmentsService {
         em,
       );
 
-      // 2. Ficha clínica privada con las notas.
       const notas = dto.notasClinicas?.trim();
       if (notas && notas.length > 0 && psychologistId) {
         await em.query(
@@ -1440,7 +1353,6 @@ export class AppointmentsService {
         );
       }
 
-      // 3. Cita de seguimiento.
       let followUp: Appointment | null = null;
       if (followUpPlan && psychologistId) {
         const plan = followUpPlan;
@@ -1521,7 +1433,6 @@ export class AppointmentsService {
     });
   }
 
-  /** Mapea el tipo de cita / categoría provista a la categoría de ficha. */
   private mapTipoToFichaCategoria(
     provided: string | undefined,
     tipo: AppointmentType,
@@ -1539,10 +1450,6 @@ export class AppointmentsService {
     return map[tipo] ?? 'otro';
   }
 
-  // ════════════════════════════════════════════════════════════════
-  // DISPONIBILIDAD
-  // ════════════════════════════════════════════════════════════════
-
   async getAvailability(cuentaId: string): Promise<AccountAvailability[]> {
     return this.availabilityRepo.find({
       where: { cuentaId, activo: true },
@@ -1550,13 +1457,6 @@ export class AppointmentsService {
     });
   }
 
-  /**
-   * Returns all availability blocks for a specific week (Monday–Sunday),
-   * applying the specific-overrides-weekly rule, plus appointments in that week.
-   *
-   * @param cuentaId  UUID of the account
-   * @param weekStart YYYY-MM-DD of the Monday of the target week
-   */
   async getWeekAvailability(cuentaId: string, weekStart: string) {
     if (!weekStart)
       throw new BadRequestException(
@@ -1574,7 +1474,6 @@ export class AppointmentsService {
     sunday.setDate(monday.getDate() + 6);
     sunday.setHours(23, 59, 59, 999);
 
-    // ── 1. All SPECIFIC blocks for this week ──────────────────────────
     const allSpecific = await this.availabilityRepo.find({
       where: { cuentaId, activo: true },
       order: { fechaEspecifica: 'ASC', horaInicio: 'ASC' },
@@ -1586,17 +1485,15 @@ export class AppointmentsService {
       return d >= monday && d <= sunday;
     });
 
-    // ── 2. Determine which week-days are overridden by specific blocks ─
     const diasConEspecifica = new Set<string>();
     for (const b of specificBlocksThisWeek) {
       if (!b.fechaEspecifica) continue;
       const d = parseLocalDate(b.fechaEspecifica);
-      const dow = d.getDay(); // 0=Sun … 6=Sat
+      const dow = d.getDay();
       const dia = DIAS_SEMANA_INDEXED[dow];
       if (dia) diasConEspecifica.add(dia);
     }
 
-    // ── 3. Weekly recurring blocks (exclude overridden days) ───────────
     const allWeekly = await this.availabilityRepo.find({
       where: { cuentaId, activo: true },
       order: { diaSemana: 'ASC', horaInicio: 'ASC' },
@@ -1605,7 +1502,6 @@ export class AppointmentsService {
       (b) => b.tipo === 'weekly' && !diasConEspecifica.has(b.diaSemana),
     );
 
-    // ── 4. Appointments this week ─────────────────────────────────────
     const appts = await this.appointmentRepo
       .createQueryBuilder('a')
       .leftJoinAndSelect('a.student', 'student')
@@ -1710,7 +1606,6 @@ export class AppointmentsService {
     const rule = role ? getAppointmentRule(role) : null;
     const effectiveSlot = slotMinutes ?? rule?.slotMinutes ?? 30;
 
-    // ── Specific-overrides-weekly logic ─────────────────────────────
     const specificForDate = await this.availabilityRepo.find({
       where: { cuentaId, fechaEspecifica: date, activo: true },
       order: { horaInicio: 'ASC' },
@@ -1718,7 +1613,6 @@ export class AppointmentsService {
 
     let bloques: AccountAvailability[];
     if (specificForDate.length > 0) {
-      // Specific blocks override weekly for this exact date
       bloques = specificForDate;
     } else {
       bloques = await this.availabilityRepo.find({
@@ -1748,8 +1642,6 @@ export class AppointmentsService {
       else merged.push({ ...r });
     }
 
-    // Tope de atención (docentes / admin / dirección → 15:30). Recorta el
-    // fin de cada bloque y descarta los que quedan vacíos.
     const cutoffMin = this.cutoffToMinutes(rule?.attentionEnd);
     if (cutoffMin !== null) {
       for (const b of merged) b.e = Math.min(b.e, cutoffMin);
@@ -1805,19 +1697,6 @@ export class AppointmentsService {
     return result;
   }
 
-  /**
-   * Vista de "drawer / slide-over" para un día: devuelve los BLOQUES de
-   * disponibilidad declarados (p. ej. 45 min para docente) y, dentro de cada
-   * uno, los SUB-SLOTS reservables de `slotMinutes` (15 min docente/admin,
-   * 30 min psicóloga) con su flag libre/ocupado.
-   *
-   * El calendario macro no debe renderizar los micro-slots de 15 min para no
-   * saturarse: muestra los bloques generales y, al hacer clic en un día, abre
-   * este detalle.
-   *
-   * `revealOccupants` controla si se incluye el detalle de quién ocupa cada
-   * sub-slot (solo el dueño de la agenda o un admin debe verlo).
-   */
   async getDayBlocks(
     cuentaId: string,
     date: string,
@@ -1882,13 +1761,11 @@ export class AppointmentsService {
     };
     if (!diaSemana) return empty;
 
-    // ── Specific-overrides-weekly: check exact date first ─────────────
     const specificForDate = await this.availabilityRepo.find({
       where: { cuentaId, fechaEspecifica: date, activo: true },
       order: { horaInicio: 'ASC' },
     });
 
-    // Bloques declarados (o el horario por defecto del rol).
     let bloques: AccountAvailability[];
     if (specificForDate.length > 0) {
       bloques = specificForDate;
@@ -1924,7 +1801,6 @@ export class AppointmentsService {
       .filter((r) => r.e - r.s >= slotMinutes)
       .sort((a, b) => a.s - b.s);
 
-    // Citas del día (para marcar sub-slots ocupados).
     const dayStart = new Date(ref);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(ref);
@@ -1985,7 +1861,7 @@ export class AppointmentsService {
           occupantLabel:
             occ && revealOccupants
               ? `${occ.row.alumno_nombre ?? ''} ${occ.row.alumno_apellido ?? ''}`.trim() ||
-                occ.row.motivo.slice(0, 40)
+              occ.row.motivo.slice(0, 40)
               : null,
         });
       }
@@ -2012,11 +1888,9 @@ export class AppointmentsService {
     }[],
   ): Promise<{ saved: AccountAvailability[]; cancelledCount: number }> {
     return this.dataSource.transaction(async (em) => {
-      // ── Separate items by tipo ────────────────────────────────────────
       const weeklyItems = items.filter((it) => (it.tipo ?? 'weekly') === 'weekly');
       const specificItems = items.filter((it) => it.tipo === 'specific');
 
-      // Collect unique fechaEspecifica values in the incoming specific items
       const specificDates = new Set(
         specificItems
           .map((it) => it.fechaEspecifica)
@@ -2024,15 +1898,12 @@ export class AppointmentsService {
       );
 
       if (weeklyItems.length > 0 || specificItems.length === 0) {
-        // Delete all existing weekly blocks for this account using raw SQL
-        // (safer than QueryBuilder for filtered deletes with new columns)
         await em.query(
           `DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1 AND tipo = 'weekly'`,
           [cuentaId],
         );
       }
 
-      // Delete existing specific blocks only for the incoming dates
       for (const fecha of specificDates) {
         await em.query(
           `DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1 AND tipo = 'specific' AND fecha_especifica = $2`,
@@ -2057,8 +1928,6 @@ export class AppointmentsService {
         );
       }
 
-      // Busca citas donde el profesional es convocador O convocado —
-      // en ambos casos su disponibilidad define el horario de la cita.
       const futureAppts = await em
         .getRepository(Appointment)
         .createQueryBuilder('a')
@@ -2072,8 +1941,7 @@ export class AppointmentsService {
         })
         .getMany();
 
-      const cancelled: { appt: Appointment; previous: AppointmentStatus }[] =
-        [];
+      const cancelled: { appt: Appointment; previous: AppointmentStatus }[] = [];
       for (const appt of futureAppts) {
         if (this.fitsInAvailability(appt, saved)) continue;
         const previous = appt.estado;
@@ -2122,16 +1990,6 @@ export class AppointmentsService {
       .getCount();
   }
 
-  /**
-   * Borra un bloque de disponibilidad respetando las citas activas.
-   *
-   * - Si NO hay citas en el bloque → borra y listo.
-   * - Si HAY citas y `confirm` es falso → 409 con la lista de afectadas.
-   * - Si HAY citas y `confirm` es true → borra slot + cancela cada cita
-   *   con motivo y emite `cita_cancelada` a todas las partes.
-   *
-   * Solo el dueño del slot (o admin) puede invocarlo.
-   */
   async deleteAvailabilitySlot(
     caller: CallerContext,
     slotId: string,
@@ -2148,8 +2006,7 @@ export class AppointmentsService {
       throw new ForbiddenException(
         'No puedes eliminar la disponibilidad de otra persona',
       );
-    // Buscar citas donde el profesional dueño del slot aparezca como convocador
-    // O como convocado — ambos casos usan su disponibilidad para fijar el horario.
+
     const affected = await this.appointmentRepo
       .createQueryBuilder('a')
       .leftJoinAndSelect('a.student', 'student')
@@ -2228,26 +2085,16 @@ export class AppointmentsService {
         }
       }
       return cancelledCount > 0
-        ? {
-            deleted: true as const,
-            cancelledCount,
-            affected: summaries,
-          }
+        ? { deleted: true as const, cancelledCount, affected: summaries }
         : { deleted: true as const, cancelledCount };
     });
   }
 
-  /**
-   * Disponibilidad pública en formato "semana": para cada uno de los 6 días
-   * (lun–sáb) a partir de `weekStart`, devuelve los slots con flag libre/ocupado.
-   * Usado por el alumno o padre para ver agendas de psicólogas y docentes.
-   */
   async getPublicWeeklyAvailability(cuentaId: string, weekStart?: string) {
     const ref = weekStart ? parseLocalDate(weekStart) : new Date();
     if (isNaN(ref.getTime()))
       throw new BadRequestException('weekStart inválido, usa YYYY-MM-DD');
 
-    // Lunes de esa semana.
     const day = ref.getDay();
     const diffToMonday = day === 0 ? -6 : 1 - day;
     const monday = new Date(ref);
@@ -2276,15 +2123,9 @@ export class AppointmentsService {
       days.push({ date: dateStr, diaSemana, slots });
     }
 
-    return {
-      cuentaId,
-      rol: account.rol,
-      weekStart: toDateStr(monday),
-      days,
-    };
+    return { cuentaId, rol: account.rol, weekStart: toDateStr(monday), days };
   }
 
-  /** Convierte 'HH:mm' a minutos desde medianoche, o null si no hay cutoff. */
   private cutoffToMinutes(cutoff: string | null | undefined): number | null {
     if (!cutoff) return null;
     const [h, m] = cutoff.split(':').map(Number);
@@ -2292,7 +2133,6 @@ export class AppointmentsService {
     return h * 60 + m;
   }
 
-  /** Convierte 'lunes' .. 'sabado' a ISO day-of-week 1..6 (1=Mon, 7=Sun). */
   private diaSemanaToIsoDow(d: DiaSemana): number {
     const map: Record<DiaSemana, number> = {
       lunes: 1,
@@ -2311,11 +2151,6 @@ export class AppointmentsService {
     if (!acc || acc.rol === 'alumno' || acc.rol === 'padre') return null;
     const role = this.toAppointmentRole(acc);
     const rule = getAppointmentRule(role);
-    // availabilityBlockMin: tamaño del bloque que se muestra en el editor de
-    // disponibilidad del profesional.
-    //   docente  → 45 min (bloque con 3 sub-slots de 15 min, hasta 3 padres)
-    //   admin    → 15 min (slot indivisible, 1 padre por slot)
-    //   psicóloga → 30 min
     const availabilityBlockMin =
       role === 'docente' ? 45 : (rule.slotMinutes ?? 15);
 
@@ -2333,6 +2168,7 @@ export class AppointmentsService {
       label: rule.label,
     };
   }
+
   async listBookableTeachers(caller: CallerContext): Promise<
     Array<{
       id: string;
@@ -2353,10 +2189,6 @@ export class AppointmentsService {
       tutoria_seccion_label: string | null;
     };
 
-    // NOTA: la tabla `secciones` NO tiene `tutor_id`. El tutor de una sección
-    // vive en `secciones_tutores (seccion_id, docente_id, anio, activo)`.
-    // Se resuelve la tutoría del AÑO EN CURSO con un LATERAL para no
-    // multiplicar filas (un docente puede tutorar varias secciones/años).
     const baseSelect = `
       SELECT
         d.id,
@@ -2384,9 +2216,6 @@ export class AppointmentsService {
       LEFT JOIN grados    g ON g.id = s.grado_id
     `;
 
-    // Spec (Aarón, 2026-06): el padre/tutor ve ABSOLUTAMENTE todos los
-    // docentes activos (igual que admin/psicóloga). Si el docente no tiene
-    // disponibilidad configurada, el FE muestra el aviso correspondiente.
     if (
       caller.rol === 'admin' ||
       caller.rol === 'psicologa' ||
@@ -2403,11 +2232,6 @@ export class AppointmentsService {
     return [];
   }
 
-  /**
-   * Lista los administradores/directivos activos con los que se puede agendar
-   * (admin incluye director, secretaría y cualquier rol administrativo). El
-   * padre/tutor, psicóloga y admin pueden consultarla.
-   */
   async listBookableAdmins(caller: CallerContext): Promise<
     Array<{
       id: string;
@@ -2443,16 +2267,12 @@ export class AppointmentsService {
       especialidad: r.especialidad,
       tutoria_actual: r.tutoria_seccion_id
         ? {
-            seccion_id: r.tutoria_seccion_id,
-            seccion_label: r.tutoria_seccion_label ?? '',
-          }
+          seccion_id: r.tutoria_seccion_id,
+          seccion_label: r.tutoria_seccion_label ?? '',
+        }
         : null,
     };
   }
-
-  // ════════════════════════════════════════════════════════════════
-  // PRIVATE HELPERS
-  // ════════════════════════════════════════════════════════════════
 
   private async loadAccountSummary(id: string): Promise<AccountSummary | null> {
     const row = await this.dataSource.query<
@@ -2484,14 +2304,11 @@ export class AppointmentsService {
       throw new BadRequestException(
         `La duración debe ser múltiplo de ${rule.slotMinutes} min para ${rule.label}`,
       );
-    // Regla canónica: una cita puede ocupar 1 o N slots consecutivos según
-    // el rol. El tope estricto se calcula como maxConsecutiveSlots * slot.
     const maxBySlots = rule.maxConsecutiveSlots * rule.slotMinutes;
     const effectiveMax = Math.min(rule.maxDurationMin, maxBySlots);
     if (value > effectiveMax)
       throw new BadRequestException(
-        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${
-          rule.maxConsecutiveSlots === 1 ? '' : 's'
+        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${rule.maxConsecutiveSlots === 1 ? '' : 's'
         } consecutivo${rule.maxConsecutiveSlots === 1 ? '' : 's'} (${effectiveMax} min)`,
       );
     return value;
@@ -2564,7 +2381,7 @@ export class AppointmentsService {
       case 'admin':
       case 'psicologa':
       case 'docente':
-      case 'auxiliar':
+      case 'staff':
         return;
       case 'padre': {
         const linked = await this.dataSource.query<unknown[]>(
@@ -2604,7 +2421,6 @@ export class AppointmentsService {
       );
   }
 
-  /** Lista los padres vinculados a un alumno (sirve para autocompletar). */
   private async findParentsOfStudent(studentId: string): Promise<ProfileRow[]> {
     return this.dataSource.query<ProfileRow[]>(
       `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno
@@ -2616,10 +2432,6 @@ export class AppointmentsService {
     );
   }
 
-  /**
-   * Advertencia (no bloqueante, sólo log) cuando la psicóloga no tiene
-   * vínculo activo en `psicologa_alumno` con el alumno de la cita.
-   */
   private async warnIfPsicologaNotLinked(
     psicologaId: string,
     studentId: string,
@@ -2630,7 +2442,6 @@ export class AppointmentsService {
       [psicologaId, studentId],
     );
     if (!linked.length) {
-      // No bloquea: el spec pide advertencia, no error.
       Logger.warn(
         `Psicóloga ${psicologaId} sin vínculo activo con alumno ${studentId} al agendar`,
         AppointmentsService.name,
@@ -2651,7 +2462,6 @@ export class AppointmentsService {
     if (dayName === 'domingo')
       throw new BadRequestException('No se atiende los domingos');
 
-    // ── Specific-overrides-weekly: check exact date first ─────────────
     const dateStr = this.toLocalDateStr(start);
     const specificForDate = await this.availabilityRepo.find({
       where: { cuentaId, fechaEspecifica: dateStr, activo: true },
@@ -2680,9 +2490,6 @@ export class AppointmentsService {
         'El profesional no tiene disponibilidad ese día',
       );
 
-    // Tope de atención (15:30 para docentes / admin / dirección): la cita no
-    // puede terminar más tarde que el cutoff aunque el bloque declarado lo
-    // permita.
     const cutoffMin = this.cutoffToMinutes(cutoff);
 
     const fits = virtualBlocks.some((d) => {
@@ -2750,12 +2557,11 @@ export class AppointmentsService {
     const dt = new Date(appt.scheduledAt);
     const dia = DIAS_SEMANA_INDEXED[dt.getDay()];
     if (!dia) return false;
-    const apptDateStr = this.toLocalDateStr(dt); // YYYY-MM-DD
+    const apptDateStr = this.toLocalDateStr(dt);
     const startMin = dt.getHours() * 60 + dt.getMinutes();
     const endMin = startMin + (appt.durationMin ?? 30);
     return availability.some((a) => {
       if (a.diaSemana !== dia) return false;
-      // Para bloques específicos, la fecha debe coincidir exactamente
       if ((a as any).tipo === 'specific' && (a as any).fechaEspecifica !== apptDateStr) {
         return false;
       }
@@ -2777,11 +2583,11 @@ export class AppointmentsService {
     if (!ids.size) return items;
 
     const rows = await this.dataSource.query<ProfileRow[]>(
-      `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas  WHERE id = ANY($1::uuid[])
+      `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas WHERE id = ANY($1::uuid[])
        UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM alumnos    WHERE id = ANY($1::uuid[])
        UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM padres     WHERE id = ANY($1::uuid[])
        UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM docentes   WHERE id = ANY($1::uuid[])
-       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM auxiliares WHERE id = ANY($1::uuid[])
+       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM staff      WHERE id = ANY($1::uuid[])
        UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM admins     WHERE id = ANY($1::uuid[])`,
       [Array.from(ids)],
     );

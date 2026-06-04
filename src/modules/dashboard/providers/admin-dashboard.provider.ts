@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { AdminDashboardDto, ContadoresItem, AlertaOperativaItem } from '../dto/admin-dashboard.dto';
+import { AdminDashboardDto, ContadoresItem, AlertaOperativaItem } from '../dto/admin-dashboard.dto.js';
 
 @Injectable()
 export class AdminDashboardProvider {
@@ -18,38 +18,36 @@ export class AdminDashboardProvider {
     private async getContadores(): Promise<ContadoresItem> {
         const [row] = await this.db.query<ContadoresItem[]>(
             `SELECT
-         (SELECT COUNT(*) FROM alumnos   a JOIN cuentas c ON c.id = a.id WHERE c.activo = TRUE)::int AS "totalAlumnos",
-         (SELECT COUNT(*) FROM docentes  d JOIN cuentas c ON c.id = d.id WHERE c.activo = TRUE)::int AS "totalDocentes",
-         (SELECT COUNT(*) FROM padres    p JOIN cuentas c ON c.id = p.id WHERE c.activo = TRUE)::int AS "totalPadres",
-         (SELECT COUNT(*) FROM auxiliares x JOIN cuentas c ON c.id = x.id WHERE c.activo = TRUE)::int AS "totalAuxiliares"`,
+                (SELECT COUNT(*) FROM alumnos  a JOIN cuentas c ON c.id = a.id WHERE c.activo = TRUE)::int AS "totalAlumnos",
+                (SELECT COUNT(*) FROM docentes d JOIN cuentas c ON c.id = d.id WHERE c.activo = TRUE)::int AS "totalDocentes",
+                (SELECT COUNT(*) FROM padres   p JOIN cuentas c ON c.id = p.id WHERE c.activo = TRUE)::int AS "totalPadres",
+                (SELECT COUNT(*) FROM staff    s JOIN cuentas c ON c.id = s.id WHERE c.activo = TRUE)::int AS "totalStaff"`,
         );
         return row;
     }
 
     private async getAlertas(): Promise<AlertaOperativaItem[]> {
         const [sinDocente, sinHorario, contratosVencer] = await Promise.all([
-            // Cursos activos del año actual sin docente
             this.db.query<{ total: number }[]>(
                 `SELECT COUNT(*)::int AS total
-       FROM   cursos c
-       WHERE  c.activo = TRUE
-         AND  c.anio = EXTRACT(YEAR FROM CURRENT_DATE)::int
-         AND  c.docente_id IS NULL`,
-            ),
-            // Cursos activos del año actual sin horario
-            this.db.query<{ total: number }[]>(
-                `SELECT COUNT(*)::int AS total
-       FROM   cursos c
-       WHERE  c.activo = TRUE
-         AND  c.anio = EXTRACT(YEAR FROM CURRENT_DATE)::int
-         AND  NOT EXISTS (SELECT 1 FROM horarios h WHERE h.curso_id = c.id)`,
+                 FROM   cursos c
+                 WHERE  c.activo = TRUE
+                   AND  c.anio = EXTRACT(YEAR FROM CURRENT_DATE)::int
+                   AND  c.docente_id IS NULL`,
             ),
             this.db.query<{ total: number }[]>(
                 `SELECT COUNT(*)::int AS total
-       FROM   docentes d
-       WHERE  d.tipo_contrato   = 'contratado'
-         AND  d.estado_contrato = 'activo'
-         AND  d.fecha_fin_contrato BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'`,
+                 FROM   cursos c
+                 WHERE  c.activo = TRUE
+                   AND  c.anio = EXTRACT(YEAR FROM CURRENT_DATE)::int
+                   AND  NOT EXISTS (SELECT 1 FROM horarios h WHERE h.curso_id = c.id)`,
+            ),
+            this.db.query<{ total: number }[]>(
+                `SELECT COUNT(*)::int AS total
+                 FROM   docentes d
+                 WHERE  d.tipo_contrato   = 'contratado'
+                   AND  d.estado_contrato = 'activo'
+                   AND  d.fecha_fin_contrato BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'`,
             ),
         ]);
 

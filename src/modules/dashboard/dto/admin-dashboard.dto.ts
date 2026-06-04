@@ -2,7 +2,7 @@ export interface ContadoresItem {
     totalAlumnos: number;
     totalDocentes: number;
     totalPadres: number;
-    totalAuxiliares: number;
+    totalStaff: number;
 }
 
 export interface AlertaOperativaItem {

@@ -25,20 +25,11 @@ export class ForumService {
         private readonly attachments: AttachmentsService,
     ) { }
 
-    /**
-     * Lista TODOS los foros visibles para el usuario en una sola consulta.
-     * Reemplaza el patrón N+1 que hacía el frontend (1 fetch por curso).
-     *
-     * Para un alumno: foros de los cursos donde está matriculado en el periodo activo.
-     * Para un docente: foros de los cursos que enseña.
-     * Para admin: todos los foros activos.
-     */
     async getMyForums(userId: string, rol: string): Promise<(Forum & { curso_nombre: string })[]> {
         let courseFilter = '';
         let params: unknown[] = [];
 
         if (rol === 'alumno') {
-            // matriculas es anual (no tiene periodo_id). Se une a periodos por año.
             courseFilter = `c.seccion_id IN (
                 SELECT m.seccion_id FROM matriculas m
                 JOIN periodos p ON p.anio = m.anio AND p.activo = TRUE
@@ -104,9 +95,6 @@ export class ForumService {
         const forum = await this.forumRepo.findOne({ where: { id: foroId } });
         if (!forum) throw new NotFoundException('Foro no encontrado');
 
-        // Trae posts (raíz + respuestas) en un solo round-trip con el autor
-        // enriquecido (nombre/apellidos/rol) usando LEFT JOINs sobre todas
-        // las tablas de rol (alumnos/docentes/padres/psicologas/admins/auxiliares).
         const rows = await this.postRepo.manager.query<{
             id: string; foro_id: string; cuenta_id: string;
             contenido: string; parent_post_id: string | null;
@@ -120,9 +108,9 @@ export class ForumService {
                 fp.id, fp.foro_id, fp.cuenta_id, fp.contenido,
                 fp.parent_post_id, fp.activo, fp.created_at, fp.updated_at,
                 c.rol AS autor_rol,
-                COALESCE(a.nombre, d.nombre, p.nombre, ps.nombre, ad.nombre, ax.nombre)                       AS autor_nombre,
-                COALESCE(a.apellido_paterno, d.apellido_paterno, p.apellido_paterno, ps.apellido_paterno, ad.apellido_paterno, ax.apellido_paterno) AS autor_apellido_paterno,
-                COALESCE(a.apellido_materno, d.apellido_materno, p.apellido_materno, ps.apellido_materno, ad.apellido_materno, ax.apellido_materno) AS autor_apellido_materno
+                COALESCE(a.nombre, d.nombre, p.nombre, ps.nombre, ad.nombre, ax.nombre)                                                                    AS autor_nombre,
+                COALESCE(a.apellido_paterno, d.apellido_paterno, p.apellido_paterno, ps.apellido_paterno, ad.apellido_paterno, ax.apellido_paterno)          AS autor_apellido_paterno,
+                COALESCE(a.apellido_materno, d.apellido_materno, p.apellido_materno, ps.apellido_materno, ad.apellido_materno, ax.apellido_materno)          AS autor_apellido_materno
              FROM foro_posts fp
              JOIN cuentas c       ON c.id = fp.cuenta_id
              LEFT JOIN alumnos    a  ON a.id  = c.id
@@ -130,7 +118,7 @@ export class ForumService {
              LEFT JOIN padres     p  ON p.id  = c.id
              LEFT JOIN psicologas ps ON ps.id = c.id
              LEFT JOIN admins     ad ON ad.id = c.id
-             LEFT JOIN auxiliares ax ON ax.id = c.id
+             LEFT JOIN staff      ax ON ax.id = c.id
              WHERE fp.foro_id = $1 AND fp.activo = TRUE
              ORDER BY fp.created_at ASC`,
             [foroId],

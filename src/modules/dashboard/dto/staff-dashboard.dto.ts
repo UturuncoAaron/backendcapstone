@@ -1,4 +1,4 @@
-import { ComunicadoItem } from '../shared/shared-dashboard.queries';
+import { ComunicadoItem } from '../shared/shared-dashboard.queries.js';
 
 export interface SeccionAsistenciaItem {
     seccionId: string;
@@ -10,7 +10,8 @@ export interface SeccionAsistenciaItem {
     totalTardanzas: number;
 }
 
-export interface AuxiliarDashboardDto {
+
+export interface StaffDashboardDto {
     seccionesHoy: SeccionAsistenciaItem[];
     comunicados: ComunicadoItem[];
 }
