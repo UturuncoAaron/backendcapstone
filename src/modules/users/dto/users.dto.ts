@@ -3,12 +3,12 @@ import {
     IsDateString, IsIn, MinLength, MaxLength, Matches,
     IsBoolean,
 } from 'class-validator';
+import { PartialType } from '@nestjs/mapped-types';
 
 const PHONE_PE_REGEX = /^9\d{8}$/;
 const PHONE_PE_MESSAGE =
     'Teléfono inválido. Debe empezar con 9 y tener 9 dígitos (ej. 987654321).';
 
-// ── CreateAlumnoDto ──────────────────────────────────────────────
 export class CreateAlumnoDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -44,7 +44,6 @@ export class CreateAlumnoDto {
     inclusivo?: boolean;
 }
 
-// ── CreateDocenteDto ─────────────────────────────────────────────
 export class CreateDocenteDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -92,7 +91,6 @@ export class CreateDocenteDto {
     fecha_fin_contrato?: string;
 }
 
-// ── CreatePadreDto ───────────────────────────────────────────────
 export class CreatePadreDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -125,7 +123,6 @@ export class CreatePadreDto {
     fecha_nacimiento?: string;
 }
 
-// ── CreateAdminDto ───────────────────────────────────────────────
 export class CreateAdminDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -158,7 +155,6 @@ export class CreateAdminDto {
     fecha_nacimiento?: string;
 }
 
-// ── CreatePsicologaDto ───────────────────────────────────────────
 export class CreatePsicologaDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -191,8 +187,6 @@ export class CreatePsicologaDto {
     fecha_nacimiento?: string;
 }
 
-// ── CreateStaffDto ───────────────────────────────────────────────
-// Reemplaza CreateAuxiliarDto — personal de apoyo sin datos de contrato
 export class CreateStaffDto {
     @IsIn(['dni', 'ce', 'pasaporte'])
     tipo_documento: string;
@@ -225,7 +219,8 @@ export class CreateStaffDto {
     telefono?: string;
 }
 
-// ── LinkPadreAlumnoDto ───────────────────────────────────────────
+export class UpdateStaffDto extends PartialType(CreateStaffDto) { }
+
 export class LinkPadreAlumnoDto {
     @IsString() @IsNotEmpty()
     padre_doc: string;
@@ -234,7 +229,6 @@ export class LinkPadreAlumnoDto {
     alumno_doc: string;
 }
 
-// ── ResetPasswordDto ─────────────────────────────────────────────
 export class ResetPasswordDto {
     @IsString() @MinLength(6)
     password: string;

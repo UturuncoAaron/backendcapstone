@@ -19,16 +19,13 @@ export class ReportsController {
         private readonly pdfBuilder: AttendancePdfBuilder,
     ) { }
 
-    /**
-     * ENDPOINT PURE REST: Retorna el JSON limpio para la UI de asistencia de docentes en Angular.
-     * Evita que el frontend sea rechazado con error 400 por validación estricta de DTO de archivos.
-     */
     @Get('attendance/teachers')
     @Roles('admin', 'staff')
     async getTeacherAttendanceData(
         @CurrentUser() user: AuthUser,
         @Query('fecha_inicio') fechaInicio: string,
         @Query('fecha_fin') fechaFin: string,
+        @Query('cuenta_id') cuentaId?: string,
     ) {
         if (!fechaInicio || !fechaFin) {
             throw new BadRequestException('fecha_inicio y fecha_fin son requeridas');
@@ -38,37 +35,32 @@ export class ReportsController {
             format: 'json',
             fecha_inicio: fechaInicio,
             fecha_fin: fechaFin,
+            cuenta_id: cuentaId,
             umbral: 11
         });
     }
 
-    /**
-     * ENDPOINT PURE REST: Retorna el JSON limpio para la UI de la pestaña de Asistencia Staff en Angular.
-     * Utiliza la misma consistencia técnica unificada de personal.
-     */
     @Get('attendance/staff')
     @Roles('admin', 'staff')
     async getStaffAttendanceData(
         @CurrentUser() user: AuthUser,
         @Query('fecha_inicio') fechaInicio: string,
         @Query('fecha_fin') fechaFin: string,
+        @Query('cuenta_id') cuentaId?: string,
     ) {
         if (!fechaInicio || !fechaFin) {
             throw new BadRequestException('fecha_inicio y fecha_fin son requeridas');
         }
-        // Ejecuta el query analítico mapeado en SQL_RESUMEN_STAFF_RANGO
         return this.reportsService.generateConsolidatedData(user, {
-            scope: 'teacher_attendance_range', // O el ámbito que mapees en tu factory interno para staff
+            scope: 'staff_attendance_range',
             format: 'json',
             fecha_inicio: fechaInicio,
             fecha_fin: fechaFin,
+            cuenta_id: cuentaId,
             umbral: 11
         });
     }
 
-    /**
-     * ENDPOINT DE RESPONSABILIDAD EXCLUSIVA: Flujos binarios de descarga pesados (PDF, XLSX, CSV).
-     */
     @Get('consolidated')
     async getConsolidatedReport(
         @CurrentUser() user: AuthUser,
@@ -77,26 +69,22 @@ export class ReportsController {
     ): Promise<void> {
         const rawData = await this.reportsService.generateConsolidatedData(user, query);
 
-        // --- 1. MANEJO DE FORMATO JSON ---
         if (query.format === 'json') {
             res.status(200).json(rawData);
             return;
         }
 
-        // --- 2. MANEJO DE FORMATO CSV ---
         if (query.format === 'csv') {
             const csvString = this.reportsService.buildCsv(rawData);
             const filename = buildFilename(`reporte_${query.scope}_${query.anio ?? 'activo'}`);
             const bom = Buffer.from('\uFEFF', 'utf-8');
             const csvBuffer = Buffer.concat([bom, Buffer.from(csvString, 'utf-8')]);
-
             res.setHeader('Content-Type', 'text/csv; charset=utf-8');
             res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
             res.status(200).send(csvBuffer);
             return;
         }
 
-        // --- 3. MANEJO PREMIUM DE PDF TABULAR (ANCHOS PROPORCIONALES) ---
         if (query.format === 'pdf') {
             let pdfBuffer: Buffer;
             const filename = buildFilename(`reporte_${query.scope}_${query.anio ?? 'activo'}`);
@@ -122,12 +110,21 @@ export class ReportsController {
                 });
             } else if (query.scope === 'teacher_attendance_range') {
                 pdfBuffer = await this.pdfBuilder.buildTablePdf(rawData, {
-                    title: 'Asistencia de Docentes y Colaboradores',
+                    title: 'Asistencia de Docentes',
                     subtitle: `Rango: ${query.fecha_inicio} al ${query.fecha_fin}`,
                     headers: ['Docente / Colaborador', 'Mód. Esp.', 'Pres.', 'Tard.', 'Faltos', 'Efectividad'],
                     keys: ['docente_nombre', 'total_bloques_esperados', 'presentes', 'tardanzas', 'faltos', 'porcentaje_asistencia'],
                     columnWidths: [225, 65, 55, 55, 55, 60],
                     alignments: ['left', 'center', 'center', 'center', 'center', 'right'],
+                });
+            } else if (query.scope === 'staff_attendance_range') {
+                pdfBuffer = await this.pdfBuilder.buildTablePdf(rawData, {
+                    title: 'Asistencia de Personal de Apoyo (Staff)',
+                    subtitle: `Rango: ${query.fecha_inicio} al ${query.fecha_fin}`,
+                    headers: ['Colaborador', 'Cargo', 'Días Esp.', 'Pres.', 'Tard.', 'Faltos', 'Efectividad'],
+                    keys: ['staff_nombre', 'cargo', 'total_esperados', 'presentes', 'tardanzas', 'faltos', 'porcentaje_asistencia'],
+                    columnWidths: [200, 90, 55, 45, 45, 45, 55],
+                    alignments: ['left', 'left', 'center', 'center', 'center', 'center', 'right'],
                 });
             } else if (query.scope === 'course_ranking') {
                 pdfBuffer = await this.pdfBuilder.buildTablePdf(rawData, {
@@ -148,7 +145,6 @@ export class ReportsController {
             return;
         }
 
-        // --- 4. MANEJO PREMIUM DE EXCEL (.xlsx SIMPLIFICADO) ---
         let workbook: any;
         if (query.scope === 'academic_general') {
             workbook = buildXlsx('Consolidado Académico', rawData, {
@@ -184,6 +180,16 @@ export class ReportsController {
                 faltos: 'Faltas',
                 porcentaje_asistencia: 'Efectividad'
             });
+        } else if (query.scope === 'staff_attendance_range') {
+            workbook = buildXlsx('Asistencia Staff', rawData, {
+                staff_nombre: 'Colaborador',
+                cargo: 'Cargo',
+                total_esperados: 'Días Esperados',
+                presentes: 'Presentes',
+                tardanzas: 'Tardanzas',
+                faltos: 'Faltas',
+                porcentaje_asistencia: 'Efectividad'
+            });
         } else if (query.scope === 'course_ranking') {
             workbook = buildXlsx('Ranking del Curso', rawData, {
                 dni: 'DNI',
@@ -198,7 +204,6 @@ export class ReportsController {
 
         const buffer = await workbookToBuffer(workbook);
         const filename = buildFilename(`reporte_${query.scope}_${query.anio ?? 'activo'}`);
-
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}.xlsx"`);
         res.status(200).send(buffer);

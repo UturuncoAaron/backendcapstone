@@ -29,8 +29,6 @@ import {
 } from './dto/users.dto.js';
 import { UpdateFullDto } from './dto/profile.dto.js';
 
-// ── Tipos exportados ──────────────────────────────────────────────────────────
-
 export interface DocenteSelectItem {
   id: string;
   nombre: string;
@@ -88,8 +86,6 @@ export interface AlumnoSearchResult {
   } | null;
 }
 
-// ── Constantes ────────────────────────────────────────────────────────────────
-
 const ROLE_PREFIX: Record<string, string> = {
   alumno: 'EST',
   docente: 'DOC',
@@ -110,6 +106,7 @@ const PROFILE_FIELDS = [
   'colegiatura',
   'cargo',
   'relacion',
+  'fecha_nacimiento'
 ] as const;
 
 const SENSITIVE_FIELDS = [
@@ -117,8 +114,6 @@ const SENSITIVE_FIELDS = [
   'password_changed',
   'password_hash',
 ];
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class UsersService {
@@ -133,10 +128,6 @@ export class UsersService {
     private readonly dataSource: DataSource,
     private readonly storageService: StorageService,
   ) { }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // HELPERS PRIVADOS
-  // ══════════════════════════════════════════════════════════════════════════
 
   async checkDocumentoUnico(tipo: string, numero: string): Promise<void> {
     const exists = await this.cuentaRepo.findOne({
@@ -197,9 +188,13 @@ export class UsersService {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // CREAR USUARIOS
-  // ══════════════════════════════════════════════════════════════════════════
+  private buildLocalDate(dateValue: string): Date {
+    const parts = dateValue.split('T')[0].split('-');
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    return new Date(year, month, day);
+  }
 
   async createAlumno(dto: CreateAlumnoDto) {
     await this.checkDocumentoUnico(dto.tipo_documento, dto.numero_documento);
@@ -211,7 +206,7 @@ export class UsersService {
         nombre: dto.nombre,
         apellido_paterno: dto.apellido_paterno,
         apellido_materno: dto.apellido_materno ?? null,
-        fecha_nacimiento: new Date(dto.fecha_nacimiento),
+        fecha_nacimiento: this.buildLocalDate(dto.fecha_nacimiento),
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
         inclusivo: dto.inclusivo === true,
@@ -232,11 +227,11 @@ export class UsersService {
         titulo_profesional: dto.titulo_profesional ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
-        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+        fecha_nacimiento: dto.fecha_nacimiento ? this.buildLocalDate(dto.fecha_nacimiento) : null,
         tipo_contrato: dto.tipo_contrato ?? 'contratado',
         estado_contrato: dto.estado_contrato ?? 'activo',
-        fecha_inicio_contrato: dto.fecha_inicio_contrato ? new Date(dto.fecha_inicio_contrato) : null,
-        fecha_fin_contrato: dto.fecha_fin_contrato ? new Date(dto.fecha_fin_contrato) : null,
+        fecha_inicio_contrato: dto.fecha_inicio_contrato ? this.buildLocalDate(dto.fecha_inicio_contrato) : null,
+        fecha_fin_contrato: dto.fecha_fin_contrato ? this.buildLocalDate(dto.fecha_fin_contrato) : null,
       }));
     });
   }
@@ -253,7 +248,7 @@ export class UsersService {
         relacion: dto.relacion as any,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
-        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+        fecha_nacimiento: dto.fecha_nacimiento ? this.buildLocalDate(dto.fecha_nacimiento) : null,
       }));
     });
   }
@@ -269,7 +264,7 @@ export class UsersService {
         apellido_materno: dto.apellido_materno ?? null,
         cargo: dto.cargo ?? null,
         email: dto.email ?? null,
-        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+        fecha_nacimiento: dto.fecha_nacimiento ? this.buildLocalDate(dto.fecha_nacimiento) : null,
       }));
     });
   }
@@ -287,7 +282,7 @@ export class UsersService {
         colegiatura: dto.colegiatura ?? null,
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
-        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+        fecha_nacimiento: dto.fecha_nacimiento ? this.buildLocalDate(dto.fecha_nacimiento) : null,
       }));
     });
   }
@@ -304,14 +299,10 @@ export class UsersService {
         cargo: dto.cargo ?? 'Personal de Apoyo',
         email: dto.email ?? null,
         telefono: dto.telefono ?? null,
-        fecha_nacimiento: dto.fecha_nacimiento ? new Date(dto.fecha_nacimiento) : null,
+        fecha_nacimiento: dto.fecha_nacimiento ? this.buildLocalDate(dto.fecha_nacimiento) : null,
       }));
     });
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // LISTAR USUARIOS (paginado)
-  // ══════════════════════════════════════════════════════════════════════════
 
   async findAdmins(filters?: { q?: string; page?: number; limit?: number }) {
     const page = filters?.page ?? 1;
@@ -600,6 +591,7 @@ export class UsersService {
         's.email            AS email',
         's.telefono         AS telefono',
         's.foto_storage_key AS foto_storage_key',
+        's.fecha_nacimiento AS fecha_nacimiento',
         'c.numero_documento AS numero_documento',
         'c.tipo_documento   AS tipo_documento',
         'c.activo           AS activo',
@@ -622,10 +614,6 @@ export class UsersService {
     rows.forEach((r) => this.sanitize(r, true));
     return { data: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // SELECTS / DIALOGS (sin paginación)
-  // ══════════════════════════════════════════════════════════════════════════
 
   async findDocentesForSelect(includeTutoria = false): Promise<DocenteSelectItem[]> {
     const qb = this.docenteRepo
@@ -881,10 +869,6 @@ export class UsersService {
       .getRawMany();
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // FIND BY ID
-  // ══════════════════════════════════════════════════════════════════════════
-
   async findAlumnoById(id: string) {
     const row = await this.alumnoRepo
       .createQueryBuilder('a')
@@ -917,8 +901,8 @@ export class UsersService {
       .createQueryBuilder('d')
       .innerJoin('cuentas', 'c', 'c.id = d.id')
       .select([
-        'd.id                    AS id',
-        'd.nombre                AS nombre',
+        'd.id                     AS id',
+        'd.nombre                 AS nombre',
         'd.apellido_paterno      AS apellido_paterno',
         'd.apellido_materno      AS apellido_materno',
         'd.especialidad          AS especialidad',
@@ -930,6 +914,7 @@ export class UsersService {
         'd.estado_contrato       AS estado_contrato',
         'd.fecha_inicio_contrato AS fecha_inicio_contrato',
         'd.fecha_fin_contrato    AS fecha_fin_contrato',
+        'd.fecha_nacimiento      AS fecha_nacimiento',
         'c.numero_documento      AS numero_documento',
         'c.tipo_documento        AS tipo_documento',
         'c.codigo_acceso         AS codigo_acceso',
@@ -955,9 +940,10 @@ export class UsersService {
         'p.email            AS email',
         'p.telefono         AS telefono',
         'p.foto_storage_key AS foto_storage_key',
+        'p.fecha_nacimiento AS fecha_nacimiento',
         'c.numero_documento AS numero_documento',
         'c.tipo_documento   AS tipo_documento',
-        'c.codigo_acceso    AS codigo_acceso',
+        'c.codigo_acceso     AS codigo_acceso',
         'c.activo           AS activo',
       ])
       .where('p.id = :id', { id })
@@ -980,9 +966,10 @@ export class UsersService {
         'a.email            AS email',
         'a.telefono         AS telefono',
         'a.foto_storage_key AS foto_storage_key',
+        'a.fecha_nacimiento AS fecha_nacimiento',
         'c.numero_documento AS numero_documento',
         'c.tipo_documento   AS tipo_documento',
-        'c.codigo_acceso    AS codigo_acceso',
+        'c.codigo_acceso     AS codigo_acceso',
         'c.activo           AS activo',
       ])
       .where('a.id = :id', { id })
@@ -1006,9 +993,10 @@ export class UsersService {
         'p.email            AS email',
         'p.telefono         AS telefono',
         'p.foto_storage_key AS foto_storage_key',
+        'p.fecha_nacimiento AS fecha_nacimiento',
         'c.numero_documento AS numero_documento',
         'c.tipo_documento   AS tipo_documento',
-        'c.codigo_acceso    AS codigo_acceso',
+        'c.codigo_acceso     AS codigo_acceso',
         'c.activo           AS activo',
       ])
       .where('p.id = :id', { id })
@@ -1031,9 +1019,10 @@ export class UsersService {
         's.email            AS email',
         's.telefono         AS telefono',
         's.foto_storage_key AS foto_storage_key',
+        's.fecha_nacimiento AS fecha_nacimiento',
         'c.numero_documento AS numero_documento',
         'c.tipo_documento   AS tipo_documento',
-        'c.codigo_acceso    AS codigo_acceso',
+        'c.codigo_acceso     AS codigo_acceso',
         'c.activo           AS activo',
       ])
       .where('s.id = :id', { id })
@@ -1056,10 +1045,6 @@ export class UsersService {
     });
     return row ?? null;
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // ACTIVAR / DESACTIVAR
-  // ══════════════════════════════════════════════════════════════════════════
 
   async deactivate(id: string): Promise<{ message: string }> {
     return this.dataSource.transaction(async (em) => {
@@ -1094,10 +1079,6 @@ export class UsersService {
     return { message: 'Usuario reactivado correctamente' };
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // RESET PASSWORD
-  // ══════════════════════════════════════════════════════════════════════════
-
   async resetPassword(id: string): Promise<{ message: string }> {
     const cuenta = await this.cuentaRepo.findOne({
       where: { id, activo: true },
@@ -1112,10 +1093,6 @@ export class UsersService {
   async updatePassword(id: string, newHash: string) {
     await this.cuentaRepo.update({ id }, { password_hash: newHash, password_changed: true });
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // VINCULAR PADRE ↔ ALUMNO
-  // ══════════════════════════════════════════════════════════════════════════
 
   async linkPadreAlumno(dto: LinkPadreAlumnoDto) {
     const [padre, alumno] = await Promise.all([
@@ -1194,10 +1171,6 @@ export class UsersService {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // MÉTODOS PARA AUTH SERVICE
-  // ══════════════════════════════════════════════════════════════════════════
-
   async findCuentaByCodigoAcceso(codigoAcceso: string) {
     return this.cuentaRepo
       .createQueryBuilder('c')
@@ -1228,10 +1201,6 @@ export class UsersService {
     this.cuentaRepo.update(id, { ultimo_acceso: new Date() }).catch(() => { });
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // PERFIL COMPLETO
-  // ══════════════════════════════════════════════════════════════════════════
-
   async getProfileById(id: string, rol: string) {
     switch (rol) {
       case 'alumno': return this.findAlumnoById(id);
@@ -1245,10 +1214,6 @@ export class UsersService {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // ACTUALIZAR PERFIL
-  // ══════════════════════════════════════════════════════════════════════════
-
   async updateFull(
     id: string,
     rol: string,
@@ -1258,7 +1223,13 @@ export class UsersService {
     return this.dataSource.transaction(async (em) => {
       const profileData: Record<string, any> = {};
       for (const k of PROFILE_FIELDS) {
-        if (dto[k] !== undefined) profileData[k] = dto[k] || null;
+        if (dto[k] !== undefined) {
+          if (k === 'fecha_nacimiento' && dto[k]) {
+            profileData[k] = this.buildLocalDate(dto[k]);
+          } else {
+            profileData[k] = dto[k] || null;
+          }
+        }
       }
       if (rol === 'alumno' && typeof dto.inclusivo === 'boolean') {
         profileData['inclusivo'] = dto.inclusivo;
@@ -1315,10 +1286,6 @@ export class UsersService {
     });
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // FOTO DE PERFIL
-  // ══════════════════════════════════════════════════════════════════════════
-
   async updateFoto(id: string, rol: string, file: Express.Multer.File) {
     const oldKeyPromise = this.getFotoKey(id, rol);
 
@@ -1356,10 +1323,6 @@ export class UsersService {
     const r = await repo.findOne({ where: { id }, select: ['foto_storage_key'] });
     return r?.foto_storage_key ?? null;
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // BULK CREATE
-  // ══════════════════════════════════════════════════════════════════════════
 
   async createBulk(rol: string, dtos: any[]): Promise<any[]> {
     const results: any[] = [];

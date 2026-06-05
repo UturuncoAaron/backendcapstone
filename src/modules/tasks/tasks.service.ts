@@ -19,7 +19,6 @@ import {
   NOTIFICATION_EVENT_NAMES,
   TaskCreatedEvent,
 } from '../notifications/events/notification-events.js';
-
 import {
   CreateTaskDto,
   SubmitTaskDto,
@@ -32,19 +31,15 @@ import {
 export class TasksService {
   constructor(
     @InjectRepository(Task) private taskRepo: Repository<Task>,
-    @InjectRepository(Submission)
-    private submissionRepo: Repository<Submission>,
+    @InjectRepository(Submission) private submissionRepo: Repository<Submission>,
     @InjectRepository(Pregunta) private preguntaRepo: Repository<Pregunta>,
     @InjectRepository(Opcion) private opcionRepo: Repository<Opcion>,
-    @InjectRepository(RespuestaAlternativa)
-    private respuestaRepo: Repository<RespuestaAlternativa>,
+    @InjectRepository(RespuestaAlternativa) private respuestaRepo: Repository<RespuestaAlternativa>,
     private readonly dataSource: DataSource,
     private readonly storage: StorageService,
     private readonly semanasService: SemanasService,
     private readonly events: EventEmitter2,
-  ) {}
-
-  // ── Docente: gestión de tareas ───────────────────────────────
+  ) { }
 
   async getCourseTasks(cursoId: string, incluirInactivas = false) {
     const where: Record<string, unknown> = { curso_id: cursoId };
@@ -54,12 +49,8 @@ export class TasksService {
       order: { fecha_limite: 'ASC' },
     });
 
-    // Cuando incluirInactivas=false (alumnos), también ocultamos las que
-    // pertenezcan a una semana marcada como oculta por el docente.
     if (!incluirInactivas) {
-      const ocultas = new Set(
-        await this.semanasService.getHiddenSemanas(cursoId),
-      );
+      const ocultas = new Set(await this.semanasService.getHiddenSemanas(cursoId));
       return tareas.filter((t) => !(t.semana != null && ocultas.has(t.semana)));
     }
     return tareas;
@@ -68,11 +59,7 @@ export class TasksService {
   async createTask(cursoId: string, dto: CreateTaskDto) {
     const { preguntas, ...taskData } = dto;
 
-    if (
-      !taskData.permite_alternativas &&
-      !taskData.permite_archivo &&
-      !taskData.permite_texto
-    ) {
+    if (!taskData.permite_alternativas && !taskData.permite_archivo && !taskData.permite_texto) {
       throw new BadRequestException(
         'La tarea debe permitir al menos un tipo de entrega (alternativas, archivo o texto)',
       );
@@ -114,10 +101,6 @@ export class TasksService {
       return task;
     });
 
-    // Resolvemos los alumnos matriculados al curso y disparamos el evento.
-    // Se hace FUERA de la transacción para no bloquearla con la resolución
-    // del listener; si la notificación falla, el listener loguea pero la
-    // tarea ya quedó persistida.
     const alumnoIds = await this.resolveCourseStudents(cursoId);
     this.events.emit(NOTIFICATION_EVENT_NAMES.TASK_CREATED, {
       taskId: task.id,
@@ -131,14 +114,62 @@ export class TasksService {
   }
 
   private async resolveCourseStudents(cursoId: string): Promise<string[]> {
-    const rows = await this.dataSource.query<{ alumno_id: string }[]>(
+    const rows = (await this.dataSource.query(
       `SELECT DISTINCT m.alumno_id
-               FROM cursos c
-               JOIN matriculas m ON m.seccion_id = c.seccion_id AND m.activo = TRUE
-              WHERE c.id = $1`,
+       FROM cursos c
+       JOIN matriculas m ON m.seccion_id = c.seccion_id AND m.activo = TRUE
+       WHERE c.id = $1`,
       [cursoId],
-    );
+    )) as { alumno_id: string }[];
     return rows.map((r) => r.alumno_id);
+  }
+
+  private async resolverPeriodoId(
+    cursoId: string,
+    bimestre: number | null,
+    em?: EntityManager,
+  ): Promise<string | null> {
+    if (!bimestre) return null;
+    const runner = em ?? this.dataSource.manager;
+    const rows = (await runner.query(
+      `SELECT p.id
+       FROM periodos p
+       JOIN cursos c ON c.anio = p.anio
+       WHERE c.id = $1 AND p.bimestre = $2
+       LIMIT 1`,
+      [cursoId, bimestre],
+    )) as { id: string }[];
+    return rows[0]?.id ?? null;
+  }
+
+  private async upsertNota(
+    params: {
+      alumnoId: string;
+      cursoId: string;
+      periodoId: string;
+      titulo: string;
+      tipo: 'tarea' | 'practica' | 'proyecto';
+      nota: number;
+      fecha: Date;
+    },
+    em?: EntityManager,
+  ): Promise<void> {
+    const runner = em ?? this.dataSource.manager;
+    await runner.query(
+      `INSERT INTO notas (alumno_id, curso_id, periodo_id, titulo, tipo, nota, fecha)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (alumno_id, curso_id, periodo_id, titulo)
+       DO UPDATE SET nota = EXCLUDED.nota, fecha = EXCLUDED.fecha, updated_at = NOW()`,
+      [
+        params.alumnoId,
+        params.cursoId,
+        params.periodoId,
+        params.titulo,
+        params.tipo,
+        params.nota,
+        params.fecha,
+      ],
+    );
   }
 
   async getTaskById(taskId: string, incluirPreguntas = false) {
@@ -157,12 +188,9 @@ export class TasksService {
     return this.taskRepo.save(task);
   }
 
-  // ── Alumno: ver tarea (oculta respuestas correctas si no venció) ──
-
   async getTaskForAlumno(taskId: string) {
     const task = await this.getTaskById(taskId, true);
-    if (!task.activo)
-      throw new ForbiddenException('Esta tarea no está disponible');
+    if (!task.activo) throw new ForbiddenException('Esta tarea no está disponible');
 
     const vencida = new Date() > task.fecha_limite;
 
@@ -179,28 +207,16 @@ export class TasksService {
     return { ...task, vencida };
   }
 
-  // ── Alumno: entregar archivo o texto ─────────────────────────
-
   async submitTask(taskId: string, alumnoId: string, dto: SubmitTaskDto) {
     const task = await this.getTaskById(taskId);
 
-    if (!task.activo) {
-      throw new ForbiddenException('Esta tarea no está disponible');
-    }
-    if (new Date() > task.fecha_limite) {
-      throw new ForbiddenException('El plazo de entrega ha vencido');
-    }
+    if (!task.activo) throw new ForbiddenException('Esta tarea no está disponible');
+    if (new Date() > task.fecha_limite) throw new ForbiddenException('El plazo de entrega ha vencido');
     if (!dto.storage_key && !dto.respuesta_texto) {
-      throw new BadRequestException(
-        'Debes adjuntar un archivo o escribir una respuesta',
-      );
+      throw new BadRequestException('Debes adjuntar un archivo o escribir una respuesta');
     }
-    if (dto.storage_key && !task.permite_archivo) {
-      throw new BadRequestException('Esta tarea no acepta archivos');
-    }
-    if (dto.respuesta_texto && !task.permite_texto) {
-      throw new BadRequestException('Esta tarea no acepta respuestas de texto');
-    }
+    if (dto.storage_key && !task.permite_archivo) throw new BadRequestException('Esta tarea no acepta archivos');
+    if (dto.respuesta_texto && !task.permite_texto) throw new BadRequestException('Esta tarea no acepta respuestas de texto');
 
     const ahora = new Date();
     const conRetraso = ahora > task.fecha_limite;
@@ -210,11 +226,7 @@ export class TasksService {
     });
 
     if (existing) {
-      Object.assign(existing, {
-        ...dto,
-        con_retraso: conRetraso,
-        fecha_entrega: ahora,
-      });
+      Object.assign(existing, { ...dto, con_retraso: conRetraso, fecha_entrega: ahora });
       return this.submissionRepo.save(existing);
     }
 
@@ -227,21 +239,12 @@ export class TasksService {
     return this.submissionRepo.save(submission);
   }
 
-  // ── Alumno: entregar respuestas de alternativas ───────────────
-
-  async submitAlternativas(
-    taskId: string,
-    alumnoId: string,
-    dto: SubmitAlternativasDto,
-  ) {
+  async submitAlternativas(taskId: string, alumnoId: string, dto: SubmitAlternativasDto) {
     const task = await this.getTaskById(taskId);
 
-    if (!task.activo)
-      throw new ForbiddenException('Esta tarea no está disponible');
-    if (!task.permite_alternativas)
-      throw new BadRequestException('Esta tarea no tiene alternativas');
-    if (new Date() > task.fecha_limite)
-      throw new ForbiddenException('El plazo de entrega ha vencido');
+    if (!task.activo) throw new ForbiddenException('Esta tarea no está disponible');
+    if (!task.permite_alternativas) throw new BadRequestException('Esta tarea no tiene alternativas');
+    if (new Date() > task.fecha_limite) throw new ForbiddenException('El plazo de entrega ha vencido');
 
     return this.dataSource.transaction(async (em) => {
       let submission = await em.findOne(Submission, {
@@ -249,10 +252,7 @@ export class TasksService {
       });
 
       if (!submission) {
-        submission = em.create(Submission, {
-          tarea_id: taskId,
-          alumno_id: alumnoId,
-        });
+        submission = em.create(Submission, { tarea_id: taskId, alumno_id: alumnoId });
         await em.save(submission);
       }
 
@@ -274,41 +274,45 @@ export class TasksService {
         }
       }
 
-      // ← pasar el EntityManager para que la query vea las filas recién insertadas
-      const calificacion_auto = await this.calcularAutoCorreccion(
-        submission.id,
-        em,
-      );
+      const calificacion_auto = await this.calcularAutoCorreccion(submission.id, em);
       submission.calificacion_auto = calificacion_auto;
+      submission.calificacion_final = calificacion_auto;
       await em.save(submission);
+
+      const periodoId = await this.resolverPeriodoId(task.curso_id, task.bimestre, em);
+      if (periodoId) {
+        await this.upsertNota(
+          {
+            alumnoId,
+            cursoId: task.curso_id,
+            periodoId,
+            titulo: task.titulo,
+            tipo: (task.tipo as 'tarea' | 'practica' | 'proyecto') ?? 'tarea',
+            nota: calificacion_auto,
+            fecha: new Date(),
+          },
+          em,
+        );
+      }
 
       return { submission, calificacion_auto };
     });
   }
 
-  // ── Autocorrección ───────────────────────────────────────────
-
-  private async calcularAutoCorreccion(
-    submissionId: string,
-    em?: EntityManager,
-  ): Promise<number> {
+  private async calcularAutoCorreccion(submissionId: string, em?: EntityManager): Promise<number> {
     const runner = em ?? this.dataSource.manager;
-    const resultado: Array<{ total: string | number }> = await runner.query(
-      `
-                SELECT COALESCE(SUM(p.puntos), 0) AS total
-                FROM respuestas_alternativas ra
-                JOIN opciones o  ON o.id  = ra.opcion_id
-                JOIN preguntas p ON p.id  = ra.pregunta_id
-                WHERE ra.entrega_id = $1
-                  AND o.es_correcta = true
-            `,
+    const resultado = (await runner.query(
+      `SELECT COALESCE(SUM(p.puntos), 0) AS total
+       FROM respuestas_alternativas ra
+       JOIN opciones o  ON o.id  = ra.opcion_id
+       JOIN preguntas p ON p.id  = ra.pregunta_id
+       WHERE ra.entrega_id = $1
+         AND o.es_correcta = true`,
       [submissionId],
-    );
+    )) as { total: string | number }[];
 
     return parseFloat(String(resultado[0]?.total ?? 0));
   }
-
-  // ── Alumno: mis entregas (para pintar estado en la lista) ─────
 
   async getMySubmissions(alumnoId: string) {
     return this.submissionRepo.find({
@@ -316,8 +320,6 @@ export class TasksService {
       order: { fecha_entrega: 'DESC' },
     });
   }
-
-  // ── Docente: ver entregas ────────────────────────────────────
 
   async getSubmissions(taskId: string) {
     return this.submissionRepo.find({
@@ -330,40 +332,44 @@ export class TasksService {
   async getSubmissionById(submissionId: string) {
     const s = await this.submissionRepo.findOne({
       where: { id: submissionId },
-      relations: [
-        'alumno',
-        'respuestas',
-        'respuestas.pregunta',
-        'respuestas.opcion',
-      ],
+      relations: ['alumno', 'respuestas', 'respuestas.pregunta', 'respuestas.opcion'],
     });
     if (!s) throw new NotFoundException('Entrega no encontrada');
     return s;
   }
 
-  // ── Docente: calificar archivo/texto manualmente ──────────────
-
   async gradeSubmission(submissionId: string, dto: GradeTaskDto) {
-    const submission = await this.submissionRepo.findOne({
-      where: { id: submissionId },
+    return this.dataSource.transaction(async (em) => {
+      const submission = await em.findOne(Submission, { where: { id: submissionId } });
+      if (!submission) throw new NotFoundException('Entrega no encontrada');
+
+      submission.calificacion_manual = dto.calificacion_manual;
+      submission.comentario_docente = dto.comentario_docente ?? null;
+      submission.calificacion_final = dto.calificacion_manual;
+      await em.save(submission);
+
+      const task = await em.findOne(Task, { where: { id: submission.tarea_id } });
+      if (!task) throw new NotFoundException('Tarea no encontrada');
+
+      const periodoId = await this.resolverPeriodoId(task.curso_id, task.bimestre, em);
+      if (periodoId) {
+        await this.upsertNota(
+          {
+            alumnoId: submission.alumno_id,
+            cursoId: task.curso_id,
+            periodoId,
+            titulo: task.titulo,
+            tipo: (task.tipo as 'tarea' | 'practica' | 'proyecto') ?? 'tarea',
+            nota: dto.calificacion_manual,
+            fecha: new Date(),
+          },
+          em,
+        );
+      }
+
+      return submission;
     });
-    if (!submission) throw new NotFoundException('Entrega no encontrada');
-
-    submission.calificacion_manual = dto.calificacion_manual;
-    submission.comentario_docente = dto.comentario_docente ?? null;
-
-    const { calificacion_auto, calificacion_manual } = submission;
-    if (calificacion_auto !== null && calificacion_manual !== null) {
-      submission.calificacion_final =
-        (Number(calificacion_auto) + Number(calificacion_manual)) / 2;
-    } else {
-      submission.calificacion_final = calificacion_manual ?? calificacion_auto;
-    }
-
-    return this.submissionRepo.save(submission);
   }
-
-  // ── Alumno: ver su propia entrega ────────────────────────────
 
   async getMySubmission(taskId: string, alumnoId: string) {
     return this.submissionRepo.findOne({
@@ -371,8 +377,6 @@ export class TasksService {
       relations: ['respuestas', 'respuestas.opcion'],
     });
   }
-
-  // ── Docente: adjuntar archivo de enunciado/referencia ─────────
 
   async attachEnunciado(
     taskId: string,
@@ -382,17 +386,11 @@ export class TasksService {
     if (!task) throw new NotFoundException('Tarea no encontrada');
 
     if (task.enunciado_storage_key) {
-      await this.storage
-        .deleteFile(task.enunciado_storage_key)
-        .catch(() => null);
+      await this.storage.deleteFile(task.enunciado_storage_key).catch(() => null);
     }
 
     const key = await this.storage.uploadFile(
-      {
-        buffer: file.buffer,
-        originalname: file.originalname,
-        mimetype: file.mimetype,
-      },
+      { buffer: file.buffer, originalname: file.originalname, mimetype: file.mimetype },
       `tareas/${task.curso_id}/${task.id}/enunciado`,
     );
     task.enunciado_storage_key = key;
@@ -416,21 +414,15 @@ export class TasksService {
     return { url, nombre: task.enunciado_url };
   }
 
-  // ── Alumno: subir archivo como entrega ───────────────────────
-
   async submitTaskWithFile(
     taskId: string,
     alumnoId: string,
     file: { buffer: Buffer; originalname: string; mimetype: string },
   ) {
     const task = await this.getTaskById(taskId);
-    if (!task.activo)
-      throw new ForbiddenException('Esta tarea no está disponible');
-    if (!task.permite_archivo)
-      throw new BadRequestException('Esta tarea no acepta archivos');
-    if (new Date() > task.fecha_limite) {
-      throw new ForbiddenException('El plazo de entrega ha vencido');
-    }
+    if (!task.activo) throw new ForbiddenException('Esta tarea no está disponible');
+    if (!task.permite_archivo) throw new BadRequestException('Esta tarea no acepta archivos');
+    if (new Date() > task.fecha_limite) throw new ForbiddenException('El plazo de entrega ha vencido');
 
     const existing = await this.submissionRepo.findOne({
       where: { tarea_id: taskId, alumno_id: alumnoId },
@@ -441,11 +433,7 @@ export class TasksService {
     }
 
     const key = await this.storage.uploadFile(
-      {
-        buffer: file.buffer,
-        originalname: file.originalname,
-        mimetype: file.mimetype,
-      },
+      { buffer: file.buffer, originalname: file.originalname, mimetype: file.mimetype },
       `entregas/${task.id}/${alumnoId}`,
     );
 
@@ -470,18 +458,11 @@ export class TasksService {
     return this.submissionRepo.save(submission);
   }
 
-  // ── URL firmada del archivo de una entrega ───────────────────
-
   async getSubmissionFileUrl(submissionId: string) {
-    const s = await this.submissionRepo.findOne({
-      where: { id: submissionId },
-    });
+    const s = await this.submissionRepo.findOne({ where: { id: submissionId } });
     if (!s) throw new NotFoundException('Entrega no encontrada');
-    if (!s.storage_key)
-      throw new NotFoundException('Esta entrega no tiene archivo adjunto');
-    if (/^https?:\/\//i.test(s.storage_key)) {
-      return { url: s.storage_key, nombre: s.nombre_archivo };
-    }
+    if (!s.storage_key) throw new NotFoundException('Esta entrega no tiene archivo adjunto');
+    if (/^https?:\/\//i.test(s.storage_key)) return { url: s.storage_key, nombre: s.nombre_archivo };
     const url = await this.storage.getSignedUrl(s.storage_key);
     return { url, nombre: s.nombre_archivo };
   }

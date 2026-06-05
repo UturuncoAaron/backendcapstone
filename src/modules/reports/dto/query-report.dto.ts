@@ -1,11 +1,11 @@
 import { IsInt, IsOptional, Min, Max, IsUUID, IsIn, IsDateString } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export type UnifiedReportScope = 'academic_general' | 'section_summary' | 'teacher_attendance_range' | 'course_ranking' | 'student_individual';
+export type UnifiedReportScope = 'academic_general' | 'section_summary' | 'teacher_attendance_range' | 'staff_attendance_range' | 'course_ranking' | 'student_individual';
 export type UnifiedReportFormat = 'xlsx' | 'pdf' | 'csv' | 'json';
 
 export class QueryReportDto {
-    @IsIn(['academic_general', 'section_summary', 'teacher_attendance_range', 'course_ranking', 'student_individual'])
+    @IsIn(['academic_general', 'section_summary', 'teacher_attendance_range', 'staff_attendance_range', 'course_ranking', 'student_individual'])
     scope!: UnifiedReportScope;
 
     @IsOptional()
@@ -51,6 +51,10 @@ export class QueryReportDto {
     @IsOptional()
     @IsDateString()
     fecha_fin?: string;
+
+    @IsOptional()
+    @IsUUID()
+    cuenta_id?: string;
 
     @IsOptional()
     @Type(() => Number)

@@ -22,12 +22,13 @@ export class GradesService {
         private readonly gradeRepo: Repository<Grade>,
         private readonly dataSource: DataSource,
     ) { }
+
     private async assertCanWriteCurso(
         cursoId: string,
         user: AuthUser,
         em?: EntityManager,
     ) {
-        const runner: EntityManager = em ?? this.dataSource.manager;
+        const runner = em ?? this.dataSource.manager;
         const [curso] = await runner.query(
             `SELECT docente_id FROM cursos WHERE id = $1 AND activo = true`,
             [cursoId],
@@ -38,11 +39,10 @@ export class GradesService {
         }
     }
 
-    /** Padre sólo ve hijos suyos (tabla padre_alumno del schema v7). */
     private async assertPadreOfAlumno(padreId: string, alumnoId: string) {
         const rows = await this.dataSource.query(
             `SELECT 1 FROM padre_alumno
-              WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
+             WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
             [padreId, alumnoId],
         );
         if (rows.length === 0) {
@@ -186,15 +186,17 @@ export class GradesService {
                 n.id, n.titulo, n.tipo, n.nota,
                 n.observaciones, n.fecha,
                 n.curso_id, n.periodo_id,
-                c.nombre AS curso_nombre, c.color AS curso_color,
+                cc.nombre  AS curso_nombre,
+                c.color    AS curso_color,
                 p.bimestre, p.anio, p.nombre AS periodo_nombre
             FROM notas n
-            JOIN cursos   c ON c.id = n.curso_id
-            JOIN periodos p ON p.id = n.periodo_id
+            JOIN cursos          c  ON c.id  = n.curso_id
+            JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
+            JOIN periodos        p  ON p.id  = n.periodo_id
             WHERE n.alumno_id = $1
             ${anioFilter}
             ORDER BY p.anio DESC, p.bimestre ASC,
-                     c.nombre ASC, n.fecha ASC NULLS LAST, n.created_at ASC
+                     cc.nombre ASC, n.fecha ASC NULLS LAST, n.created_at ASC
         `, params);
     }
 
@@ -219,7 +221,6 @@ export class GradesService {
             throw new ForbiddenException('No eres el docente de este curso');
         }
 
-        // Si no viene periodoId válido, usamos el periodo activo del año del curso
         let resolvedPeriodoId = isUuid(periodoId) ? periodoId : null;
         if (!resolvedPeriodoId) {
             const [periodo] = await this.dataSource.query(
@@ -231,23 +232,22 @@ export class GradesService {
         if (!resolvedPeriodoId) throw new NotFoundException('No hay periodo activo para este curso');
 
         const actividades = await this.dataSource.query(`
-        SELECT
-            titulo, tipo,
-            COUNT(*)                AS total_alumnos,
-            COUNT(nota)             AS con_nota,
-            AVG(nota)::numeric(4,2) AS promedio,
-            MIN(fecha)              AS fecha,
-            MIN(created_at)         AS created_at
-        FROM notas
-        WHERE curso_id = $1 AND periodo_id = $2
-        GROUP BY titulo, tipo
-        ORDER BY MIN(created_at) ASC
-    `, [cursoId, resolvedPeriodoId]);
+            SELECT
+                titulo, tipo,
+                COUNT(*)                AS total_alumnos,
+                COUNT(nota)             AS con_nota,
+                AVG(nota)::numeric(4,2) AS promedio,
+                MIN(fecha)              AS fecha,
+                MIN(created_at)         AS created_at
+            FROM notas
+            WHERE curso_id = $1 AND periodo_id = $2
+            GROUP BY titulo, tipo
+            ORDER BY MIN(created_at) ASC
+        `, [cursoId, resolvedPeriodoId]);
 
         return { curso_id: cursoId, periodo_id: resolvedPeriodoId, actividades };
     }
 
-    /** Planilla del docente: alumnos × actividades del periodo. */
     async getCourseGrid(cursoId: string, user: AuthUser, periodoId?: string) {
         const [curso] = await this.dataSource.query(
             `SELECT id, seccion_id, anio, docente_id FROM cursos WHERE id = $1`,
@@ -258,7 +258,6 @@ export class GradesService {
             throw new ForbiddenException('No eres el docente de este curso');
         }
 
-        // Resolver periodo — fallback al activo del año del curso
         let resolvedPeriodoId = isUuid(periodoId) ? periodoId : null;
         if (!resolvedPeriodoId) {
             const [periodo] = await this.dataSource.query(
@@ -269,18 +268,17 @@ export class GradesService {
         }
         if (!resolvedPeriodoId) throw new NotFoundException('No hay periodo activo para este curso');
 
-        // Alumnos matriculados — usa anio (matriculas no tiene periodo_id)
         const alumnos = await this.dataSource.query(`
-        SELECT a.id AS alumno_id, a.codigo_estudiante,
-               a.nombre, a.apellido_paterno, a.apellido_materno
-        FROM matriculas m
-        JOIN alumnos  a  ON a.id  = m.alumno_id
-        JOIN cuentas  ct ON ct.id = a.id AND ct.activo = true
-        WHERE m.seccion_id = $1
-          AND m.anio       = $2
-          AND m.activo     = true
-        ORDER BY a.apellido_paterno, a.apellido_materno NULLS LAST, a.nombre
-    `, [curso.seccion_id, curso.anio]);
+            SELECT a.id AS alumno_id, a.codigo_estudiante,
+                   a.nombre, a.apellido_paterno, a.apellido_materno
+            FROM matriculas m
+            JOIN alumnos  a  ON a.id  = m.alumno_id
+            JOIN cuentas  ct ON ct.id = a.id AND ct.activo = true
+            WHERE m.seccion_id = $1
+              AND m.anio       = $2
+              AND m.activo     = true
+            ORDER BY a.apellido_paterno, a.apellido_materno NULLS LAST, a.nombre
+        `, [curso.seccion_id, curso.anio]);
 
         const notas = await this.gradeRepo
             .createQueryBuilder('n')
@@ -324,6 +322,7 @@ export class GradesService {
 
         return { curso_id: cursoId, periodo_id: resolvedPeriodoId, actividades, filas };
     }
+
     private promedio(valores: (number | null)[]): number | null {
         const limpios = valores.filter((v): v is number => v != null);
         if (limpios.length === 0) return null;

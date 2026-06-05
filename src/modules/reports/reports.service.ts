@@ -61,7 +61,13 @@ export class ReportsService {
                 if (!dto.fecha_inicio || !dto.fecha_fin) {
                     throw new BadRequestException('fecha_inicio y fecha_fin son requeridas');
                 }
-                return this.teacherAttendanceSvc.getResumenRango(user, dto.fecha_inicio, dto.fecha_fin);
+                return this.attendanceSvc.getResumenDocentesRango(dto.fecha_inicio, dto.fecha_fin, dto.cuenta_id);
+
+            case 'staff_attendance_range':
+                if (!dto.fecha_inicio || !dto.fecha_fin) {
+                    throw new BadRequestException('fecha_inicio y fecha_fin son requeridas');
+                }
+                return this.attendanceSvc.getResumenStaffRango(dto.fecha_inicio, dto.fecha_fin, dto.cuenta_id);
 
             case 'course_ranking':
                 if (!dto.curso_id || !dto.periodo_id) {

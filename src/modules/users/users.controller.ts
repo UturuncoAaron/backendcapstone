@@ -25,10 +25,6 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
-    // ══════════════════════════════════════════════════════════════
-    // LISTAR CON PAGINACIÓN
-    // ══════════════════════════════════════════════════════════════
-
     @Get('admins')
     findAdmins(
         @Query('q') q?: string,
@@ -43,7 +39,7 @@ export class UsersController {
     }
 
     @Get('alumnos')
-    @Roles('admin', 'staff', 'psicologa')
+    @Roles('admin', 'staff', 'psicologa', 'docente')
     findAlumnos(
         @Query('q') q?: string,
         @Query('grado_id') gradoId?: string,
@@ -59,6 +55,7 @@ export class UsersController {
     }
 
     @Get('docentes')
+    @Roles('admin', 'staff', 'docente')
     findDocentes(
         @Query('q') q?: string,
         @Query('include') include?: string,
@@ -100,6 +97,7 @@ export class UsersController {
     }
 
     @Get('staff')
+    @Roles('admin', 'staff', 'docente')
     findStaff(
         @Query('q') q?: string,
         @Query('page') page = '1',
@@ -112,12 +110,8 @@ export class UsersController {
         });
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // BÚSQUEDA AUTOCOMPLETE + SELECTS
-    // IMPORTANTE: rutas con sufijo ANTES de /:id
-    // ══════════════════════════════════════════════════════════════
-
     @Get('alumnos/search')
+    @Roles('admin', 'staff', 'psicologa', 'docente')
     searchAlumnos(
         @Query('q') q: string,
         @Query('anio') anio?: string,
@@ -136,30 +130,31 @@ export class UsersController {
     }
 
     @Get('docentes/search')
+    @Roles('admin', 'staff', 'docente')
     searchDocentes(@Query('q') q: string) {
         return this.usersService.searchDocentes(q);
     }
 
     @Get('docentes/select')
+    @Roles('admin', 'staff', 'docente')
     findDocentesForSelect(@Query('include') include?: string) {
         return this.usersService.findDocentesForSelect(include === 'tutoria');
     }
 
     @Get('staff/search')
+    @Roles('admin', 'staff', 'docente')
     searchStaff(@Query('q') q: string) {
         return this.usersService.searchStaff(q);
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // OBTENER UNO POR ID
-    // ══════════════════════════════════════════════════════════════
-
     @Get('alumnos/:id')
+    @Roles('admin', 'staff', 'psicologa', 'docente')
     findAlumno(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findAlumnoById(id);
     }
 
     @Get('docentes/:id')
+    @Roles('admin', 'staff', 'docente')
     findDocente(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findDocenteById(id);
     }
@@ -180,13 +175,10 @@ export class UsersController {
     }
 
     @Get('staff/:id')
+    @Roles('admin', 'staff', 'docente')
     findStaffById(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findStaffById(id);
     }
-
-    // ══════════════════════════════════════════════════════════════
-    // CREAR INDIVIDUAL
-    // ══════════════════════════════════════════════════════════════
 
     @Post('alumnos')
     createAlumno(@Body() dto: CreateAlumnoDto) {
@@ -218,10 +210,6 @@ export class UsersController {
         return this.usersService.createStaff(dto);
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // ACTUALIZAR
-    // ══════════════════════════════════════════════════════════════
-
     @Put(':id')
     async updateUser(
         @Param('id', ParseUUIDPipe) id: string,
@@ -231,10 +219,6 @@ export class UsersController {
         if (!cuenta) throw new NotFoundException(`Usuario ${id} no encontrado`);
         return this.usersService.updateFull(id, cuenta.rol, dto, false);
     }
-
-    // ══════════════════════════════════════════════════════════════
-    // ACTIVAR / DESACTIVAR
-    // ══════════════════════════════════════════════════════════════
 
     @Delete(':id')
     @HttpCode(HttpStatus.OK)
@@ -248,10 +232,6 @@ export class UsersController {
         return this.usersService.reactivate(id);
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // VÍNCULO PADRE ↔ ALUMNO
-    // ══════════════════════════════════════════════════════════════
-
     @Post('parent-child')
     linkPadreAlumno(@Body() dto: LinkPadreAlumnoDto) {
         return this.usersService.linkPadreAlumno(dto);
@@ -264,6 +244,7 @@ export class UsersController {
     }
 
     @Get('alumnos/:id/padres')
+    @Roles('admin', 'staff', 'psicologa', 'docente')
     getPadresOfAlumno(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.getPadresOfAlumno(id);
     }

@@ -45,7 +45,7 @@ export class TeacherAttendanceService {
     ): Promise<ResumenAsistenciaDocenteRow[]> {
         this.assertCanViewReports(user);
         this.assertRangoFechas(fechaInicio, fechaFin);
-        return this.ds.query(SQL_RESUMEN_DOCENTES_RANGO, [fechaInicio, fechaFin]);
+        return this.ds.query(SQL_RESUMEN_DOCENTES_RANGO, [fechaInicio, fechaFin, null]);
     }
 
     async getAlertas(
