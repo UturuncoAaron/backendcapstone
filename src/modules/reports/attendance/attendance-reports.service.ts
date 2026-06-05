@@ -146,15 +146,14 @@ export class AttendanceReportsService {
     const [metaRows, summaryRows, detalleRows] = await Promise.all([
       this.ds.query<{ curso_nombre: string; periodo_nombre: string | null }[]>(
         `SELECT
-            c.nombre AS curso_nombre,
-            p.nombre AS periodo_nombre
-         FROM cursos c
-         LEFT JOIN periodos p ON p.id = $2
-         WHERE c.id = $1
-         LIMIT 1`,
+      c.descripcion AS curso_nombre,
+      p.nombre AS periodo_nombre
+      FROM cursos c
+      LEFT JOIN periodos p ON p.id = $2
+      WHERE c.id = $1
+      LIMIT 1`,
         [cursoId, periodoId ?? null],
       ),
-
       this.ds.query<{
         apellido_paterno: string;
         apellido_materno: string | null;

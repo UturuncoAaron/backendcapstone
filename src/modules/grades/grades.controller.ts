@@ -18,35 +18,35 @@ import type { AuthUser } from '../auth/types/auth-user.js';
 export class GradesController {
     constructor(private readonly grades: GradesService) { }
 
-    // GET /api/grades/my?anio=2025
+    // GET /api/grades/my?anio=2025&cursoId=<uuid>
     @Get('my')
     @Roles('alumno')
-    async getMyGrades(
+    getMyGrades(
         @CurrentUser() user: AuthUser,
         @Query('anio') anio?: string,
+        @Query('cursoId') cursoId?: string,
     ) {
-        const data = await this.grades.getGradesByAlumno(
-            user.id, anio ? parseInt(anio, 10) : undefined,
+        return this.grades.getGradesByAlumno(
+            user.id,
+            anio ? parseInt(anio, 10) : undefined,
+            cursoId,
         );
-        return { success: true, data };
     }
 
     // GET /api/grades/alumno/:alumnoId?anio=2025
     @Get('alumno/:alumnoId')
     @Roles('docente', 'admin', 'padre')
-    async getGradesByAlumno(
+    getGradesByAlumno(
         @Param('alumnoId', ParseUUIDPipe) alumnoId: string,
         @CurrentUser() user: AuthUser,
         @Query('anio') anio?: string,
     ) {
-        const data = await this.grades.getGradesByAlumnoForUser(
+        return this.grades.getGradesByAlumnoForUser(
             alumnoId, user, anio ? parseInt(anio, 10) : undefined,
         );
-        return { success: true, data };
     }
 
     // GET /api/grades/course/:cursoId?periodoId=<uuid>
-    // periodoId es UUID; antes se parseaba como entero y rompia con 400.
     @Get('course/:cursoId')
     @Roles('docente', 'admin')
     getCourseGrid(

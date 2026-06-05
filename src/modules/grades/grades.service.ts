@@ -50,8 +50,6 @@ export class GradesService {
         }
     }
 
-    // ── CREATE ────────────────────────────────────────
-
     async create(dto: CreateGradeDto, user: AuthUser): Promise<Grade> {
         await this.assertCanWriteCurso(dto.curso_id, user);
 
@@ -82,8 +80,6 @@ export class GradesService {
         }));
     }
 
-    // ── PUT ───────────────────────────────────────────
-
     async replace(id: string, dto: CreateGradeDto, user: AuthUser): Promise<Grade> {
         const existing = await this.gradeRepo.findOne({ where: { id } });
         if (!existing) throw new NotFoundException('Nota no encontrada');
@@ -107,8 +103,6 @@ export class GradesService {
         existing.fecha = dto.fecha ?? null;
         return this.gradeRepo.save(existing);
     }
-
-    // ── PATCH ─────────────────────────────────────────
 
     async update(id: string, dto: UpdateGradeDto, user: AuthUser): Promise<Grade> {
         const existing = await this.gradeRepo.findOne({ where: { id } });
@@ -140,16 +134,12 @@ export class GradesService {
         return this.gradeRepo.save(existing);
     }
 
-    // ── DELETE ────────────────────────────────────────
-
     async remove(id: string, user: AuthUser): Promise<void> {
         const existing = await this.gradeRepo.findOne({ where: { id } });
         if (!existing) throw new NotFoundException('Nota no encontrada');
         await this.assertCanWriteCurso(existing.curso_id, user);
         await this.gradeRepo.delete(id);
     }
-
-    // ── GET ONE ───────────────────────────────────────
 
     async getOneFor(id: string, user: AuthUser): Promise<Grade> {
         const grade = await this.gradeRepo.findOne({ where: { id } });
@@ -172,15 +162,23 @@ export class GradesService {
         return grade;
     }
 
-    // ── LISTAS ────────────────────────────────────────
-
-    async getGradesByAlumno(alumnoId: string, anio?: number) {
+    async getGradesByAlumno(alumnoId: string, anio?: number, cursoId?: string) {
         const params: (string | number)[] = [alumnoId];
-        let anioFilter = '';
+        const filters: string[] = [];
+
         if (anio !== undefined) {
             params.push(anio);
-            anioFilter = `AND p.anio = $${params.length}`;
+            filters.push(`p.anio = $${params.length}`);
         }
+        if (cursoId) {
+            params.push(cursoId);
+            filters.push(`n.curso_id = $${params.length}`);
+        }
+
+        const where = filters.length > 0
+            ? 'AND ' + filters.join(' AND ')
+            : '';
+
         return this.dataSource.query(`
             SELECT
                 n.id, n.titulo, n.tipo, n.nota,
@@ -194,7 +192,7 @@ export class GradesService {
             JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
             JOIN periodos        p  ON p.id  = n.periodo_id
             WHERE n.alumno_id = $1
-            ${anioFilter}
+            ${where}
             ORDER BY p.anio DESC, p.bimestre ASC,
                      cc.nombre ASC, n.fecha ASC NULLS LAST, n.created_at ASC
         `, params);
@@ -329,8 +327,6 @@ export class GradesService {
         const avg = limpios.reduce((a, b) => a + b, 0) / limpios.length;
         return Math.round(avg * 100) / 100;
     }
-
-    // ── BULK transaccional ────────────────────────────
 
     async upsertBulk(
         cursoId: string, items: CreateGradeDto[], user: AuthUser,
