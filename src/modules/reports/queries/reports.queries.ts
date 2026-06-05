@@ -182,16 +182,17 @@ export const SQL_RESUMEN_DOCENTES_RANGO = `
     FROM horarios h
     JOIN cursos c ON c.id = h.curso_id AND c.activo = true
     JOIN dias_laborables dl ON dl.dia_semana = h.dia_semana
+    WHERE ($3::uuid IS NULL OR c.docente_id = $3::uuid)
   ),
   stats AS (
     SELECT
       dc.docente_id,
       COUNT(*)::int AS total_esperados,
-      COUNT(aj.id) FILTER (WHERE aj.estado = 'presente')::int   AS presentes,
-      COUNT(aj.id) FILTER (WHERE aj.estado = 'tardanza')::int   AS tardanzas,
-      COUNT(aj.id) FILTER (WHERE aj.estado = 'falto')::int      AS faltos,
+      COUNT(aj.id) FILTER (WHERE aj.estado = 'presente')::int    AS presentes,
+      COUNT(aj.id) FILTER (WHERE aj.estado = 'tardanza')::int    AS tardanzas,
+      COUNT(aj.id) FILTER (WHERE aj.estado = 'falto')::int       AS faltos,
       COUNT(aj.id) FILTER (WHERE aj.estado = 'justificado')::int AS justificados,
-      COUNT(*) FILTER (WHERE aj.id IS NULL)::int                        AS sin_registro
+      COUNT(*) FILTER (WHERE aj.id IS NULL)::int                 AS sin_registro
     FROM docentes_con_clases dc
     LEFT JOIN asistencias_personal aj 
            ON aj.cuenta_id = dc.docente_id 
@@ -201,6 +202,8 @@ export const SQL_RESUMEN_DOCENTES_RANGO = `
   SELECT
     d.id                                                                               AS docente_id,
     CONCAT(d.apellido_paterno, ' ', COALESCE(d.apellido_materno, ''), ', ', d.nombre) AS docente_nombre,
+    d.apellido_paterno,
+    d.apellido_materno,
     s.total_esperados                                                                  AS total_bloques_esperados,
     s.presentes,
     s.tardanzas,
@@ -210,11 +213,12 @@ export const SQL_RESUMEN_DOCENTES_RANGO = `
     0 AS faltos_sin_justificacion,
     CASE WHEN s.total_esperados = 0 THEN NULL ELSE
       ROUND(100.0 * (s.presentes + s.tardanzas) / s.total_esperados, 2)
-    END                                                                                AS porcentaje_asistencia
+    END AS porcentaje_asistencia
   FROM stats s
   JOIN docentes d ON d.id = s.docente_id
   ORDER BY s.faltos DESC, d.apellido_paterno;
 `;
+
 
 export const SQL_ALERTAS_AUSENCIAS_DOCENTE = `
   SELECT
@@ -418,10 +422,11 @@ export const SQL_RESUMEN_STAFF_RANGO = `
     WHERE EXTRACT(DOW FROM d.fecha) BETWEEN 1 AND 5
   ),
   universo_staff AS (
-    SELECT s.id AS staff_id, s.cargo, c.nombre, c.apellido_paterno, c.apellido_materno, dl.fecha
+    SELECT s.id AS staff_id, s.cargo, s.nombre, s.apellido_paterno, s.apellido_materno, dl.fecha
     FROM staff s
     JOIN cuentas c ON c.id = s.id AND c.activo = true
     CROSS JOIN dias_laborables dl
+    WHERE ($3::uuid IS NULL OR s.id = $3::uuid)
   ),
   stats_staff AS (
     SELECT
@@ -431,9 +436,9 @@ export const SQL_RESUMEN_STAFF_RANGO = `
       us.apellido_paterno,
       us.apellido_materno,
       COUNT(*)::int AS total_esperados,
-      COUNT(ap.id) FILTER (WHERE ap.estado = 'presente')::int AS presentes,
-      COUNT(ap.id) FILTER (WHERE ap.estado = 'tardanza')::int AS tardanzas,
-      COUNT(ap.id) FILTER (WHERE ap.estado = 'falto')::int AS faltos,
+      COUNT(ap.id) FILTER (WHERE ap.estado = 'presente')::int    AS presentes,
+      COUNT(ap.id) FILTER (WHERE ap.estado = 'tardanza')::int    AS tardanzas,
+      COUNT(ap.id) FILTER (WHERE ap.estado = 'falto')::int       AS faltos,
       COUNT(ap.id) FILTER (WHERE ap.estado = 'justificado')::int AS justificados
     FROM universo_staff us
     LEFT JOIN asistencias_personal ap 
@@ -444,6 +449,8 @@ export const SQL_RESUMEN_STAFF_RANGO = `
   SELECT 
     staff_id,
     cargo,
+    apellido_paterno,
+    apellido_materno,
     CONCAT(apellido_paterno, ' ', COALESCE(apellido_materno, ''), ', ', nombre) AS staff_nombre,
     total_esperados,
     presentes,

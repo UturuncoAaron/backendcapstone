@@ -3,13 +3,13 @@ import {
   IsOptional,
   IsDateString,
   IsInt,
+  IsString,
   Min,
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { FormatQueryDto } from './academic-reports.dto.js';
 
-/** B1 — asistencia diaria por sección. */
 export class AsistenciaDiariaQueryDto extends FormatQueryDto {
   @IsUUID()
   seccion_id!: string;
@@ -18,7 +18,6 @@ export class AsistenciaDiariaQueryDto extends FormatQueryDto {
   fecha!: string;
 }
 
-/** B3 — resumen de inasistencias por sección/periodo. */
 export class ResumenInasistenciasQueryDto extends FormatQueryDto {
   @IsUUID()
   seccion_id!: string;
@@ -27,7 +26,6 @@ export class ResumenInasistenciasQueryDto extends FormatQueryDto {
   periodo_id!: string;
 }
 
-/** B4 — top inasistentes por sección/periodo. */
 export class TopInasistentesQueryDto extends FormatQueryDto {
   @IsUUID()
   seccion_id!: string;
@@ -41,4 +39,16 @@ export class TopInasistentesQueryDto extends FormatQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+export class ResumenPersonalRangoQueryDto {
+  @IsDateString()
+  fecha_inicio!: string;
+
+  @IsDateString()
+  fecha_fin!: string;
+
+  @IsOptional()
+  @IsUUID()
+  cuenta_id?: string;
 }

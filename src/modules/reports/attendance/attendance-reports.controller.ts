@@ -11,8 +11,8 @@ import {
   AsistenciaDiariaQueryDto,
   ResumenInasistenciasQueryDto,
   TopInasistentesQueryDto,
+  ResumenPersonalRangoQueryDto,
 } from '../dto/attendance-reports.dto.js';
-// CORREGIDO: Importación agregada para solucionar el error 2304
 import { QueryReportDto } from '../dto/query-report.dto.js';
 import { buildXlsx, workbookToBuffer, buildFilename } from '../excel/excel.helper.js';
 
@@ -24,9 +24,7 @@ export class AttendanceReportsController {
     private readonly xlsxBuilder: AttendanceXlsxBuilder,
   ) { }
 
-  // ── B1: Asistencia diaria ──────────────────────────────────────────────────
   @Get('diaria')
-  // CORREGIDO: 'auxiliar' reemplazado por 'staff'
   @Roles('admin', 'docente', 'staff')
   async diaria(
     @CurrentUser() user: AuthUser,
@@ -43,9 +41,7 @@ export class AttendanceReportsController {
     return this.sendXlsx(res, wb, `asistencia_diaria_${q.fecha}`);
   }
 
-  // ── B3: Resumen inasistencias ──────────────────────────────────────────────
   @Get('resumen')
-  // CORREGIDO: 'auxiliar' reemplazado por 'staff'
   @Roles('admin', 'docente', 'staff')
   async resumen(
     @CurrentUser() user: AuthUser,
@@ -64,9 +60,7 @@ export class AttendanceReportsController {
     return this.sendXlsx(res, wb, `resumen_asistencia_${q.seccion_id}`);
   }
 
-  // ── B4: Top inasistentes ───────────────────────────────────────────────────
   @Get('top-inasistentes')
-  // CORREGIDO: 'auxiliar' reemplazado por 'staff'
   @Roles('admin', 'docente', 'staff')
   async topInasistentes(
     @CurrentUser() user: AuthUser,
@@ -83,7 +77,6 @@ export class AttendanceReportsController {
     return this.sendXlsx(res, wb, `top_inasistentes_${q.seccion_id}`);
   }
 
-  // ── EXCEL POR CURSO (respeta todos los filtros activos) ───────────────────
   @Get('excel')
   @Roles('admin', 'docente')
   async excelCurso(
@@ -94,24 +87,33 @@ export class AttendanceReportsController {
     @Query('hasta') hasta?: string,
     @Res() res?: Response,
   ) {
-    const data = await this.svc.getAsistenciaCursoExcel(
-      user, cursoId, periodoId, desde, hasta,
-    );
-
+    const data = await this.svc.getAsistenciaCursoExcel(user, cursoId, periodoId, desde, hasta);
     const buffer = await this.xlsxBuilder.build(data);
-
     const parts = [data.meta.curso_nombre.replace(/\s+/g, '_')];
     if (data.meta.periodo_nombre) parts.push(data.meta.periodo_nombre.replace(/\s+/g, '_'));
     if (desde) parts.push(`desde_${desde}`);
     if (hasta) parts.push(`hasta_${hasta}`);
-    const filename = `Asistencia_${parts.join('_')}.xlsx`;
-
-    res!.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    res!.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res!.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res!.setHeader('Content-Disposition', `attachment; filename="Asistencia_${parts.join('_')}.xlsx"`);
     res!.send(buffer);
+  }
+
+  // ── NUEVOS: rutas que el frontend espera ─────────────────────────────────
+
+  @Get('teachers')
+  @Roles('admin', 'staff')
+  async resumenTeachers(
+    @Query() q: ResumenPersonalRangoQueryDto,
+  ) {
+    return this.svc.getResumenDocentesRango(q.fecha_inicio, q.fecha_fin, q.cuenta_id);
+  }
+
+  @Get('staff')
+  @Roles('admin', 'staff')
+  async resumenStaff(
+    @Query() q: ResumenPersonalRangoQueryDto,
+  ) {
+    return this.svc.getResumenStaffRango(q.fecha_inicio, q.fecha_fin, q.cuenta_id);
   }
 
   // ── Helper ────────────────────────────────────────────────────────────────
@@ -125,23 +127,5 @@ export class AttendanceReportsController {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return buf;
-  }
-
-  @Get('personal-global')
-  @Roles('admin')
-  async exportacionGlobalPersonal(
-    @Query() q: QueryReportDto,
-    @Res() res: Response,
-  ) {
-    let inicio = q.fecha_inicio;
-    let fin = q.fecha_fin;
-
-    if (q.periodo_id) {
-      // Lógica para resolver las fechas del período desde la BD
-    }
-
-    if (q.scope === 'teacher_attendance_range') {
-      // Lógica de procesamiento y despacho del reporte
-    }
   }
 }

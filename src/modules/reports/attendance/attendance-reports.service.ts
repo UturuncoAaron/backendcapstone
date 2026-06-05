@@ -227,12 +227,12 @@ export class AttendanceReportsService {
   // ─────────────────────────────────────────────────────────────────────
   // REPORTES GLOBALES DE JORNADA (Docentes y Staff)
   // ─────────────────────────────────────────────────────────────────────
-  async getResumenDocentesRango(desde: string, hasta: string) {
-    return this.ds.query(SQL_RESUMEN_DOCENTES_RANGO, [desde, hasta]);
+  async getResumenDocentesRango(desde: string, hasta: string, cuentaId?: string) {
+    return this.ds.query(SQL_RESUMEN_DOCENTES_RANGO, [desde, hasta, cuentaId ?? null]);
   }
 
-  async getResumenStaffRango(desde: string, hasta: string) {
-    return this.ds.query(SQL_RESUMEN_STAFF_RANGO, [desde, hasta]);
+  async getResumenStaffRango(desde: string, hasta: string, cuentaId?: string) {
+    return this.ds.query(SQL_RESUMEN_STAFF_RANGO, [desde, hasta, cuentaId ?? null]);
   }
 
   // ─────────────────────────────────────────────────────────────────────
