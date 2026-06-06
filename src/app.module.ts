@@ -35,6 +35,7 @@ import { HistoricoModule } from './modules/historico/historico.module.js';
 import { AcademicYearModule } from './modules/academic-year/academic-year.module.js';
 import { StudentPortalModule } from './modules/student-portal/student-portal.module.js';
 import { FichajeModule } from './modules/fichaje/fichaje.module.js';
+import { RecordedClassesModule } from './modules/recorded-classes/recorded-classes.module.js';
 
 @Injectable()
 class DevBypassGuard implements CanActivate {
@@ -88,6 +89,7 @@ const isDev = process.env.NODE_ENV === 'development';
     ForumModule,
     GradesModule,
     LiveClassesModule,
+    RecordedClassesModule,
     LibretasModule,
 
     AnnouncementsModule,

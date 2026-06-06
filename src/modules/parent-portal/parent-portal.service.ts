@@ -255,14 +255,15 @@ export class ParentPortalService {
         return this.dataSource.query<unknown[]>(`
             SELECT
                 h.dia_semana                                AS "diaSemana",
-                h.hora_inicio                              AS "horaInicio",
-                h.hora_fin                                 AS "horaFin",
-                cc.nombre                                  AS curso,
+                h.hora_inicio                               AS "horaInicio",
+                h.hora_fin                                  AS "horaFin",
+                cc.nombre                                   AS curso,
                 h.aula,
+                COALESCE(c.color, cc.color, '#3B82F6')      AS color,
                 TRIM(CONCAT(
                     d.nombre, ' ', d.apellido_paterno,
                     COALESCE(' ' || d.apellido_materno, '')
-                ))                                         AS docente
+                ))                                          AS docente
             FROM matriculas m
             JOIN secciones       s  ON s.id = m.seccion_id
             JOIN cursos          c  ON c.seccion_id = s.id AND c.anio = m.anio AND c.activo = TRUE

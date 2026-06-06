@@ -179,14 +179,21 @@ export class GradesService {
             ? 'AND ' + filters.join(' AND ')
             : '';
 
-        return this.dataSource.query(`
+        const rows = await this.dataSource.query(`
             SELECT
-                n.id, n.titulo, n.tipo, n.nota,
-                n.observaciones, n.fecha,
-                n.curso_id, n.periodo_id,
-                cc.nombre  AS curso_nombre,
-                c.color    AS curso_color,
-                p.bimestre, p.anio, p.nombre AS periodo_nombre
+                n.id,
+                n.titulo,
+                n.tipo,
+                n.nota::float                           AS nota,
+                n.observaciones,
+                TO_CHAR(n.fecha, 'YYYY-MM-DD')          AS fecha,
+                n.curso_id,
+                n.periodo_id,
+                cc.nombre                               AS curso_nombre,
+                c.color                                 AS curso_color,
+                p.bimestre,
+                p.anio,
+                p.nombre                                AS periodo_nombre
             FROM notas n
             JOIN cursos          c  ON c.id  = n.curso_id
             JOIN cursos_catalogo cc ON cc.id = c.catalogo_id
@@ -196,6 +203,8 @@ export class GradesService {
             ORDER BY p.anio DESC, p.bimestre ASC,
                      cc.nombre ASC, n.fecha ASC NULLS LAST, n.created_at ASC
         `, params);
+
+        return rows;
     }
 
     async getGradesByAlumnoForUser(
@@ -231,12 +240,13 @@ export class GradesService {
 
         const actividades = await this.dataSource.query(`
             SELECT
-                titulo, tipo,
-                COUNT(*)                AS total_alumnos,
-                COUNT(nota)             AS con_nota,
-                AVG(nota)::numeric(4,2) AS promedio,
-                MIN(fecha)              AS fecha,
-                MIN(created_at)         AS created_at
+                titulo,
+                tipo,
+                COUNT(*)                            AS total_alumnos,
+                COUNT(nota)                         AS con_nota,
+                ROUND(AVG(nota)::numeric, 2)::float AS promedio,
+                TO_CHAR(MIN(fecha), 'YYYY-MM-DD')   AS fecha,
+                MIN(created_at)                     AS created_at
             FROM notas
             WHERE curso_id = $1 AND periodo_id = $2
             GROUP BY titulo, tipo
