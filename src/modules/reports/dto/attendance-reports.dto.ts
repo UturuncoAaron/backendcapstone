@@ -51,4 +51,12 @@ export class ResumenPersonalRangoQueryDto {
   @IsOptional()
   @IsUUID()
   cuenta_id?: string;
+
+  @IsOptional()
+  @IsString()
+  format?: string;
+
+  @IsOptional()
+  @IsString()
+  rol?: string;
 }

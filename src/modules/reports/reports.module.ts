@@ -17,7 +17,7 @@ import { AlumnoReportXlsxBuilder } from './alumno-report/alumno-report-xlsx.serv
 import { AlumnoReportPdfBuilder } from './alumno-report/alumno-report-pdf.service.js';
 import { PsychologyReportService } from './psychology-report/psychology-report.service.js';
 import { PdfGenerator } from './pdf/pdf.generator.js';
-import { AttendanceXlsxBuilder } from './attendance/attendance-xlsx-builder.service.js';
+import { AttendanceXlsxBuilder, PersonalXlsxBuilder } from './attendance/attendance-xlsx-builder.service.js';
 import { AttendancePdfBuilder } from './attendance/attendance-pdf-builder.service.js';
 
 import { StorageModule } from '../storage/storage.module.js';
@@ -46,6 +46,7 @@ import { PsychologyModule } from '../psychology/psychology.module.js';
     AlumnoReportPdfBuilder,
     AttendanceXlsxBuilder,
     AttendancePdfBuilder,
+    PersonalXlsxBuilder,
     PsychologyReportService,
     PdfGenerator,
   ],

@@ -542,17 +542,19 @@ export const SQL_REPORTE_RANGO_DOCENTES = `
         AND ap.fecha     = dl.fecha
   ORDER BY dl.fecha, g.orden, s.nombre, d.apellido_paterno, h.hora_inicio;
 `;
+
+
 export const SQL_RESUMEN_PERSONAL_RANGO = `
   WITH dias AS (
     SELECT generate_series($1::date, $2::date, '1 day'::interval)::date AS fecha
   ),
   dias_laborables AS (
     SELECT d.fecha FROM dias d
-    WHERE EXTRACT(DOW FROM d.fecha) BETWEEN 1 AND 5
+    WHERE EXTRACT(DOW FROM d.fecha) BETWEEN 1 AND 6
   ),
   universo AS (
     SELECT
-      c.id        AS cuenta_id,
+      c.id         AS cuenta_id,
       c.rol,
       c.codigo_acceso,
       COALESCE(d.apellido_paterno, s.apellido_paterno, a.apellido_paterno, ps.apellido_paterno) AS apellido_paterno,
@@ -569,32 +571,31 @@ export const SQL_RESUMEN_PERSONAL_RANGO = `
       AND c.rol IN ('docente', 'staff', 'admin', 'psicologa')
       AND ($3::uuid IS NULL OR c.id = $3::uuid)
   ),
-  universo_fechas AS (
-    SELECT u.*, dl.fecha
-    FROM universo u
-    CROSS JOIN dias_laborables dl
+  dias_count AS (
+    SELECT COUNT(*)::int AS total FROM dias_laborables
   ),
   stats AS (
     SELECT
-      uf.cuenta_id,
-      uf.rol,
-      uf.codigo_acceso,
-      uf.apellido_paterno,
-      uf.apellido_materno,
-      uf.nombre,
-      uf.cargo,
-      COUNT(*)::int                                                          AS total_esperados,
+      u.cuenta_id,
+      u.rol,
+      u.codigo_acceso,
+      u.apellido_paterno,
+      u.apellido_materno,
+      u.nombre,
+      u.cargo,
+      (SELECT total FROM dias_count)                                        AS total_esperados,
       COUNT(ap.id) FILTER (WHERE ap.estado = 'presente')::int               AS presentes,
       COUNT(ap.id) FILTER (WHERE ap.estado = 'tardanza')::int               AS tardanzas,
       COUNT(ap.id) FILTER (WHERE ap.estado = 'falto')::int                  AS faltos,
       COUNT(ap.id) FILTER (WHERE ap.estado = 'justificado')::int            AS justificados,
-      COUNT(*) FILTER (WHERE ap.id IS NULL)::int                            AS sin_registro
-    FROM universo_fechas uf
+      GREATEST(0, (SELECT total FROM dias_count) - COUNT(ap.id)::int)       AS sin_registro
+    FROM universo u
     LEFT JOIN asistencias_personal ap
-           ON ap.cuenta_id = uf.cuenta_id
-          AND ap.fecha = uf.fecha
-    GROUP BY uf.cuenta_id, uf.rol, uf.codigo_acceso,
-             uf.apellido_paterno, uf.apellido_materno, uf.nombre, uf.cargo
+           ON ap.cuenta_id = u.cuenta_id
+          AND ap.fecha BETWEEN $1::date AND $2::date
+          AND EXTRACT(DOW FROM ap.fecha) BETWEEN 1 AND 6
+    GROUP BY u.cuenta_id, u.rol, u.codigo_acceso,
+             u.apellido_paterno, u.apellido_materno, u.nombre, u.cargo
   )
   SELECT
     cuenta_id,
@@ -623,4 +624,62 @@ export const SQL_RESUMEN_PERSONAL_RANGO = `
     END,
     apellido_paterno,
     nombre;
+`;
+
+export const SQL_DETALLE_PERSONAL_RANGO = `
+  WITH dias AS (
+    SELECT generate_series($1::date, $2::date, '1 day'::interval)::date AS fecha
+  ),
+  dias_laborables AS (
+    SELECT d.fecha FROM dias d
+    WHERE EXTRACT(DOW FROM d.fecha) BETWEEN 1 AND 6
+  ),
+  universo AS (
+    SELECT
+      c.id         AS cuenta_id,
+      c.rol,
+      c.codigo_acceso,
+      COALESCE(d.apellido_paterno, s.apellido_paterno, a.apellido_paterno, ps.apellido_paterno) AS apellido_paterno,
+      COALESCE(d.apellido_materno, s.apellido_materno, a.apellido_materno, ps.apellido_materno) AS apellido_materno,
+      COALESCE(d.nombre,           s.nombre,           a.nombre,           ps.nombre)           AS nombre,
+      COALESCE(d.especialidad,     s.cargo,             a.cargo,            ps.especialidad,
+               c.rol)                                                                            AS cargo
+    FROM cuentas c
+    LEFT JOIN docentes   d  ON d.id  = c.id
+    LEFT JOIN staff      s  ON s.id  = c.id
+    LEFT JOIN admins     a  ON a.id  = c.id
+    LEFT JOIN psicologas ps ON ps.id = c.id
+    WHERE c.activo = true
+      AND c.rol IN ('docente', 'staff', 'admin', 'psicologa')
+      AND ($3::uuid IS NULL OR c.id = $3::uuid)
+  )
+  SELECT
+    u.cuenta_id,
+    u.rol,
+    u.codigo_acceso,
+    CONCAT(u.apellido_paterno, ' ', COALESCE(u.apellido_materno, ''), ', ', u.nombre) AS nombre_completo,
+    u.cargo,
+    dl.fecha::text                        AS fecha,
+    COALESCE(ap.estado, 'sin-registro')   AS estado,
+    ap.hora_entrada::text                 AS hora_entrada,
+    ap.hora_salida::text                  AS hora_salida,
+    ap.hora_entrada_esperada::text        AS hora_entrada_esperada,
+    ap.hora_salida_esperada::text         AS hora_salida_esperada,
+    ap.motivo_justificacion,
+    ap.observacion
+  FROM universo u
+  CROSS JOIN dias_laborables dl
+  LEFT JOIN asistencias_personal ap
+         ON ap.cuenta_id = u.cuenta_id
+        AND ap.fecha = dl.fecha
+  ORDER BY
+    CASE u.rol
+      WHEN 'admin'     THEN 1
+      WHEN 'docente'   THEN 2
+      WHEN 'psicologa' THEN 3
+      WHEN 'staff'     THEN 4
+    END,
+    u.apellido_paterno,
+    u.nombre,
+    dl.fecha;
 `;

@@ -1,7 +1,7 @@
-import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards, UseInterceptors } from '@nestjs/common';
 import type { Response } from 'express';
 import { AttendanceReportsService } from './attendance-reports.service.js';
-import { AttendanceXlsxBuilder } from './attendance-xlsx-builder.service.js';
+import { AttendanceXlsxBuilder, PersonalXlsxBuilder } from './attendance-xlsx-builder.service.js';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../auth/guards/roles.guard.js';
 import { Roles } from '../../auth/decorators/roles.decorator.js';
@@ -13,7 +13,6 @@ import {
   TopInasistentesQueryDto,
   ResumenPersonalRangoQueryDto,
 } from '../dto/attendance-reports.dto.js';
-import { QueryReportDto } from '../dto/query-report.dto.js';
 import { buildXlsx, workbookToBuffer, buildFilename } from '../excel/excel.helper.js';
 
 @Controller('reports/asistencias')
@@ -22,6 +21,7 @@ export class AttendanceReportsController {
   constructor(
     private readonly svc: AttendanceReportsService,
     private readonly xlsxBuilder: AttendanceXlsxBuilder,
+    private readonly personalXlsxBuilder: PersonalXlsxBuilder,
   ) { }
 
   @Get('diaria')
@@ -79,6 +79,7 @@ export class AttendanceReportsController {
 
   @Get('excel')
   @Roles('admin', 'docente')
+  @UseInterceptors()
   async excelCurso(
     @CurrentUser() user: AuthUser,
     @Query('curso_id') cursoId: string,
@@ -98,8 +99,6 @@ export class AttendanceReportsController {
     res!.send(buffer);
   }
 
-  // ── NUEVOS: rutas que el frontend espera ─────────────────────────────────
-
   @Get('teachers')
   @Roles('admin', 'staff')
   async resumenTeachers(
@@ -115,13 +114,41 @@ export class AttendanceReportsController {
   ) {
     return this.svc.getResumenStaffRango(q.fecha_inicio, q.fecha_fin, q.cuenta_id);
   }
+
   @Get('personal')
   @Roles('admin')
-  async resumenPersonal(@Query() q: ResumenPersonalRangoQueryDto) {
-    return this.svc.getResumenPersonalRango(q.fecha_inicio, q.fecha_fin, q.cuenta_id);
+  @UseInterceptors()
+  async resumenPersonal(
+    @Query() q: ResumenPersonalRangoQueryDto,
+    @Res() res: Response,
+  ) {
+    const [resumen, detalle] = await Promise.all([
+      this.svc.getResumenPersonalRango(q.fecha_inicio, q.fecha_fin, q.cuenta_id, q.rol),
+      this.svc.getDetallePersonalRango(q.fecha_inicio, q.fecha_fin, q.cuenta_id, q.rol),
+    ]);
+
+    if (q.format !== 'xlsx') {
+      res.setHeader('Content-Type', 'application/json');
+      res.send({ resumen, detalle });
+      return;
+    }
+
+    const buffer = await this.personalXlsxBuilder.build({
+      meta: {
+        fecha_inicio: q.fecha_inicio,
+        fecha_fin: q.fecha_fin,
+        generado_en: new Date().toISOString(),
+      },
+      resumen,
+      detalle,
+    });
+
+    const filename = `Asistencia_Personal_${q.fecha_inicio}_al_${q.fecha_fin}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   }
 
-  // ── Helper ────────────────────────────────────────────────────────────────
   private async sendXlsx(
     res: Response,
     wb: ReturnType<typeof buildXlsx>,

@@ -5,17 +5,15 @@ import type { AuthUser } from '../../auth/types/auth-user.js';
 import type { AsistenciaCursoExcelData } from './attendance-xlsx-builder.service.js';
 import {
   SQL_RESUMEN_DOCENTES_RANGO,
+  SQL_RESUMEN_STAFF_RANGO,
   SQL_RESUMEN_PERSONAL_RANGO,
-  SQL_RESUMEN_STAFF_RANGO
+  SQL_DETALLE_PERSONAL_RANGO,
 } from '../queries/reports.queries.js';
 
 @Injectable()
 export class AttendanceReportsService {
   constructor(@InjectDataSource() private readonly ds: DataSource) { }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // B1 — Asistencia diaria por sección
-  // ─────────────────────────────────────────────────────────────────────
   async getAsistenciaDiaria(user: AuthUser, seccionId: string, fecha: string) {
     await this.assertCanViewSeccion(user, seccionId);
     return this.ds.query(
@@ -44,9 +42,6 @@ export class AttendanceReportsService {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // B3 — Resumen de inasistencias
-  // ─────────────────────────────────────────────────────────────────────
   async getResumenInasistencias(user: AuthUser, seccionId: string, periodoId: string) {
     await this.assertCanViewSeccion(user, seccionId);
     return this.ds.query(
@@ -77,9 +72,6 @@ export class AttendanceReportsService {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // B4 — Top inasistentes
-  // ─────────────────────────────────────────────────────────────────────
   async getTopInasistentes(user: AuthUser, seccionId: string, periodoId: string, limit = 10) {
     await this.assertCanViewSeccion(user, seccionId);
     return this.ds.query(
@@ -107,9 +99,6 @@ export class AttendanceReportsService {
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // EXCEL DE ASISTENCIA POR CURSO (resumen + detalle con filtros)
-  // ─────────────────────────────────────────────────────────────────────
   async getAsistenciaCursoExcel(
     user: AuthUser,
     cursoId: string,
@@ -186,7 +175,6 @@ export class AttendanceReportsService {
          ORDER BY a.apellido_paterno, a.apellido_materno, a.nombre`,
         params,
       ),
-
       this.ds.query<{
         apellido_paterno: string;
         apellido_materno: string | null;
@@ -224,9 +212,6 @@ export class AttendanceReportsService {
     };
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // REPORTES GLOBALES DE JORNADA (Docentes y Staff)
-  // ─────────────────────────────────────────────────────────────────────
   async getResumenDocentesRango(desde: string, hasta: string, cuentaId?: string) {
     return this.ds.query(SQL_RESUMEN_DOCENTES_RANGO, [desde, hasta, cuentaId ?? null]);
   }
@@ -235,11 +220,19 @@ export class AttendanceReportsService {
     return this.ds.query(SQL_RESUMEN_STAFF_RANGO, [desde, hasta, cuentaId ?? null]);
   }
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Autorización y Seguridad
-  // ─────────────────────────────────────────────────────────────────────
+  async getResumenPersonalRango(desde: string, hasta: string, cuentaId?: string, rol?: string) {
+    const rows = await this.ds.query(SQL_RESUMEN_PERSONAL_RANGO, [desde, hasta, cuentaId ?? null]);
+    if (rol && rol !== 'todos') return (rows as any[]).filter((r: any) => r.rol === rol);
+    return rows;
+  }
+
+  async getDetallePersonalRango(desde: string, hasta: string, cuentaId?: string, rol?: string) {
+    const rows = await this.ds.query(SQL_DETALLE_PERSONAL_RANGO, [desde, hasta, cuentaId ?? null]);
+    if (rol && rol !== 'todos') return (rows as any[]).filter((r: any) => r.rol === rol);
+    return rows;
+  }
+
   private async assertCanViewSeccion(user: AuthUser, seccionId: string) {
-    // CORREGIDO: 'auxiliar' migrado estrictamente a 'staff'
     if (['admin', 'staff', 'psicologa'].includes(user.rol)) return;
     if (user.rol === 'docente') {
       const isTutor = await this.docenteIsTutor(user.id, seccionId);
@@ -254,9 +247,6 @@ export class AttendanceReportsService {
       [seccionId, docenteId],
     );
     return rows.length > 0;
-  }
-  async getResumenPersonalRango(desde: string, hasta: string, cuentaId?: string) {
-    return this.ds.query(SQL_RESUMEN_PERSONAL_RANGO, [desde, hasta, cuentaId ?? null]);
   }
 }
 

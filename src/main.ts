@@ -17,13 +17,17 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), { prefix: '/uploads' });
+  // Ajuste para Vercel: Solo mapear la carpeta si existe físicamente (entorno local / VPS futuro)
+  if (!process.env.VERCEL) {
+    app.useStaticAssets(join(__dirname, '..', 'uploads'), { prefix: '/uploads' });
+  }
 
+  // Orígenes permitidos para desarrollo local
   const devOrigins = [
     'http://localhost:4200',
-    'http://192.168.18.8:4200',
   ];
 
+  // Orígenes permitidos para producción (se leerán de la variable de entorno en Vercel o VPS)
   const allowedOrigins = [
     ...devOrigins,
     ...(process.env.FRONTEND_URL ?? '')
@@ -34,9 +38,12 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin, cb) => {
+      // Permitir peticiones sin origen (como Postman o apps móviles)
       if (!origin) return cb(null, true);
+      
       const normalized = origin.replace(/\/+$/, '');
       if (allowedOrigins.includes(normalized)) return cb(null, true);
+      
       return cb(new Error(`Origin no permitido por CORS: ${origin}`), false);
     },
     credentials: true,
@@ -62,5 +69,13 @@ async function bootstrap() {
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
   logger.log(`EduAula API corriendo en http://localhost:${port}/api`);
+
+  // Retornar la instancia Express para que Vercel pueda manejarla en modo Serverless
+  return app.getHttpAdapter().getInstance();
 }
-bootstrap();
+
+// Manejador obligatorio para el despliegue Serverless en Vercel
+export const handler = async (req: any, res: any) => {
+  const instance = await bootstrap();
+  return instance(req, res);
+};
