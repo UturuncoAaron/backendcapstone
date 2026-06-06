@@ -40,10 +40,10 @@ async function bootstrap() {
     origin: (origin, cb) => {
       // Permitir peticiones sin origen (como Postman o apps móviles)
       if (!origin) return cb(null, true);
-      
+
       const normalized = origin.replace(/\/+$/, '');
       if (allowedOrigins.includes(normalized)) return cb(null, true);
-      
+
       return cb(new Error(`Origin no permitido por CORS: ${origin}`), false);
     },
     credentials: true,
@@ -74,8 +74,8 @@ async function bootstrap() {
   return app.getHttpAdapter().getInstance();
 }
 
-// Manejador obligatorio para el despliegue Serverless en Vercel
-export const handler = async (req: any, res: any) => {
+// CORRECCIÓN CRÍTICA: Exportar la función asíncrona por defecto para Vercel Node.js Runtime
+export default async (req: any, res: any) => {
   const instance = await bootstrap();
   return instance(req, res);
 };
