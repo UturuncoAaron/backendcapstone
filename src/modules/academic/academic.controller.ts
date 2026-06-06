@@ -17,13 +17,13 @@ export class AcademicController {
 
     // ── GRADOS ───────────────────────────────────────────────────
     @Get('grados')
-    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa')
+    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa','staff')
     findAllGrados() {
         return this.academicService.findAllGrados();
     }
 
     @Get('grados/:id')
-    @Roles('admin', 'docente')
+    @Roles('admin', 'docente', 'staff')
     findGrado(@Param('id', ParseUUIDPipe) id: string) {
         return this.academicService.findGradoById(id);
     }
@@ -31,14 +31,11 @@ export class AcademicController {
     // ── SECCIONES ────────────────────────────────────────────────
 
     @Get('secciones')
-    @Roles('admin', 'docente', 'psicologa')
+    @Roles('admin', 'docente', 'psicologa', 'staff')
     findAllSecciones(@Query('gradoId') gradoId?: string) {
         return this.academicService.findAllSecciones(gradoId);
     }
-
-    // Secciones donde el docente tiene cursos asignados.
-    // Usado por LibretasPadresPage cuando el usuario es docente.
-    // IMPORTANTE: debe ir ANTES de secciones/:id para evitar conflicto de rutas.
+    
     @Get('mis-secciones')
     @Roles('docente')
     getMisSecciones(@CurrentUser() user: AuthUser) {
@@ -58,7 +55,7 @@ export class AcademicController {
     }
 
     @Patch('secciones/:id')
-    @Roles('admin')
+    @Roles('admin', 'staff')
     updateSeccion(
         @Param('id', ParseUUIDPipe) seccionId: string,
         @Body() body: { nombre?: string; capacidad?: number },
