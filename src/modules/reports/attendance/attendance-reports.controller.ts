@@ -115,6 +115,11 @@ export class AttendanceReportsController {
   ) {
     return this.svc.getResumenStaffRango(q.fecha_inicio, q.fecha_fin, q.cuenta_id);
   }
+  @Get('personal')
+  @Roles('admin')
+  async resumenPersonal(@Query() q: ResumenPersonalRangoQueryDto) {
+    return this.svc.getResumenPersonalRango(q.fecha_inicio, q.fecha_fin, q.cuenta_id);
+  }
 
   // ── Helper ────────────────────────────────────────────────────────────────
   private async sendXlsx(

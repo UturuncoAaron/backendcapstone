@@ -38,4 +38,24 @@ export class PsychologyReportController {
         res.setHeader('Content-Length', buffer.length);
         res.send(buffer);
     }
+    @Get('informes/:id/pdf/preview')
+    @Roles('psicologa')
+    async previewInformePdf(
+        @Param('id', ParseUUIDPipe) id: string,
+        @CurrentUser() user: AuthUser,
+        @Res() res: Response,
+    ): Promise<void> {
+        const { buffer, filename } = await this.service.generateInformePdf(
+            user.id,
+            id,
+        );
+
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader(
+            'Content-Disposition',
+            `inline; filename="${filename}"`,
+        );
+        res.setHeader('Content-Length', buffer.length);
+        res.send(buffer);
+    }
 }

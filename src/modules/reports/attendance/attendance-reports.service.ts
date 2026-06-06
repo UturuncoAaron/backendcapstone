@@ -5,6 +5,7 @@ import type { AuthUser } from '../../auth/types/auth-user.js';
 import type { AsistenciaCursoExcelData } from './attendance-xlsx-builder.service.js';
 import {
   SQL_RESUMEN_DOCENTES_RANGO,
+  SQL_RESUMEN_PERSONAL_RANGO,
   SQL_RESUMEN_STAFF_RANGO
 } from '../queries/reports.queries.js';
 
@@ -253,6 +254,9 @@ export class AttendanceReportsService {
       [seccionId, docenteId],
     );
     return rows.length > 0;
+  }
+  async getResumenPersonalRango(desde: string, hasta: string, cuentaId?: string) {
+    return this.ds.query(SQL_RESUMEN_PERSONAL_RANGO, [desde, hasta, cuentaId ?? null]);
   }
 }
 
