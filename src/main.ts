@@ -6,10 +6,12 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { default as compression } from 'compression';
 import helmet from 'helmet';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
+
+// Guardamos la referencia de la app para no reinicializar NestJS en cada petición de Vercel
+let cachedApp: any;
 
 async function bootstrap() {
-  // 1. FORZAR ZONA HORARIA DE PERÚ EN EL PROCESO DEL BACKEND
+  // 1. FORZAR ZONA HORARIA DE PERÚ
   process.env.TZ = 'America/Lima';
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -17,17 +19,12 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
-  // Ajuste para Vercel: Solo mapear la carpeta si existe físicamente (entorno local / VPS futuro)
-  if (!process.env.VERCEL) {
-    app.useStaticAssets(join(__dirname, '..', 'uploads'), { prefix: '/uploads' });
-  }
-
   // Orígenes permitidos para desarrollo local
   const devOrigins = [
     'http://localhost:4200',
   ];
 
-  // Orígenes permitidos para producción (se leerán de la variable de entorno en Vercel o VPS)
+  // Orígenes permitidos para producción (FRONTEND_URL)
   const allowedOrigins = [
     ...devOrigins,
     ...(process.env.FRONTEND_URL ?? '')
@@ -38,12 +35,9 @@ async function bootstrap() {
 
   app.enableCors({
     origin: (origin, cb) => {
-      // Permitir peticiones sin origen (como Postman o apps móviles)
       if (!origin) return cb(null, true);
-
       const normalized = origin.replace(/\/+$/, '');
       if (allowedOrigins.includes(normalized)) return cb(null, true);
-
       return cb(new Error(`Origin no permitido por CORS: ${origin}`), false);
     },
     credentials: true,
@@ -66,16 +60,29 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new TransformInterceptor());
 
-  const port = process.env.PORT ?? 3000;
-  await app.listen(port);
-  logger.log(`EduAula API corriendo en http://localhost:${port}/api`);
+  // SI ESTAMOS EN LOCAL: Escucha un puerto real
+  if (!process.env.VERCEL) {
+    const port = process.env.PORT ?? 3000;
+    await app.listen(port);
+    logger.log(`EduAula API corriendo en local: http://localhost:${port}/api`);
+  }
 
-  // Retornar la instancia Express para que Vercel pueda manejarla en modo Serverless
+  // Inicializa los componentes internos de Express sin bloquear el puerto en la nube
+  await app.init();
+
   return app.getHttpAdapter().getInstance();
 }
 
-// CORRECCIÓN CRÍTICA: Exportar la función asíncrona por defecto para Vercel Node.js Runtime
+// DETERMINAR EL MODO DE EJECUCIÓN
+if (!process.env.VERCEL) {
+  // Si no es Vercel (es tu PC local), levanta NestJS normalmente al instante
+  bootstrap();
+}
+
+// Exportación por defecto limpia y optimizada para Vercel Serverless
 export default async (req: any, res: any) => {
-  const instance = await bootstrap();
-  return instance(req, res);
+  if (!cachedApp) {
+    cachedApp = await bootstrap();
+  }
+  return cachedApp(req, res);
 };
