@@ -15,6 +15,7 @@ import { Opcion } from './entities/opcion.entity.js';
 import { RespuestaAlternativa } from './entities/respuesta-alternativa.entity.js';
 import { StorageService } from '../storage/storage.service.js';
 import { SemanasService } from '../semanas/semanas.service.js';
+import { MaterialsService } from '../materials/materials.service.js';
 import {
   NOTIFICATION_EVENT_NAMES,
   TaskCreatedEvent,
@@ -27,6 +28,8 @@ import {
   ToggleTaskDto,
 } from './dto/tasks.dto.js';
 
+const MAX_MATERIALES_REFERENCIA = 3;
+
 @Injectable()
 export class TasksService {
   constructor(
@@ -38,6 +41,7 @@ export class TasksService {
     private readonly dataSource: DataSource,
     private readonly storage: StorageService,
     private readonly semanasService: SemanasService,
+    private readonly materialsService: MaterialsService,
     private readonly events: EventEmitter2,
   ) { }
 
@@ -111,6 +115,60 @@ export class TasksService {
     } satisfies TaskCreatedEvent);
 
     return task;
+  }
+
+  /**
+   * Devuelve los materiales de referencia asociados a la tarea.
+   * Filtra por curso_id + bimestre + semana de la tarea.
+   * Máximo MAX_MATERIALES_REFERENCIA resultados, ordenados por orden ASC.
+   * Incluye URL firmada de R2 para cada material con archivo.
+   */
+  async getMaterialesReferencia(taskId: string) {
+    const task = await this.taskRepo.findOne({ where: { id: taskId } });
+    if (!task) throw new NotFoundException('Tarea no encontrada');
+
+    // Si la tarea no tiene bimestre ni semana no hay forma de filtrar materiales
+    if (!task.bimestre && !task.semana) return [];
+
+    const rows = (await this.dataSource.query(
+      `SELECT m.id, m.titulo, m.tipo, m.url, m.storage_key,
+              m.nombre_original, m.mime_type, m.size_bytes,
+              m.descripcion, m.bimestre, m.semana, m.orden
+       FROM   materiales m
+       WHERE  m.curso_id = $1
+         AND  m.activo   = TRUE
+         AND  m.oculto   = FALSE
+         AND  ($2::int IS NULL OR m.bimestre = $2)
+         AND  ($3::int IS NULL OR m.semana   = $3)
+       ORDER  BY m.orden ASC
+       LIMIT  $4`,
+      [task.curso_id, task.bimestre ?? null, task.semana ?? null, MAX_MATERIALES_REFERENCIA],
+    )) as {
+      id: string;
+      titulo: string;
+      tipo: string;
+      url: string | null;
+      storage_key: string | null;
+      nombre_original: string | null;
+      mime_type: string | null;
+      size_bytes: number | null;
+      descripcion: string | null;
+      bimestre: number | null;
+      semana: number | null;
+      orden: number;
+    }[];
+
+    // Adjuntar URL firmada para cada material con archivo en R2
+    return Promise.all(
+      rows.map(async (m) => {
+        const key = m.storage_key ?? (!m.url?.startsWith('http') ? m.url : null);
+        if (key) {
+          const url = await this.storage.getSignedUrl(key);
+          return { ...m, url };
+        }
+        return m;
+      }),
+    );
   }
 
   private async resolveCourseStudents(cursoId: string): Promise<string[]> {
@@ -385,14 +443,16 @@ export class TasksService {
     const task = await this.taskRepo.findOne({ where: { id: taskId } });
     if (!task) throw new NotFoundException('Tarea no encontrada');
 
-    if (task.enunciado_storage_key) {
-      await this.storage.deleteFile(task.enunciado_storage_key).catch(() => null);
-    }
-
+    // Subir primero; solo borrar el anterior si el upload tuvo éxito
     const key = await this.storage.uploadFile(
       { buffer: file.buffer, originalname: file.originalname, mimetype: file.mimetype },
       `tareas/${task.curso_id}/${task.id}/enunciado`,
     );
+
+    if (task.enunciado_storage_key) {
+      await this.storage.deleteFile(task.enunciado_storage_key).catch(() => null);
+    }
+
     task.enunciado_storage_key = key;
     task.enunciado_url = file.originalname;
     await this.taskRepo.save(task);
@@ -428,14 +488,15 @@ export class TasksService {
       where: { tarea_id: taskId, alumno_id: alumnoId },
     });
 
-    if (existing?.storage_key) {
-      await this.storage.deleteFile(existing.storage_key).catch(() => null);
-    }
-
+    // Subir primero; solo borrar el anterior si el upload tuvo éxito
     const key = await this.storage.uploadFile(
       { buffer: file.buffer, originalname: file.originalname, mimetype: file.mimetype },
       `entregas/${task.id}/${alumnoId}`,
     );
+
+    if (existing?.storage_key) {
+      await this.storage.deleteFile(existing.storage_key).catch(() => null);
+    }
 
     const ahora = new Date();
     const conRetraso = ahora > task.fecha_limite;

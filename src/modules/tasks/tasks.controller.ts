@@ -36,7 +36,7 @@ const MIME_PERMITIDOS =
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller()
 export class TasksController {
-  constructor(private readonly tasksService: TasksService) {}
+  constructor(private readonly tasksService: TasksService) { }
 
   // ── Docente ──────────────────────────────────────────────────
 
@@ -66,6 +66,13 @@ export class TasksController {
     @Body() dto: ToggleTaskDto,
   ) {
     return this.tasksService.toggleTask(taskId, dto);
+  }
+
+  // Ruta estática antes de /:id para evitar conflictos de orden
+  @Get('tasks/:id/materiales-referencia')
+  @Roles('alumno', 'docente', 'admin')
+  getMaterialesReferencia(@Param('id', ParseUUIDPipe) taskId: string) {
+    return this.tasksService.getMaterialesReferencia(taskId);
   }
 
   @Post('tasks/:id/enunciado')
@@ -107,6 +114,21 @@ export class TasksController {
     return this.tasksService.getSubmissions(taskId);
   }
 
+  @Get('tasks/:id/my-submission')
+  @Roles('alumno')
+  getMySubmission(
+    @Param('id', ParseUUIDPipe) taskId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.tasksService.getMySubmission(taskId, user.id);
+  }
+
+  @Get('tasks/:id')
+  @Roles('alumno', 'docente', 'admin')
+  getTask(@Param('id', ParseUUIDPipe) taskId: string) {
+    return this.tasksService.getTaskForAlumno(taskId);
+  }
+
   @Get('submissions/:id')
   @Roles('docente', 'admin')
   getSubmission(@Param('id', ParseUUIDPipe) submissionId: string) {
@@ -134,12 +156,6 @@ export class TasksController {
   @Roles('alumno')
   getMySubmissions(@CurrentUser() user: AuthUser) {
     return this.tasksService.getMySubmissions(user.id);
-  }
-
-  @Get('tasks/:id')
-  @Roles('alumno', 'docente', 'admin')
-  getTask(@Param('id', ParseUUIDPipe) taskId: string) {
-    return this.tasksService.getTaskForAlumno(taskId);
   }
 
   @Post('tasks/:id/submit')
@@ -188,14 +204,5 @@ export class TasksController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.tasksService.submitAlternativas(taskId, user.id, dto);
-  }
-
-  @Get('tasks/:id/my-submission')
-  @Roles('alumno')
-  getMySubmission(
-    @Param('id', ParseUUIDPipe) taskId: string,
-    @CurrentUser() user: AuthUser,
-  ) {
-    return this.tasksService.getMySubmission(taskId, user.id);
   }
 }

@@ -10,6 +10,7 @@ import { Opcion } from './entities/opcion.entity.js';
 import { RespuestaAlternativa } from './entities/respuesta-alternativa.entity.js';
 import { StorageModule } from '../storage/storage.module.js';
 import { SemanasModule } from '../semanas/semanas.module.js';
+import { MaterialsModule } from '../materials/materials.module.js';
 
 @Module({
     imports: [
@@ -22,6 +23,7 @@ import { SemanasModule } from '../semanas/semanas.module.js';
         ]),
         StorageModule,
         SemanasModule,
+        MaterialsModule,
     ],
     controllers: [TasksController],
     providers: [TasksService],
