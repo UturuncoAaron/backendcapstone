@@ -275,4 +275,9 @@ export class ReplaceAvailabilityDto {
   @ValidateNested({ each: true })
   @Type(() => SetAvailabilityDto)
   items: SetAvailabilityDto[];
+
+  /** Semana que se reemplaza cuando los items son tipo='specific'. */
+  @IsOptional()
+  @IsDateString()
+  weekStart?: string;
 }

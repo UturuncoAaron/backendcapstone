@@ -20,6 +20,7 @@ import { AppointmentStatusLog } from './entities/appointment-status-log.entity.j
 import { Cuenta } from '../users/entities/cuenta.entity.js';
 import {
   AccountAvailability,
+  AvailabilityTipo,
   DiaSemana,
 } from './entities/account-availability.entity.js';
 import { PsychologistStudent } from '../psychology/entities/psychologist-student.entity.js';
@@ -106,6 +107,14 @@ interface AccountSummary {
   cargo: string | null;
 }
 
+interface AvailabilityItemInput {
+  diaSemana: string;
+  horaInicio: string;
+  horaFin: string;
+  tipo?: string;
+  fechaEspecifica?: string;
+}
+
 interface AppointmentPersonView {
   id: string;
   nombre: string;
@@ -137,7 +146,7 @@ export class AppointmentsService {
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
     private readonly events: EventEmitter2,
-  ) { }
+  ) {}
 
   private async appendStatusLog(
     appointmentId: string,
@@ -162,7 +171,8 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `appendStatusLog falló para cita ${appointmentId}: ${err instanceof Error ? err.message : String(err)
+        `appendStatusLog falló para cita ${appointmentId}: ${
+          err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -229,9 +239,10 @@ export class AppointmentsService {
       nextStatus: r.next_status,
       changedById: r.changed_by_id,
       changedByName: r.changed_by_nombre
-        ? `${r.changed_by_nombre}${r.changed_by_apellido_paterno
-            ? ' ' + r.changed_by_apellido_paterno
-            : ''
+        ? `${r.changed_by_nombre}${
+            r.changed_by_apellido_paterno
+              ? ' ' + r.changed_by_apellido_paterno
+              : ''
           }`.trim()
         : null,
       changedByRole: r.changed_by_rol,
@@ -251,6 +262,7 @@ export class AppointmentsService {
 
     if (caller.rol === 'alumno')
       dto = { ...dto, studentId: caller.id, parentId: undefined };
+    if (caller.rol === 'padre') dto = { ...dto, parentId: caller.id };
 
     if (caller.id === dto.convocadoAId)
       throw new BadRequestException('No puedes convocarte a ti mismo');
@@ -399,6 +411,18 @@ export class AppointmentsService {
         priorNotes: dto.priorNotes ?? null,
       });
       const saved = await em.save(appointment);
+      if (
+        caller.rol === 'psicologa' &&
+        convocadoA.rol === 'alumno' &&
+        !dto.parentId
+      ) {
+        await this.blockSpecificAvailabilityRange(
+          em,
+          caller.id,
+          scheduledAt,
+          durationMin,
+        );
+      }
       await this.appendStatusLog(
         saved.id,
         null,
@@ -457,7 +481,8 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `autoFinalizePastAppointments falló: ${err instanceof Error ? err.message : String(err)
+        `autoFinalizePastAppointments falló: ${
+          err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -755,20 +780,14 @@ export class AppointmentsService {
       lastPostpone.changedById === appt.convocadoAId &&
       lastPostpone.previousStatus !== null;
 
-    let canAccept: boolean;
-    if (appt.parentId !== null) {
-      canAccept = caller.rol === 'admin' || isParent;
-    } else {
-      canAccept =
-        caller.rol === 'admin' ||
-        isConvocado ||
-        (lastPostponeByConvocado && isConvocador);
-    }
+    const canAccept =
+      caller.rol === 'admin' ||
+      isConvocado ||
+      isParent ||
+      (lastPostponeByConvocado && isConvocador);
     if (!canAccept)
       throw new ForbiddenException(
-        appt.parentId !== null
-          ? 'Solo el padre/tutor puede confirmar esta cita'
-          : 'Solo la parte que no propuso el aplazamiento puede confirmar la cita',
+        'Solo la parte convocada o admin puede confirmar la cita',
       );
 
     appt.estado = 'confirmada';
@@ -798,11 +817,7 @@ export class AppointmentsService {
     const appt = await this.appointmentRepo.findOne({ where: { id } });
     if (!appt) throw new NotFoundException('Cita no encontrada');
     const isParent = appt.parentId !== null && appt.parentId === caller.id;
-    if (
-      caller.rol !== 'admin' &&
-      appt.convocadoAId !== caller.id &&
-      !isParent
-    )
+    if (caller.rol !== 'admin' && appt.convocadoAId !== caller.id && !isParent)
       throw new ForbiddenException(
         'Solo el convocado o el padre/tutor puede rechazar la cita',
       );
@@ -1066,13 +1081,20 @@ export class AppointmentsService {
     );
 
     const docenteRows = await this.dataSource.query<
-      { nombre: string; apellido_paterno: string; apellido_materno: string | null }[]
+      {
+        nombre: string;
+        apellido_paterno: string;
+        apellido_materno: string | null;
+      }[]
     >(
       `SELECT nombre, apellido_paterno, apellido_materno FROM docentes WHERE id = $1`,
       [caller.id],
     );
     const docenteNombre = docenteRows[0]
-      ? `${docenteRows[0].nombre} ${docenteRows[0].apellido_paterno}${docenteRows[0].apellido_materno ? ' ' + docenteRows[0].apellido_materno : ''
+      ? `${docenteRows[0].nombre} ${docenteRows[0].apellido_paterno}${
+          docenteRows[0].apellido_materno
+            ? ' ' + docenteRows[0].apellido_materno
+            : ''
         }`.trim()
       : 'Docente';
 
@@ -1112,6 +1134,13 @@ export class AppointmentsService {
         priorNotes: `[Derivación] Derivado por el docente ${docenteNombre}.`,
       });
       const saved = await em.save(appointment);
+
+      await this.blockSpecificAvailabilityRange(
+        em,
+        psicologaSummary.id,
+        scheduledAt,
+        durationMin,
+      );
 
       await this.appendStatusLog(
         saved.id,
@@ -1395,6 +1424,12 @@ export class AppointmentsService {
           priorNotes: `[Seguimiento] Generado al cerrar la cita ${closed.id}`,
         });
         followUp = await em.save(nueva);
+        await this.blockSpecificAvailabilityRange(
+          em,
+          psychologistId,
+          plan.scheduledAt,
+          plan.durationMin,
+        );
         await this.appendStatusLog(
           followUp.id,
           null,
@@ -1616,7 +1651,12 @@ export class AppointmentsService {
       bloques = specificForDate;
     } else {
       bloques = await this.availabilityRepo.find({
-        where: { cuentaId, diaSemana: dayName, activo: true, tipo: 'weekly' as any },
+        where: {
+          cuentaId,
+          diaSemana: dayName,
+          activo: true,
+          tipo: 'weekly' as AvailabilityTipo,
+        },
         order: { horaInicio: 'ASC' },
       });
     }
@@ -1771,7 +1811,12 @@ export class AppointmentsService {
       bloques = specificForDate;
     } else {
       bloques = await this.availabilityRepo.find({
-        where: { cuentaId, diaSemana, activo: true, tipo: 'weekly' as any },
+        where: {
+          cuentaId,
+          diaSemana,
+          activo: true,
+          tipo: 'weekly' as AvailabilityTipo,
+        },
         order: { horaInicio: 'ASC' },
       });
     }
@@ -1861,7 +1906,7 @@ export class AppointmentsService {
           occupantLabel:
             occ && revealOccupants
               ? `${occ.row.alumno_nombre ?? ''} ${occ.row.alumno_apellido ?? ''}`.trim() ||
-              occ.row.motivo.slice(0, 40)
+                occ.row.motivo.slice(0, 40)
               : null,
         });
       }
@@ -1879,17 +1924,19 @@ export class AppointmentsService {
 
   async replaceAvailability(
     cuentaId: string,
-    items: {
-      diaSemana: string;
-      horaInicio: string;
-      horaFin: string;
-      tipo?: string;
-      fechaEspecifica?: string;
-    }[],
+    items: AvailabilityItemInput[],
+    weekStart?: string,
   ): Promise<{ saved: AccountAvailability[]; cancelledCount: number }> {
+    const normalized = (items ?? []).map((it) =>
+      this.normalizeAvailabilityItem(it),
+    );
+    const replacesSpecificWeek =
+      !!weekStart || normalized.some((it) => it.tipo === 'specific');
+    const weekRange = weekStart ? this.resolveWeekRange(weekStart) : null;
+
     return this.dataSource.transaction(async (em) => {
-      const weeklyItems = items.filter((it) => (it.tipo ?? 'weekly') === 'weekly');
-      const specificItems = items.filter((it) => it.tipo === 'specific');
+      const weeklyItems = normalized.filter((it) => it.tipo === 'weekly');
+      const specificItems = normalized.filter((it) => it.tipo === 'specific');
 
       const specificDates = new Set(
         specificItems
@@ -1897,24 +1944,36 @@ export class AppointmentsService {
           .filter((d): d is string => !!d),
       );
 
-      if (weeklyItems.length > 0 || specificItems.length === 0) {
+      if (!replacesSpecificWeek) {
         await em.query(
           `DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1 AND tipo = 'weekly'`,
           [cuentaId],
         );
       }
 
-      for (const fecha of specificDates) {
+      if (weekRange) {
         await em.query(
-          `DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1 AND tipo = 'specific' AND fecha_especifica = $2`,
-          [cuentaId, fecha],
+          `DELETE FROM disponibilidad_cuenta
+            WHERE cuenta_id = $1
+              AND tipo = 'specific'
+              AND fecha_especifica >= $2::date
+              AND fecha_especifica <= $3::date`,
+          [cuentaId, weekRange.start, weekRange.end],
         );
+      } else {
+        for (const fecha of specificDates) {
+          await em.query(
+            `DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1 AND tipo = 'specific' AND fecha_especifica = $2::date`,
+            [cuentaId, fecha],
+          );
+        }
       }
 
       let saved: AccountAvailability[] = [];
-      if (items.length > 0) {
+      const itemsToSave = replacesSpecificWeek ? specificItems : weeklyItems;
+      if (itemsToSave.length > 0) {
         saved = await em.save(
-          items.map((it) =>
+          itemsToSave.map((it) =>
             em.create(AccountAvailability, {
               cuentaId,
               diaSemana: it.diaSemana as DiaSemana,
@@ -1941,9 +2000,17 @@ export class AppointmentsService {
         })
         .getMany();
 
-      const cancelled: { appt: Appointment; previous: AppointmentStatus }[] = [];
+      const cancelled: { appt: Appointment; previous: AppointmentStatus }[] =
+        [];
       for (const appt of futureAppts) {
-        if (this.fitsInAvailability(appt, saved)) continue;
+        if (
+          this.fitsInAvailability(
+            appt,
+            saved,
+            replacesSpecificWeek ? weekRange : null,
+          )
+        )
+          continue;
         const previous = appt.estado;
         appt.estado = 'cancelada';
         appt.cancelledAt = new Date();
@@ -2010,10 +2077,9 @@ export class AppointmentsService {
     const affected = await this.appointmentRepo
       .createQueryBuilder('a')
       .leftJoinAndSelect('a.student', 'student')
-      .where(
-        '(a.convocado_a_id = :cid OR a.convocado_por_id = :cid)',
-        { cid: slot.cuentaId },
-      )
+      .where('(a.convocado_a_id = :cid OR a.convocado_por_id = :cid)', {
+        cid: slot.cuentaId,
+      })
       .andWhere('a.estado IN (:...states)', {
         states: ['pendiente', 'confirmada'],
       })
@@ -2145,6 +2211,137 @@ export class AppointmentsService {
     return map[d];
   }
 
+  private minutesToHHMM(total: number): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+  }
+
+  private hhmmToMinutes(value: string): number {
+    const [h, m] = value.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m))
+      throw new BadRequestException('Formato de hora inválido, usa HH:mm');
+    return h * 60 + m;
+  }
+
+  private normalizeAvailabilityItem(
+    item: AvailabilityItemInput,
+  ): Required<AvailabilityItemInput> {
+    const tipo = item.tipo ?? 'weekly';
+    if (tipo !== 'weekly' && tipo !== 'specific')
+      throw new BadRequestException('Tipo de disponibilidad inválido');
+    if (!DIAS_SEMANA_INDEXED.includes(item.diaSemana as DiaSemana))
+      throw new BadRequestException('Día de disponibilidad inválido');
+    const start = this.hhmmToMinutes(item.horaInicio);
+    const end = this.hhmmToMinutes(item.horaFin);
+    if (end <= start)
+      throw new BadRequestException(
+        'La hora de fin debe ser posterior a la hora de inicio',
+      );
+    if (tipo === 'specific' && !item.fechaEspecifica)
+      throw new BadRequestException(
+        'La disponibilidad por semana requiere fechaEspecifica',
+      );
+
+    return {
+      diaSemana: item.diaSemana,
+      horaInicio: this.minutesToHHMM(start),
+      horaFin: this.minutesToHHMM(end),
+      tipo,
+      fechaEspecifica: tipo === 'specific' ? (item.fechaEspecifica ?? '') : '',
+    };
+  }
+
+  private resolveWeekRange(weekStart: string): { start: string; end: string } {
+    const monday = parseLocalDate(weekStart);
+    if (isNaN(monday.getTime()))
+      throw new BadRequestException(
+        'Formato de fecha inválido para weekStart, usa YYYY-MM-DD',
+      );
+    monday.setHours(0, 0, 0, 0);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return {
+      start: this.toLocalDateStr(monday),
+      end: this.toLocalDateStr(sunday),
+    };
+  }
+
+  private splitRangesAround(
+    ranges: Array<{ start: number; end: number }>,
+    busyStart: number,
+    busyEnd: number,
+  ): Array<{ start: number; end: number }> {
+    const result: Array<{ start: number; end: number }> = [];
+    for (const range of ranges) {
+      if (busyEnd <= range.start || busyStart >= range.end) {
+        result.push(range);
+        continue;
+      }
+      if (busyStart > range.start)
+        result.push({ start: range.start, end: busyStart });
+      if (busyEnd < range.end) result.push({ start: busyEnd, end: range.end });
+    }
+    return result.filter((r) => r.end > r.start);
+  }
+
+  private async blockSpecificAvailabilityRange(
+    em: EntityManager,
+    cuentaId: string,
+    scheduledAt: Date,
+    durationMin: number,
+  ): Promise<void> {
+    const dateStr = this.toLocalDateStr(scheduledAt);
+    const diaSemana = DIAS_SEMANA_INDEXED[scheduledAt.getDay()];
+    if (!diaSemana) return;
+
+    const repo = em.getRepository(AccountAvailability);
+    const specific = await repo.find({
+      where: { cuentaId, fechaEspecifica: dateStr, activo: true },
+      order: { horaInicio: 'ASC' },
+    });
+    const source =
+      specific.length > 0
+        ? specific
+        : await repo.find({
+            where: { cuentaId, diaSemana, tipo: 'weekly', activo: true },
+            order: { horaInicio: 'ASC' },
+          });
+    if (!source.length) return;
+
+    const busyStart = scheduledAt.getHours() * 60 + scheduledAt.getMinutes();
+    const busyEnd = busyStart + durationMin;
+    const remaining = this.splitRangesAround(
+      source.map((b) => ({
+        start: this.hhmmToMinutes(b.horaInicio),
+        end: this.hhmmToMinutes(b.horaFin),
+      })),
+      busyStart,
+      busyEnd,
+    );
+
+    await em.query(
+      `DELETE FROM disponibilidad_cuenta
+        WHERE cuenta_id = $1 AND tipo = 'specific' AND fecha_especifica = $2::date`,
+      [cuentaId, dateStr],
+    );
+
+    if (remaining.length > 0) {
+      await repo.save(
+        remaining.map((range) =>
+          repo.create({
+            cuentaId,
+            diaSemana,
+            horaInicio: this.minutesToHHMM(range.start),
+            horaFin: this.minutesToHHMM(range.end),
+            activo: true,
+            tipo: 'specific',
+            fechaEspecifica: dateStr,
+          }),
+        ),
+      );
+    }
+  }
+
   async getRulesForTarget(targetId?: string) {
     if (!targetId) return null;
     const acc = await this.loadAccountSummary(targetId);
@@ -2267,9 +2464,9 @@ export class AppointmentsService {
       especialidad: r.especialidad,
       tutoria_actual: r.tutoria_seccion_id
         ? {
-          seccion_id: r.tutoria_seccion_id,
-          seccion_label: r.tutoria_seccion_label ?? '',
-        }
+            seccion_id: r.tutoria_seccion_id,
+            seccion_label: r.tutoria_seccion_label ?? '',
+          }
         : null,
     };
   }
@@ -2308,7 +2505,8 @@ export class AppointmentsService {
     const effectiveMax = Math.min(rule.maxDurationMin, maxBySlots);
     if (value > effectiveMax)
       throw new BadRequestException(
-        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${rule.maxConsecutiveSlots === 1 ? '' : 's'
+        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${
+          rule.maxConsecutiveSlots === 1 ? '' : 's'
         } consecutivo${rule.maxConsecutiveSlots === 1 ? '' : 's'} (${effectiveMax} min)`,
       );
     return value;
@@ -2473,7 +2671,12 @@ export class AppointmentsService {
       bloques = specificForDate;
     } else {
       bloques = await this.availabilityRepo.find({
-        where: { cuentaId, diaSemana: dayName, activo: true, tipo: 'weekly' as any },
+        where: {
+          cuentaId,
+          diaSemana: dayName,
+          activo: true,
+          tipo: 'weekly' as AvailabilityTipo,
+        },
         order: { horaInicio: 'ASC' },
       });
     }
@@ -2552,17 +2755,24 @@ export class AppointmentsService {
   private fitsInAvailability(
     appt: Appointment,
     availability: AccountAvailability[],
+    scopedWeek: { start: string; end: string } | null = null,
   ): boolean {
-    if (!availability.length) return false;
     const dt = new Date(appt.scheduledAt);
+    const apptDateStr = this.toLocalDateStr(dt);
+    if (
+      scopedWeek &&
+      (apptDateStr < scopedWeek.start || apptDateStr > scopedWeek.end)
+    ) {
+      return true;
+    }
+    if (!availability.length) return false;
     const dia = DIAS_SEMANA_INDEXED[dt.getDay()];
     if (!dia) return false;
-    const apptDateStr = this.toLocalDateStr(dt);
     const startMin = dt.getHours() * 60 + dt.getMinutes();
     const endMin = startMin + (appt.durationMin ?? 30);
     return availability.some((a) => {
       if (a.diaSemana !== dia) return false;
-      if ((a as any).tipo === 'specific' && (a as any).fechaEspecifica !== apptDateStr) {
+      if (a.tipo === 'specific' && a.fechaEspecifica !== apptDateStr) {
         return false;
       }
       const [hI, mI] = a.horaInicio.split(':').map(Number);
