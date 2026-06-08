@@ -244,7 +244,7 @@ export function allowedRecipientsFor(
 
 /** True si el rol que cita necesita SIEMPRE indicar `alumno_id` en la cita. */
 export function callerRequiresStudent(caller: CallerRol): boolean {
-  return caller === 'docente';
+  return caller === 'docente' || caller === 'padre';
 }
 /**
  * True si la cita debe usar la regla del CONVOCADOR para calcular
@@ -287,6 +287,8 @@ export function resolveInitialStatus(ctx: InitialStatusContext): InitialStatus {
   // se asume vínculo/confianza directa).
   if (caller === 'alumno' && recipient === 'psicologa') return 'confirmada';
 
+  if (caller === 'padre' && recipient === 'psicologa') return 'confirmada';
+
   // Psicóloga → alumno: confirmada si NO hay padre vinculado; si el padre
   // también participa (cita mixta), queda pendiente hasta que el padre
   // confirme — la cita depende enteramente del padre.
@@ -295,8 +297,7 @@ export function resolveInitialStatus(ctx: InitialStatusContext): InitialStatus {
   }
 
   // Cualquier otra combinación queda pendiente. En particular:
-  //   • padre → psicóloga / docente / admin   (el profesional debe aceptar
-  //     en su panel — cuando el PADRE inicia la solicitud, queda pendiente)
+  //   • padre → docente / admin               (el profesional debe aceptar)
   //   • psicóloga → padre
   //   • docente → padre
   //   • admin / director → padre

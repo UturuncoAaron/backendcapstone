@@ -169,7 +169,7 @@ export class AppointmentsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: ReplaceAvailabilityDto,
   ) {
-    return this.service.replaceAvailability(user.id, dto.items);
+    return this.service.replaceAvailability(user.id, dto.items, dto.weekStart);
   }
   @Get('count-future')
   @Roles('psicologa', 'docente', 'admin')
