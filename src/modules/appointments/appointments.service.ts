@@ -90,8 +90,41 @@ function hasAvailability(rol: string): rol is RoleWithAvailability {
   return (ROLES_WITH_AVAILABILITY as readonly string[]).includes(rol);
 }
 
+function normalizeDateOnlyInput(dateStr: string): string | null {
+  const trimmed = dateStr.trim();
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  const localMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+  const parts = isoMatch
+    ? {
+        year: Number(isoMatch[1]),
+        month: Number(isoMatch[2]),
+        day: Number(isoMatch[3]),
+      }
+    : localMatch
+      ? {
+          year: Number(localMatch[3]),
+          month: Number(localMatch[2]),
+          day: Number(localMatch[1]),
+        }
+      : null;
+
+  if (!parts) return null;
+
+  const date = new Date(parts.year, parts.month - 1, parts.day);
+  if (
+    date.getFullYear() !== parts.year ||
+    date.getMonth() !== parts.month - 1 ||
+    date.getDate() !== parts.day
+  )
+    return null;
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
+}
+
 function parseLocalDate(dateStr: string): Date {
-  return new Date(dateStr + 'T00:00:00');
+  const normalized = normalizeDateOnlyInput(dateStr);
+  return normalized ? new Date(normalized + 'T00:00:00') : new Date(NaN);
 }
 
 const MAX_FUTURE_MONTHS = 6;
@@ -113,6 +146,14 @@ interface AvailabilityItemInput {
   horaFin: string;
   tipo?: string;
   fechaEspecifica?: string;
+}
+
+interface NormalizedAvailabilityItem {
+  diaSemana: string;
+  horaInicio: string;
+  horaFin: string;
+  tipo: 'weekly' | 'specific';
+  fechaEspecifica: string | null;
 }
 
 interface AppointmentPersonView {
@@ -1501,7 +1542,7 @@ export class AppointmentsService {
     const monday = parseLocalDate(weekStart);
     if (isNaN(monday.getTime()))
       throw new BadRequestException(
-        'Formato de fecha inválido para weekStart, usa YYYY-MM-DD',
+        'Formato de fecha inválido para weekStart, usa YYYY-MM-DD o DD/MM/YYYY',
       );
     monday.setHours(0, 0, 0, 0);
 
@@ -1980,8 +2021,8 @@ export class AppointmentsService {
               horaInicio: it.horaInicio,
               horaFin: it.horaFin,
               activo: true,
-              tipo: (it.tipo ?? 'weekly') as 'weekly' | 'specific',
-              fechaEspecifica: it.fechaEspecifica ?? null,
+              tipo: it.tipo,
+              fechaEspecifica: it.fechaEspecifica,
             }),
           ),
         );
@@ -2159,7 +2200,9 @@ export class AppointmentsService {
   async getPublicWeeklyAvailability(cuentaId: string, weekStart?: string) {
     const ref = weekStart ? parseLocalDate(weekStart) : new Date();
     if (isNaN(ref.getTime()))
-      throw new BadRequestException('weekStart inválido, usa YYYY-MM-DD');
+      throw new BadRequestException(
+        'weekStart inválido, usa YYYY-MM-DD o DD/MM/YYYY',
+      );
 
     const day = ref.getDay();
     const diffToMonday = day === 0 ? -6 : 1 - day;
@@ -2225,7 +2268,7 @@ export class AppointmentsService {
 
   private normalizeAvailabilityItem(
     item: AvailabilityItemInput,
-  ): Required<AvailabilityItemInput> {
+  ): NormalizedAvailabilityItem {
     const tipo = item.tipo ?? 'weekly';
     if (tipo !== 'weekly' && tipo !== 'specific')
       throw new BadRequestException('Tipo de disponibilidad inválido');
@@ -2233,21 +2276,36 @@ export class AppointmentsService {
       throw new BadRequestException('Día de disponibilidad inválido');
     const start = this.hhmmToMinutes(item.horaInicio);
     const end = this.hhmmToMinutes(item.horaFin);
+    const fechaEspecifica = item.fechaEspecifica?.trim() || null;
     if (end <= start)
       throw new BadRequestException(
         'La hora de fin debe ser posterior a la hora de inicio',
       );
-    if (tipo === 'specific' && !item.fechaEspecifica)
-      throw new BadRequestException(
-        'La disponibilidad por semana requiere fechaEspecifica',
-      );
+    if (tipo === 'specific') {
+      if (!fechaEspecifica)
+        throw new BadRequestException(
+          'La disponibilidad por semana requiere fechaEspecifica',
+        );
+      const normalizedDate = normalizeDateOnlyInput(fechaEspecifica);
+      if (!normalizedDate)
+        throw new BadRequestException(
+          'Formato de fecha inválido para fechaEspecifica, usa YYYY-MM-DD o DD/MM/YYYY',
+        );
+      return {
+        diaSemana: item.diaSemana,
+        horaInicio: this.minutesToHHMM(start),
+        horaFin: this.minutesToHHMM(end),
+        tipo,
+        fechaEspecifica: normalizedDate,
+      };
+    }
 
     return {
       diaSemana: item.diaSemana,
       horaInicio: this.minutesToHHMM(start),
       horaFin: this.minutesToHHMM(end),
       tipo,
-      fechaEspecifica: tipo === 'specific' ? (item.fechaEspecifica ?? '') : '',
+      fechaEspecifica: null,
     };
   }
 
@@ -2255,7 +2313,7 @@ export class AppointmentsService {
     const monday = parseLocalDate(weekStart);
     if (isNaN(monday.getTime()))
       throw new BadRequestException(
-        'Formato de fecha inválido para weekStart, usa YYYY-MM-DD',
+        'Formato de fecha inválido para weekStart, usa YYYY-MM-DD o DD/MM/YYYY',
       );
     monday.setHours(0, 0, 0, 0);
     const sunday = new Date(monday);

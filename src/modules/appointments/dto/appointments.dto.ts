@@ -265,9 +265,11 @@ export class SetAvailabilityDto {
   @IsIn(['weekly', 'specific'])
   tipo?: 'weekly' | 'specific';
 
-  /** Solo se usa cuando tipo='specific'. Formato YYYY-MM-DD. */
+  /** Solo se usa cuando tipo='specific'. Formato YYYY-MM-DD o DD/MM/YYYY. */
   @IsOptional()
-  @IsDateString()
+  @Matches(/^(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})$/, {
+    message: 'Formato de fecha inválido, usa YYYY-MM-DD o DD/MM/YYYY',
+  })
   fechaEspecifica?: string;
 }
 export class ReplaceAvailabilityDto {
@@ -278,6 +280,8 @@ export class ReplaceAvailabilityDto {
 
   /** Semana que se reemplaza cuando los items son tipo='specific'. */
   @IsOptional()
-  @IsDateString()
+  @Matches(/^(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})$/, {
+    message: 'Formato de fecha inválido, usa YYYY-MM-DD o DD/MM/YYYY',
+  })
   weekStart?: string;
 }
