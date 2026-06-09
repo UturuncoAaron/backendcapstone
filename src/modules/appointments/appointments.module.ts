@@ -8,6 +8,7 @@ import { PsychologistStudent } from '../psychology/entities/psychologist-student
 import { AppointmentsService } from './appointments.service.js';
 import { AppointmentsController } from './appointments.controller.js';
 import { PublicAvailabilityController } from './public-availability.controller.js';
+import { AppointmentsSchemaSync } from './appointments-schema-sync.service.js';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { PublicAvailabilityController } from './public-availability.controller.j
     ]),
   ],
   controllers: [AppointmentsController, PublicAvailabilityController],
-  providers: [AppointmentsService],
+  providers: [AppointmentsService, AppointmentsSchemaSync],
   exports: [AppointmentsService],
 })
 export class AppointmentsModule {}
