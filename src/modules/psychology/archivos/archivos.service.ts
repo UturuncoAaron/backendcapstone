@@ -10,7 +10,6 @@ import { PsychologistStudent } from '../entities/psychologist-student.entity.js'
 import { StorageService } from '../../storage/storage.service.js';
 import { CreateArchivoDto, ArchivoQueryDto } from '../dto/psychology.dto.js';
 
-// 10 MB. Cualquier tipo de archivo.
 const MAX_ARCHIVO_BYTES = 10 * 1024 * 1024;
 
 @Injectable()
@@ -26,8 +25,6 @@ export class PsychologyArchivosService {
         private readonly storage: StorageService,
     ) { }
 
-    // ── CRUD para la psicóloga ──────────────────────────────────────
-
     async upload(
         psychologistId: string,
         studentId: string,
@@ -42,7 +39,6 @@ export class PsychologyArchivosService {
             );
         }
 
-        // Upload asegura la asignación automáticamente
         await this.ensureAssigned(psychologistId, studentId);
 
         const key = await this.storage.uploadFile(file, `psychology/${dto.categoria}`);
@@ -53,7 +49,7 @@ export class PsychologyArchivosService {
             categoria: dto.categoria,
             nombre: dto.nombre?.trim() || file.originalname,
             descripcion: dto.descripcion?.trim() || null,
-            confidencial: dto.confidencial !== 'false', // default TRUE
+            confidencial: dto.confidencial !== 'false',
             storageKey: key,
             nombreOriginal: file.originalname,
             mimeType: file.mimetype,
@@ -74,7 +70,6 @@ export class PsychologyArchivosService {
 
         const page = q.page ?? 1;
         const limit = q.limit ?? 50;
-
         const where: Record<string, unknown> = { studentId };
         if (q.categoria) where['categoria'] = q.categoria;
 
@@ -107,8 +102,6 @@ export class PsychologyArchivosService {
         await this.archivoRepo.remove(archivo);
     }
 
-    // ── Para el portal del alumno / padre ───────────────────────────
-
     listForAlumno(alumnoId: string, categoria?: 'ficha' | 'test') {
         const where: Record<string, unknown> = {
             studentId: alumnoId,
@@ -118,7 +111,6 @@ export class PsychologyArchivosService {
         return this.archivoRepo.find({ where, order: { createdAt: 'DESC' } });
     }
 
-    /** Padre: solo los NO confidenciales. */
     listForPadre(alumnoId: string, categoria?: 'ficha' | 'test') {
         const where: Record<string, unknown> = {
             studentId: alumnoId,
@@ -128,24 +120,17 @@ export class PsychologyArchivosService {
         return this.archivoRepo.find({ where, order: { createdAt: 'DESC' } });
     }
 
-    /** Valida acceso del visor (alumno o padre) y devuelve URL firmada. */
     async resolveDownload(
         archivoId: string,
-        viewer:
-            | { role: 'alumno'; userId: string }
-            | { role: 'padre'; userId: string },
+        viewer: { role: 'alumno'; userId: string } | { role: 'padre'; userId: string },
     ): Promise<{ url: string }> {
         const archivo = await this.archivoRepo.findOne({ where: { id: archivoId } });
         if (!archivo) throw new NotFoundException('Archivo no encontrado');
 
         if (viewer.role === 'alumno') {
-            if (archivo.studentId !== viewer.userId) {
-                throw new ForbiddenException('Sin acceso');
-            }
+            if (archivo.studentId !== viewer.userId) throw new ForbiddenException('Sin acceso');
         } else {
-            if (archivo.confidencial) {
-                throw new ForbiddenException('Archivo confidencial');
-            }
+            if (archivo.confidencial) throw new ForbiddenException('Archivo confidencial');
             const r = await this.dataSource.query<{ exists: boolean }[]>(
                 `SELECT EXISTS (
                      SELECT 1 FROM padre_alumno
@@ -163,14 +148,37 @@ export class PsychologyArchivosService {
         return { url };
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────
+    async resolvePreview(
+        archivoId: string,
+        viewer: { role: 'alumno'; userId: string } | { role: 'padre'; userId: string },
+    ): Promise<{ url: string }> {
+        const archivo = await this.archivoRepo.findOne({ where: { id: archivoId } });
+        if (!archivo) throw new NotFoundException('Archivo no encontrado');
 
-    /** Retorna true/false sin lanzar. Usar en lecturas. */
+        if (viewer.role === 'alumno') {
+            if (archivo.studentId !== viewer.userId) throw new ForbiddenException('Sin acceso');
+        } else {
+            if (archivo.confidencial) throw new ForbiddenException('Archivo confidencial');
+            const r = await this.dataSource.query<{ exists: boolean }[]>(
+                `SELECT EXISTS (
+                     SELECT 1 FROM padre_alumno
+                      WHERE padre_id = $1 AND alumno_id = $2
+                 ) AS "exists"`,
+                [viewer.userId, archivo.studentId],
+            );
+            if (!r[0]?.exists) throw new ForbiddenException('No es tu hijo/a');
+        }
+
+        const url = await this.storage.getPreviewUrl(archivo.storageKey);
+        return { url };
+    }
+
     private async isAssigned(psychologistId: string, studentId: string): Promise<boolean> {
         return this.assignmentRepo.exist({
             where: { psychologistId, studentId, activo: true },
         });
     }
+
     private async ensureAssigned(psychologistId: string, studentId: string): Promise<void> {
         await this.dataSource.query(
             `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde)

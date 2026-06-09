@@ -17,8 +17,7 @@ export class StudentPortalService {
         return this.dataSource.query<unknown[]>(`
             SELECT
                 i.id,
-                i.tipo,
-                i.titulo,
+                i.motivo_consulta_corto AS titulo,
                 i.finalizado_at AS "finalizadoAt",
                 TRIM(CONCAT(
                     ps.nombre, ' ', ps.apellido_paterno,
@@ -46,15 +45,9 @@ export class StudentPortalService {
             [informeId],
         );
 
-        if (!informe || informe.alumno_id !== alumnoId) {
-            throw new NotFoundException('Informe no disponible');
-        }
-        if (informe.estado !== 'finalizado') {
-            throw new NotFoundException('Informe no disponible');
-        }
-        if (informe.confidencial) {
-            throw new ForbiddenException('Este informe es confidencial');
-        }
+        if (!informe || informe.alumno_id !== alumnoId) throw new NotFoundException('Informe no disponible');
+        if (informe.estado !== 'finalizado') throw new NotFoundException('Informe no disponible');
+        if (informe.confidencial) throw new ForbiddenException('Este informe es confidencial');
 
         const { buffer, filename } = await this.reportSvc.generateInformePdf(
             informe.psicologa_id,
@@ -71,9 +64,10 @@ export class StudentPortalService {
     }
 
     async getArchivoUrl(alumnoId: string, archivoId: string): Promise<{ url: string }> {
-        return this.archivosSvc.resolveDownload(archivoId, {
-            role: 'alumno',
-            userId: alumnoId,
-        });
+        return this.archivosSvc.resolveDownload(archivoId, { role: 'alumno', userId: alumnoId });
+    }
+
+    async getArchivoPreviewUrl(alumnoId: string, archivoId: string): Promise<{ url: string }> {
+        return this.archivosSvc.resolvePreview(archivoId, { role: 'alumno', userId: alumnoId });
     }
 }

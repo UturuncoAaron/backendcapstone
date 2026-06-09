@@ -60,6 +60,20 @@ export class StorageService {
     }
   }
 
+  async getPreviewUrl(key: string, expiresIn = 3600): Promise<string> {
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ResponseContentDisposition: 'inline',
+      });
+      return await getSignedUrl(this.s3, command, { expiresIn });
+    } catch (error) {
+      this.logger.error(`Error al generar URL de previsualización: ${(error as Error).message}`);
+      throw new InternalServerErrorException('Error al generar URL de previsualización');
+    }
+  }
+
   async getDownloadUrl(key: string, filename: string, expiresIn = 3600): Promise<string> {
     try {
       const safeName = filename.replace(/"/g, '').replace(/[\r\n]/g, ' ');

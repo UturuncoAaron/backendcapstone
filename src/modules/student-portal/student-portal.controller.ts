@@ -43,4 +43,12 @@ export class StudentPortalController {
     ) {
         return this.service.getArchivoUrl(user.id, archivoId);
     }
+
+    @Get('psicologia/archivos/:id/preview')
+    getArchivoPreviewUrl(
+        @Param('id', ParseUUIDPipe) archivoId: string,
+        @CurrentUser() user: AuthUser,
+    ) {
+        return this.service.getArchivoPreviewUrl(user.id, archivoId);
+    }
 }
