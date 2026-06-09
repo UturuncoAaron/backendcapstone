@@ -87,16 +87,6 @@ export class AppointmentsController {
   // ══════════════════════════════════════════════════════════════
 
   // ── Vista semanal de disponibilidad (bloques + citas de la semana) ─
-  // Debe ir ANTES de availability/:cuentaId para evitar conflicto de rutas.
-  @Get('availability/:cuentaId/week')
-  @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
-  getWeekAvailability(
-    @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
-    @Query('weekStart') weekStart: string,
-  ) {
-    return this.service.getWeekAvailability(cuentaId, weekStart);
-  }
-
   // ── Disponibilidad declarada por el profesional ─────────────────
   @Get('availability/:cuentaId')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
@@ -169,7 +159,7 @@ export class AppointmentsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: ReplaceAvailabilityDto,
   ) {
-    return this.service.replaceAvailability(user.id, dto.items, dto.weekStart);
+    return this.service.replaceAvailability(user.id, dto.items);
   }
   @Get('count-future')
   @Roles('psicologa', 'docente', 'admin')
