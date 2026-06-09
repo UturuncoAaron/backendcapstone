@@ -258,30 +258,11 @@ export class SetAvailabilityDto {
   @IsString()
   @Matches(/^\d{2}:\d{2}$/, { message: 'Formato de hora inválido, usa HH:mm' })
   horaFin: string;
-
-  /** 'weekly' = recurrente cada semana (comportamiento actual, por defecto).
-   *  'specific' = aplica solo en la fecha exacta indicada en fechaEspecifica. */
-  @IsOptional()
-  @IsIn(['weekly', 'specific'])
-  tipo?: 'weekly' | 'specific';
-
-  /** Solo se usa cuando tipo='specific'. Formato YYYY-MM-DD o DD/MM/YYYY. */
-  @IsOptional()
-  @Matches(/^(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})$/, {
-    message: 'Formato de fecha inválido, usa YYYY-MM-DD o DD/MM/YYYY',
-  })
-  fechaEspecifica?: string;
 }
+
 export class ReplaceAvailabilityDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => SetAvailabilityDto)
   items: SetAvailabilityDto[];
-
-  /** Semana que se reemplaza cuando los items son tipo='specific'. */
-  @IsOptional()
-  @Matches(/^(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})$/, {
-    message: 'Formato de fecha inválido, usa YYYY-MM-DD o DD/MM/YYYY',
-  })
-  weekStart?: string;
 }

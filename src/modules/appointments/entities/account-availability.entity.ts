@@ -20,14 +20,11 @@ export const DIAS_SEMANA = [
 ] as const;
 export type DiaSemana = (typeof DIAS_SEMANA)[number];
 
-export type AvailabilityTipo = 'weekly' | 'specific';
+export type AvailabilityTipo = 'weekly';
 
 @Entity('disponibilidad_cuenta')
 @Index('idx_disp_cuenta_activo', ['cuentaId', 'diaSemana'], {
   where: '"activo" = true',
-})
-@Index('idx_disp_cuenta_especifica', ['cuentaId', 'fechaEspecifica'], {
-  where: '"fecha_especifica" IS NOT NULL',
 })
 @Index(
   'uq_disp_cuenta_weekly_dia_hora',
@@ -35,14 +32,6 @@ export type AvailabilityTipo = 'weekly' | 'specific';
   {
     unique: true,
     where: '"tipo" = \'weekly\'',
-  },
-)
-@Index(
-  'uq_disp_cuenta_specific_fecha_hora',
-  ['cuentaId', 'fechaEspecifica', 'horaInicio'],
-  {
-    unique: true,
-    where: '"tipo" = \'specific\' AND "fecha_especifica" IS NOT NULL',
   },
 )
 export class AccountAvailability {

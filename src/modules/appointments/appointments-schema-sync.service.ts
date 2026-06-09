@@ -13,6 +13,18 @@ export class AppointmentsSchemaSync implements OnApplicationBootstrap {
     );
 
     await this.dataSource.query(
+      `DROP INDEX IF EXISTS uq_disp_cuenta_specific_fecha_hora`,
+    );
+
+    await this.dataSource.query(
+      `DROP INDEX IF EXISTS idx_disp_cuenta_especifica`,
+    );
+
+    await this.dataSource.query(
+      `DELETE FROM disponibilidad_cuenta WHERE tipo = 'specific'`,
+    );
+
+    await this.dataSource.query(
       `UPDATE disponibilidad_cuenta
         SET fecha_especifica = NULL
         WHERE tipo = 'weekly'
@@ -23,12 +35,6 @@ export class AppointmentsSchemaSync implements OnApplicationBootstrap {
       `CREATE UNIQUE INDEX IF NOT EXISTS uq_disp_cuenta_weekly_dia_hora
         ON disponibilidad_cuenta (cuenta_id, dia_semana, hora_inicio)
         WHERE tipo = 'weekly'`,
-    );
-
-    await this.dataSource.query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS uq_disp_cuenta_specific_fecha_hora
-        ON disponibilidad_cuenta (cuenta_id, fecha_especifica, hora_inicio)
-        WHERE tipo = 'specific' AND fecha_especifica IS NOT NULL`,
     );
   }
 }
