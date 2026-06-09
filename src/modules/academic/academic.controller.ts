@@ -17,7 +17,7 @@ export class AcademicController {
 
     // ── GRADOS ───────────────────────────────────────────────────
     @Get('grados')
-    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa','staff')
+    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa', 'staff')
     findAllGrados() {
         return this.academicService.findAllGrados();
     }
@@ -35,7 +35,7 @@ export class AcademicController {
     findAllSecciones(@Query('gradoId') gradoId?: string) {
         return this.academicService.findAllSecciones(gradoId);
     }
-    
+
     @Get('mis-secciones')
     @Roles('docente')
     getMisSecciones(@CurrentUser() user: AuthUser) {
@@ -43,7 +43,7 @@ export class AcademicController {
     }
 
     @Post('secciones')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     createSeccion(
         @Body() body: { grado_id: string; nombre: string; capacidad?: number },
     ) {
@@ -55,7 +55,7 @@ export class AcademicController {
     }
 
     @Patch('secciones/:id')
-    @Roles('admin', 'staff')
+    @Roles('admin', 'staff', 'docente')
     updateSeccion(
         @Param('id', ParseUUIDPipe) seccionId: string,
         @Body() body: { nombre?: string; capacidad?: number },
@@ -64,7 +64,7 @@ export class AcademicController {
     }
 
     @Patch('secciones/:id/tutor')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     asignarTutor(
         @Param('id', ParseUUIDPipe) seccionId: string,
         @Body() body: { docente_id: string | null; force?: boolean },
@@ -85,20 +85,19 @@ export class AcademicController {
     // ── PERIODOS ─────────────────────────────────────────────────
 
     @Get('periodos')
-    // CORREGIDO: Único lugar donde estaba 'auxiliar', reemplazado estrictamente por 'staff'
     @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa', 'staff')
     findAllPeriodos() {
         return this.academicService.findAllPeriodos();
     }
 
     @Get('periodos/activo')
-    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa')
+    @Roles('admin', 'docente', 'alumno', 'padre', 'psicologa', 'staff')
     findPeriodoActivo() {
         return this.academicService.findPeriodoActivo();
     }
 
     @Post('periodos')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     createPeriodo(
         @Body() body: {
             nombre: string;
@@ -112,7 +111,7 @@ export class AcademicController {
     }
 
     @Patch('periodos/:id/activar')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     activarPeriodo(@Param('id', ParseUUIDPipe) id: string) {
         return this.academicService.activarPeriodo(id);
     }
@@ -120,7 +119,7 @@ export class AcademicController {
     // ── MATRÍCULAS ───────────────────────────────────────────────
 
     @Get('matriculas')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     findMatriculas(
         @Query('anio') anio?: string,
         @Query('seccion_id') seccionId?: string,

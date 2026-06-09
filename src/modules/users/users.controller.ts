@@ -21,11 +21,12 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 
 @Controller('admin/users')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin')
+@Roles('admin', 'staff', 'docente')
 export class UsersController {
     constructor(private readonly usersService: UsersService) { }
 
     @Get('admins')
+    @Roles('admin')
     findAdmins(
         @Query('q') q?: string,
         @Query('page') page = '1',
@@ -71,6 +72,7 @@ export class UsersController {
     }
 
     @Get('padres')
+    @Roles('admin', 'staff', 'docente')
     findPadres(
         @Query('q') q?: string,
         @Query('page') page = '1',
@@ -84,6 +86,7 @@ export class UsersController {
     }
 
     @Get('psicologos')
+    @Roles('admin', 'staff', 'docente')
     findPsicologas(
         @Query('q') q?: string,
         @Query('page') page = '1',
@@ -125,6 +128,7 @@ export class UsersController {
     }
 
     @Get('padres/search')
+    @Roles('admin', 'staff', 'docente')
     searchPadres(@Query('q') q: string) {
         return this.usersService.searchPadres(q);
     }
@@ -160,16 +164,19 @@ export class UsersController {
     }
 
     @Get('padres/:id')
+    @Roles('admin', 'staff', 'docente')
     findPadre(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findPadreById(id);
     }
 
     @Get('admins/:id')
+    @Roles('admin')
     findAdmin(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findAdminById(id);
     }
 
     @Get('psicologos/:id')
+    @Roles('admin', 'staff', 'docente')
     findPsicologa(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findPsicologaById(id);
     }
@@ -181,36 +188,43 @@ export class UsersController {
     }
 
     @Post('alumnos')
+    @Roles('admin', 'staff', 'docente')
     createAlumno(@Body() dto: CreateAlumnoDto) {
         return this.usersService.createAlumno(dto);
     }
 
     @Post('docentes')
+    @Roles('admin', 'staff', 'docente')
     createDocente(@Body() dto: CreateDocenteDto) {
         return this.usersService.createDocente(dto);
     }
 
     @Post('padres')
+    @Roles('admin', 'staff', 'docente')
     createPadre(@Body() dto: CreatePadreDto) {
         return this.usersService.createPadre(dto);
     }
 
     @Post('admins')
+    @Roles('admin')
     createAdmin(@Body() dto: CreateAdminDto) {
         return this.usersService.createAdmin(dto);
     }
 
     @Post('psicologos')
+    @Roles('admin', 'staff', 'docente')
     createPsicologa(@Body() dto: CreatePsicologaDto) {
         return this.usersService.createPsicologa(dto);
     }
 
     @Post('staff')
+    @Roles('admin', 'staff', 'docente')
     createStaff(@Body() dto: CreateStaffDto) {
         return this.usersService.createStaff(dto);
     }
 
     @Put(':id')
+    @Roles('admin', 'staff', 'docente')
     async updateUser(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: UpdateFullDto,
@@ -222,22 +236,26 @@ export class UsersController {
 
     @Delete(':id')
     @HttpCode(HttpStatus.OK)
+    @Roles('admin')
     deactivate(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.deactivate(id);
     }
 
     @Patch(':id/reactivar')
     @HttpCode(HttpStatus.OK)
+    @Roles('admin')
     reactivate(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.reactivate(id);
     }
 
     @Post('parent-child')
+    @Roles('admin', 'staff', 'docente')
     linkPadreAlumno(@Body() dto: LinkPadreAlumnoDto) {
         return this.usersService.linkPadreAlumno(dto);
     }
 
     @Get('parent-child/recent')
+    @Roles('admin', 'staff', 'docente')
     getRecentParentLinks(@Query('limit') limit = '10') {
         const n = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
         return this.usersService.getRecentParentLinks(n);

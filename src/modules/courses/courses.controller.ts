@@ -19,37 +19,32 @@ export class CoursesController {
         private readonly materialsService: MaterialsService,
     ) { }
 
-    // GET /api/courses/colors
     @Get('colors')
-    @Roles('admin', 'docente')
+    @Roles('admin', 'docente', 'staff')
     getCourseColors() {
         return this.coursesService.getAvailableColors();
     }
 
-    // GET /api/courses/areas
     @Get('areas')
-    @Roles('admin', 'docente')
+    @Roles('admin', 'docente', 'staff')
     getCourseAreas() {
         return this.coursesService.getAvailableAreas();
     }
 
-    // GET /api/courses/catalog
     @Get('catalog')
-    @Roles('admin', 'docente')
+    @Roles('admin', 'docente', 'staff')
     getCatalog() {
         return this.coursesService.findCatalog();
     }
 
-    // POST /api/courses/catalog
     @Post('catalog')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     createCatalogItem(@Body() dto: { nombre: string; area?: string; color?: string }) {
         return this.coursesService.createCatalogItem(dto);
     }
 
-    // PATCH /api/courses/catalog/:id
     @Patch('catalog/:id')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     updateCatalogItem(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: { nombre?: string; area?: string; color?: string; activo?: boolean },
@@ -57,9 +52,8 @@ export class CoursesController {
         return this.coursesService.updateCatalogItem(id, dto);
     }
 
-    // GET /api/courses
     @Get()
-    @Roles('alumno', 'docente', 'admin')
+    @Roles('alumno', 'docente', 'admin', 'staff')
     findMyCourses(
         @CurrentUser() user: AuthUser,
         @Query('seccion_id') seccionId?: string,
@@ -70,9 +64,8 @@ export class CoursesController {
         );
     }
 
-    // POST /api/courses
     @Post()
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     create(@Body() dto: {
         catalogo_id: string;
         descripcion?: string;
@@ -84,23 +77,20 @@ export class CoursesController {
         return this.coursesService.create(dto);
     }
 
-    // POST /api/courses/enroll
     @Post('enroll')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     enroll(@Body() dto: { alumnoId: string; seccionId: string; anio: number }) {
         return this.coursesService.enrollStudent(dto.alumnoId, dto.seccionId, dto.anio);
     }
 
-    // DELETE /api/courses/enroll/:id
     @Delete('enroll/:id')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     unenroll(@Param('id', ParseUUIDPipe) id: string) {
         return this.coursesService.unenrollStudent(id);
     }
 
-    // GET /api/courses/seccion/:id/students
     @Get('seccion/:id/students')
-    @Roles('alumno', 'docente', 'admin')
+    @Roles('alumno', 'docente', 'admin', 'staff')
     getStudents(
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: AuthUser,
@@ -108,14 +98,12 @@ export class CoursesController {
         return this.coursesService.getEnrollmentsBySeccion(id, user);
     }
 
-    // GET /api/courses/:id
     @Get(':id')
-    @Roles('alumno', 'docente', 'admin')
+    @Roles('alumno', 'docente', 'admin', 'staff')
     findOne(@Param('id', ParseUUIDPipe) id: string) {
         return this.coursesService.findOne(id);
     }
 
-    // GET /api/courses/:id/progress
     @Get(':id/progress')
     @Roles('alumno')
     getProgress(
@@ -125,9 +113,8 @@ export class CoursesController {
         return this.materialsService.getCourseProgress(id, user.id);
     }
 
-    // PATCH /api/courses/:id
     @Patch(':id')
-    @Roles('docente', 'admin')
+    @Roles('docente', 'admin', 'staff')
     update(
         @Param('id', ParseUUIDPipe) id: string,
         @CurrentUser() user: AuthUser,
@@ -136,9 +123,8 @@ export class CoursesController {
         return this.coursesService.update(id, user.id, user.rol, dto);
     }
 
-    // PATCH /api/courses/:id/assign-teacher
     @Patch(':id/assign-teacher')
-    @Roles('admin')
+    @Roles('admin', 'staff', 'docente')
     assignTeacher(
         @Param('id', ParseUUIDPipe) id: string,
         @Body() dto: AssignTeacherDto,

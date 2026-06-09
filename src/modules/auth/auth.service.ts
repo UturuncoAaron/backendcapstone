@@ -16,14 +16,42 @@ interface SeccionTutorada {
     id: string;
     nombre: string;
 }
+
 const PERMISO_A_MODULO: Array<{
     modulo: string;
     accion: string;
-    modulo_jwt: Modulo;
+    modulos_jwt: Modulo[];
 }> = [
-        { modulo: 'reportes', accion: 'ver_todos', modulo_jwt: MODULOS.REPORTES_ACCESO },
-        { modulo: 'libretas', accion: 'subir_padre', modulo_jwt: MODULOS.LIBRETAS_PADRE_ACCESO },
-        { modulo: 'asistencias_general', accion: 'registrar', modulo_jwt: MODULOS.ASIST_GENERAL },
+        {
+            modulo: 'reportes',
+            accion: 'ver_todos',
+            modulos_jwt: [MODULOS.REPORTES_ACCESO],
+        },
+        {
+            modulo: 'libretas',
+            accion: 'subir_padre',
+            modulos_jwt: [MODULOS.LIBRETAS_PADRE_ACCESO],
+        },
+        {
+            modulo: 'asistencias_general',
+            accion: 'registrar',
+            modulos_jwt: [MODULOS.ASIST_GENERAL],
+        },
+        {
+            modulo: 'nav',
+            accion: 'academico',
+            modulos_jwt: [
+                MODULOS.GRADOS_SECCIONES,
+                MODULOS.PERIODOS,
+                MODULOS.MATRICULAS,
+                MODULOS.PADRE_HIJO_ADMIN,
+            ],
+        },
+        {
+            modulo: 'nav',
+            accion: 'usuarios',
+            modulos_jwt: [MODULOS.USUARIOS],
+        },
     ];
 
 @Injectable()
@@ -161,17 +189,15 @@ export class AuthService {
         const base = getModulosBasePorRol(rol);
         const extras: Modulo[] = [];
 
-        // Módulos por condición de negocio
         if (rol === 'docente' && esTutorDe.length > 0) {
             extras.push(MODULOS.TUTORIA, MODULOS.ASIST_GENERAL);
         }
 
-        // Módulos derivados de permisos extra
-        for (const { modulo, accion, modulo_jwt } of PERMISO_A_MODULO) {
+        for (const { modulo, accion, modulos_jwt } of PERMISO_A_MODULO) {
             const tiene = permisosExtra.some(
                 p => p.modulo === modulo && p.accion === accion,
             );
-            if (tiene) extras.push(modulo_jwt);
+            if (tiene) extras.push(...modulos_jwt);
         }
 
         return Array.from(new Set([...base, ...extras]));

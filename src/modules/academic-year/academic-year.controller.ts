@@ -31,19 +31,19 @@ export class AcademicYearController {
   constructor(private readonly service: AcademicYearService) { }
 
   @Get()
-  @Roles('admin')
+  @Roles('admin', 'staff', 'docente')
   list() {
     return this.service.list();
   }
 
   @Get('current')
-  @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno', 'auxiliar')
+  @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno', 'staff')
   getCurrent() {
     return this.service.getCurrent();
   }
 
   @Get(':anio')
-  @Roles('admin')
+  @Roles('admin', 'staff', 'docente')
   getByAnio(@Param('anio', ParseIntPipe) anio: number) {
     return this.service.getByAnio(anio);
   }
@@ -84,7 +84,7 @@ export class AcademicYearController {
   }
 
   @Patch('matriculas/:matriculaId/condicion-final')
-  @Roles('admin')
+  @Roles('admin', 'staff', 'docente')
   setCondicionFinal(
     @Param('matriculaId', ParseUUIDPipe) matriculaId: string,
     @Body() dto: SetCondicionFinalDto,
@@ -94,13 +94,13 @@ export class AcademicYearController {
 
   @Post('matriculas/bulk-condicion')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin')
+  @Roles('admin', 'staff', 'docente')
   bulkCondicionFinal(@Body() dto: BulkCondicionFinalDto) {
     return this.service.bulkSetCondicionFinal(dto);
   }
 
   @Patch('matriculas/:matriculaId/seccion')
-  @Roles('admin')
+  @Roles('admin', 'staff', 'docente')
   cambiarSeccion(
     @Param('matriculaId', ParseUUIDPipe) matriculaId: string,
     @Body() dto: CambiarSeccionDto,
@@ -110,7 +110,7 @@ export class AcademicYearController {
 
   @Post(':anio/rematriculas/:matriculaId')
   @HttpCode(HttpStatus.OK)
-  @Roles('admin')
+  @Roles('admin', 'staff', 'docente')
   rematricularAlumno(
     @Param('anio', ParseIntPipe) anio: number,
     @Param('matriculaId', ParseUUIDPipe) matriculaId: string,
@@ -119,7 +119,7 @@ export class AcademicYearController {
     const condicion = dto.condicion as string;
     if (condicion === 'retirado' || condicion === 'pendiente')
       throw new BadRequestException(
-        'Solo se puede rematricualr con condición "aprobado" o "desaprobado"',
+        'Solo se puede rematricular con condición "aprobado" o "desaprobado"',
       );
     return this.service.rematricularAlumno(
       anio,
