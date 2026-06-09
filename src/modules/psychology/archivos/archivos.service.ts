@@ -197,4 +197,9 @@ export class PsychologyArchivosService {
         }
         return archivo;
     }
+    async getPreviewUrl(psychologistId: string, archivoId: string) {
+        const archivo = await this.assertOwned(psychologistId, archivoId);
+        const url = await this.storage.getPreviewUrl(archivo.storageKey);
+        return { url };
+    }
 }
