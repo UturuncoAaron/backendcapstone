@@ -29,6 +29,22 @@ export type AvailabilityTipo = 'weekly' | 'specific';
 @Index('idx_disp_cuenta_especifica', ['cuentaId', 'fechaEspecifica'], {
   where: '"fecha_especifica" IS NOT NULL',
 })
+@Index(
+  'uq_disp_cuenta_weekly_dia_hora',
+  ['cuentaId', 'diaSemana', 'horaInicio'],
+  {
+    unique: true,
+    where: '"tipo" = \'weekly\'',
+  },
+)
+@Index(
+  'uq_disp_cuenta_specific_fecha_hora',
+  ['cuentaId', 'fechaEspecifica', 'horaInicio'],
+  {
+    unique: true,
+    where: '"tipo" = \'specific\' AND "fecha_especifica" IS NOT NULL',
+  },
+)
 export class AccountAvailability {
   @PrimaryGeneratedColumn('uuid')
   id: string;
