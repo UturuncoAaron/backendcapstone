@@ -131,4 +131,18 @@ export class AcademicController {
             gradoId,
         );
     }
+    // ── CONFIG HORARIO ALUMNOS ───────────────────────────────────
+    @Get('config/horario-entrada')
+    @Roles('admin')
+    getConfigHorarioEntrada() {
+        return this.academicService.getConfigHorarioEntrada();
+    }
+
+    @Post('config/horario-entrada')
+    @Roles('admin')
+    updateConfigHorarioEntrada(
+        @Body() body: { dia_semana?: string; hora_limite: string; aplicar_semana?: boolean },
+    ) {
+        return this.academicService.updateConfigHorarioEntrada(body);
+    }
 }

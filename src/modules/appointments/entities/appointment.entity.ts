@@ -113,4 +113,6 @@ export class Appointment {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
+  @Column({ name: 'last_postponed_by_id', nullable: true })
+  lastPostponedById: string | null;
 }

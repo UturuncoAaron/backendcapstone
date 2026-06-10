@@ -95,16 +95,16 @@ function normalizeDateOnlyInput(dateStr: string): string | null {
   const localMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
   const parts = isoMatch
     ? {
-        year: Number(isoMatch[1]),
-        month: Number(isoMatch[2]),
-        day: Number(isoMatch[3]),
-      }
+      year: Number(isoMatch[1]),
+      month: Number(isoMatch[2]),
+      day: Number(isoMatch[3]),
+    }
     : localMatch
       ? {
-          year: Number(localMatch[3]),
-          month: Number(localMatch[2]),
-          day: Number(localMatch[1]),
-        }
+        year: Number(localMatch[3]),
+        month: Number(localMatch[2]),
+        day: Number(localMatch[1]),
+      }
       : null;
 
   if (!parts) return null;
@@ -182,7 +182,7 @@ export class AppointmentsService {
     private readonly assignmentRepo: Repository<PsychologistStudent>,
     private readonly dataSource: DataSource,
     private readonly events: EventEmitter2,
-  ) {}
+  ) { }
 
   private async appendStatusLog(
     appointmentId: string,
@@ -207,8 +207,7 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `appendStatusLog falló para cita ${appointmentId}: ${
-          err instanceof Error ? err.message : String(err)
+        `appendStatusLog falló para cita ${appointmentId}: ${err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -275,10 +274,9 @@ export class AppointmentsService {
       nextStatus: r.next_status,
       changedById: r.changed_by_id,
       changedByName: r.changed_by_nombre
-        ? `${r.changed_by_nombre}${
-            r.changed_by_apellido_paterno
-              ? ' ' + r.changed_by_apellido_paterno
-              : ''
+        ? `${r.changed_by_nombre}${r.changed_by_apellido_paterno
+          ? ' ' + r.changed_by_apellido_paterno
+          : ''
           }`.trim()
         : null,
       changedByRole: r.changed_by_rol,
@@ -310,27 +308,23 @@ export class AppointmentsService {
       );
 
     if (caller.rol === 'padre') {
-      const existing = await this.appointmentRepo
+      const conflict = await this.appointmentRepo
         .createQueryBuilder('a')
-        .leftJoin(Cuenta, 'cv', 'cv.id = a.convocado_a_id')
-        .select(['a.id', 'a.scheduledAt', 'a.convocadoAId'])
-        .addSelect('cv.rol::text', 'cv_rol')
-        .where('a.convocado_por_id = :id', { id: caller.id })
-        .andWhere('a.estado IN (:...states)', {
-          states: ['pendiente', 'confirmada'],
-        })
-        .andWhere('a.fecha_hora > NOW()')
-        .andWhere('a.convocado_a_id <> :otherSide', {
-          otherSide: dto.convocadoAId,
-        })
+        .where('(a.convocado_por_id = :id OR a.convocado_a_id = :id)', { id: caller.id })
+        .andWhere('a.estado IN (:...states)', { states: ['pendiente', 'confirmada'] })
+        .andWhere('a.convocado_a_id <> :otherSide', { otherSide: dto.convocadoAId })
+        .andWhere(
+          `tstzrange(a.fecha_hora, a.fecha_hora + (a.duracion_min || ' minutes')::interval, '[)')
+             && tstzrange(:start, :end, '[)')`,
+          {
+            start: scheduledAt,
+            end: new Date(scheduledAt.getTime() + (dto.durationMin ?? 15) * 60_000),
+          },
+        )
         .getOne();
-      if (existing) {
-        throw new ConflictException(
-          'Ya tienes una cita pendiente o confirmada con otro profesional. Cancélala o espera a que termine antes de agendar una nueva.',
-        );
-      }
+      if (conflict)
+        throw new ConflictException('Ya tienes una cita en ese horario con otro profesional.');
     }
-
     if (!canInvite(caller.rol as CallerRol, convocadoA.rol as CallerRol)) {
       const permitidos = allowedRecipientsFor(caller.rol as CallerRol);
       const detalle = permitidos.length
@@ -505,8 +499,7 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `autoFinalizePastAppointments falló: ${
-          err instanceof Error ? err.message : String(err)
+        `autoFinalizePastAppointments falló: ${err instanceof Error ? err.message : String(err)
         }`,
       );
     }
@@ -930,8 +923,25 @@ export class AppointmentsService {
     const previousScheduled = appt.scheduledAt;
     const previousStatus = appt.estado;
 
+    const convocadoAccount = await this.loadAccountSummary(appt.convocadoAId);
+    const callerEsPsicologa = caller.rol === 'psicologa';
+    const callerEsPadre = caller.rol === 'padre';
+    const convocadoEsAlumno = convocadoAccount?.rol === 'alumno';
+    const hayAlumnoVinculado = !!appt.studentId && convocadoAccount?.rol !== 'padre';
+    const otroEsAlumno = convocadoEsAlumno || hayAlumnoVinculado;
+    const otroEsPsicologa =
+      convocadoAccount?.rol === 'psicologa' ||
+      convocadorAccount?.rol === 'psicologa';
+
+    const nuevoEstado =
+      callerEsPsicologa && otroEsAlumno ? 'confirmada' :
+        callerEsPadre && otroEsPsicologa ? 'confirmada' :
+          'pendiente';
+
     appt.scheduledAt = nuevaFecha;
-    appt.estado = 'pendiente';
+    appt.estado = nuevoEstado;
+    appt.lastPostponedById = caller.id;
+
     const actorLabel = isConvocador
       ? `convocador (${caller.rol})`
       : isConvocado
@@ -945,13 +955,13 @@ export class AppointmentsService {
       appointmentId: saved.id,
       actorId: caller.id,
       previousStatus,
-      nextStatus: 'pendiente',
+      nextStatus: nuevoEstado,
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentStatusChangedEvent);
     await this.appendStatusLog(
       saved.id,
       previousStatus,
-      'pendiente',
+      nuevoEstado,
       caller.id,
       `Aplazada por ${actorLabel}. ${dto.motivo.trim()}`,
     );
@@ -1115,10 +1125,9 @@ export class AppointmentsService {
       [caller.id],
     );
     const docenteNombre = docenteRows[0]
-      ? `${docenteRows[0].nombre} ${docenteRows[0].apellido_paterno}${
-          docenteRows[0].apellido_materno
-            ? ' ' + docenteRows[0].apellido_materno
-            : ''
+      ? `${docenteRows[0].nombre} ${docenteRows[0].apellido_paterno}${docenteRows[0].apellido_materno
+        ? ' ' + docenteRows[0].apellido_materno
+        : ''
         }`.trim()
       : 'Docente';
 
@@ -1818,7 +1827,7 @@ export class AppointmentsService {
           occupantLabel:
             occ && revealOccupants
               ? `${occ.row.alumno_nombre ?? ''} ${occ.row.alumno_apellido ?? ''}`.trim() ||
-                occ.row.motivo.slice(0, 40)
+              occ.row.motivo.slice(0, 40)
               : null,
         });
       }
@@ -2236,9 +2245,9 @@ export class AppointmentsService {
       especialidad: r.especialidad,
       tutoria_actual: r.tutoria_seccion_id
         ? {
-            seccion_id: r.tutoria_seccion_id,
-            seccion_label: r.tutoria_seccion_label ?? '',
-          }
+          seccion_id: r.tutoria_seccion_id,
+          seccion_label: r.tutoria_seccion_label ?? '',
+        }
         : null,
     };
   }
@@ -2277,8 +2286,7 @@ export class AppointmentsService {
     const effectiveMax = Math.min(rule.maxDurationMin, maxBySlots);
     if (value > effectiveMax)
       throw new BadRequestException(
-        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${
-          rule.maxConsecutiveSlots === 1 ? '' : 's'
+        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${rule.maxConsecutiveSlots === 1 ? '' : 's'
         } consecutivo${rule.maxConsecutiveSlots === 1 ? '' : 's'} (${effectiveMax} min)`,
       );
     return value;
@@ -2293,6 +2301,7 @@ export class AppointmentsService {
   private baseAppointmentQuery() {
     return this.appointmentRepo
       .createQueryBuilder('a')
+      .addSelect('a.lastPostponedById')
       .leftJoinAndSelect('a.student', 'student')
       .leftJoinAndSelect('a.parent', 'parent')
       .leftJoinAndSelect('a.createdBy', 'createdBy')
@@ -2554,10 +2563,7 @@ export class AppointmentsService {
     const byId = new Map(rows.map((r) => [r.id, r]));
 
     for (const a of items) {
-      const target = a as unknown as Record<
-        string,
-        AppointmentPersonView | null
-      >;
+      const target = a as unknown as Record<string, unknown>;
       if (a.convocadoAId && a.convocadoA) {
         const p = byId.get(a.convocadoAId);
         if (p)

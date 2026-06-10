@@ -430,4 +430,46 @@ export class AcademicService {
         );
         return result;
     }
+    // ── CONFIG HORARIO ALUMNOS ───────────────────────────────────
+
+    async getConfigHorarioEntrada() {
+        return this.dataSource.query(
+            `SELECT dia_semana, hora_limite FROM config_horario_alumnos ORDER BY
+         CASE dia_semana
+             WHEN 'lunes'     THEN 1
+             WHEN 'martes'    THEN 2
+             WHEN 'miercoles' THEN 3
+             WHEN 'jueves'    THEN 4
+             WHEN 'viernes'   THEN 5
+         END`,
+        );
+    }
+
+    async updateConfigHorarioEntrada(body: {
+        horarios?: { dia_semana: string; hora_limite: string }[];
+        dia_semana?: string;
+        hora_limite?: string;
+        aplicar_semana?: boolean;
+    }) {
+        if (body.horarios?.length) {
+            for (const item of body.horarios) {
+                await this.dataSource.query(
+                    `UPDATE config_horario_alumnos SET hora_limite = $1 WHERE dia_semana = $2`,
+                    [item.hora_limite, item.dia_semana],
+                );
+            }
+        } else if (body.aplicar_semana) {
+            await this.dataSource.query(
+                `UPDATE config_horario_alumnos SET hora_limite = $1`,
+                [body.hora_limite],
+            );
+        } else {
+            if (!body.dia_semana) throw new BadRequestException('dia_semana es requerido');
+            await this.dataSource.query(
+                `UPDATE config_horario_alumnos SET hora_limite = $1 WHERE dia_semana = $2`,
+                [body.hora_limite, body.dia_semana],
+            );
+        }
+        return this.getConfigHorarioEntrada();
+    }
 }
