@@ -14,11 +14,12 @@ import {
 import { QrService } from '../qr/qr.service.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'];
+
 @Injectable()
 export class AssistsService {
     private readonly logger = new Logger(AssistsService.name);
 
-    private readonly HORA_LIMITE_ENTRADA = '07:30';
     private periodoCache: { id: string; fecha_inicio: string; fecha_fin: string } | null = null;
 
     constructor(
@@ -30,8 +31,35 @@ export class AssistsService {
         private readonly qrService: QrService,
     ) { }
 
+    private getHoy(): string {
+        return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+    }
+
     private requireAuth(user: AuthUser | undefined): asserts user is AuthUser {
         if (!user?.id) throw new UnauthorizedException('Usuario no autenticado');
+    }
+
+    private requireHoy(fecha: string) {
+        const hoyLima = this.getHoy();
+        if (!fecha || fecha.trim() !== hoyLima) {
+            this.logger.error(
+                `Validación fallida en requireHoy: Se recibió la fecha [${fecha?.trim()}], pero el servidor esperaba [${hoyLima}] bajo America/Lima.`
+            );
+            throw new BadRequestException('Solo se puede registrar asistencia del día actual');
+        }
+    }
+
+    private async getHoraLimiteAlumnos(fecha: string): Promise<string> {
+        const diaSemana = DIAS_SEMANA[new Date(fecha + 'T12:00:00').getDay()];
+        const rows = await this.dataSource.query<{ hora_limite: string }[]>(
+            `SELECT hora_limite::text FROM config_horario_alumnos WHERE dia_semana = $1`,
+            [diaSemana],
+        );
+        if (!rows[0]) {
+            this.logger.warn(`Sin config de hora límite para ${diaSemana}, usando 07:30 por defecto`);
+            return '07:30';
+        }
+        return rows[0].hora_limite.slice(0, 5);
     }
 
     private async assertDocenteDelCurso(cursoId: string, user: AuthUser) {
@@ -208,47 +236,13 @@ export class AssistsService {
         }
     }
 
-    async generalBulk(seccionId: string, dto: BulkAsistenciaDto, user: AuthUser) {
-        this.requireAuth(user);
-        await this.assertTutorDeSeccion(seccionId, user);
-        if (!dto.alumnos.length) throw new BadRequestException('Lista vacía');
-
-        const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
-        const alumnoIds = dto.alumnos.map(a => a.alumno_id);
-
-        const { validos, invalidos } = await this.filtrarAlumnosEnSeccion(alumnoIds, seccionId, dto.fecha);
-
-        if (invalidos.length) {
-            this.logger.warn(`Bulk general: omitiendo ${invalidos.length} alumnos sin matrícula | sec ${seccionId}`);
-        }
-        if (!validos.length) {
-            throw new BadRequestException('Ningún alumno está matriculado en esta sección para el año actual.');
-        }
-
-        const validosSet = new Set(validos);
-        const records = dto.alumnos
-            .filter(a => validosSet.has(a.alumno_id))
-            .map(a => ({
-                alumno_id: a.alumno_id,
-                seccion_id: seccionId,
-                periodo_id,
-                fecha: dto.fecha,
-                estado: a.estado,
-                observacion: a.observacion ?? null,
-                registrado_por: user.id,
-            }));
-
-        await this.generalRepo.upsert(records, ['alumno_id', 'seccion_id', 'fecha']);
-        return { registrados: records.length, omitidos: invalidos.length };
-    }
-
     async generalScan(dto: ScanQrDto, user: AuthUser) {
         this.requireAuth(user);
 
         const verified = this.qrService.verifyAttendanceToken(dto.qr_token);
         if (!verified) throw new BadRequestException('QR inválido o no reconocido');
 
-        const fecha = dto.fecha ?? new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+        const fecha = this.getHoy();
         const anio = new Date(fecha + 'T12:00:00').getFullYear();
         const periodo_id = await this.resolvePeriodoId(fecha);
 
@@ -288,7 +282,9 @@ export class AssistsService {
         const horaLima = new Date().toLocaleTimeString('en-GB', {
             timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit',
         });
-        const estado: EstadoAsistencia = horaLima <= this.HORA_LIMITE_ENTRADA ? 'asistio' : 'tardanza';
+
+        const horaLimite = await this.getHoraLimiteAlumnos(fecha);
+        const estado: EstadoAsistencia = horaLima <= horaLimite ? 'asistio' : 'tardanza';
 
         const record = {
             alumno_id: info.alumno_id,
@@ -302,6 +298,61 @@ export class AssistsService {
 
         await this.generalRepo.upsert(record, ['alumno_id', 'seccion_id', 'fecha']);
         return { duplicate: false, attendance: record, alumno: this.mapAlumnoScan(info) };
+    }
+
+    async generalRegister(seccionId: string, dto: RegisterAsistenciaDto, user: AuthUser) {
+        this.requireAuth(user);
+        this.requireHoy(dto.fecha);
+        await this.assertTutorDeSeccion(seccionId, user);
+        const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
+        await this.assertAlumnoEnSeccion(dto.alumno_id, seccionId, dto.fecha);
+
+        const record = {
+            alumno_id: dto.alumno_id,
+            seccion_id: seccionId,
+            periodo_id,
+            fecha: dto.fecha,
+            estado: dto.estado,
+            observacion: dto.observacion ?? null,
+            registrado_por: user.id,
+        };
+        await this.generalRepo.upsert(record, ['alumno_id', 'seccion_id', 'fecha']);
+        return record;
+    }
+
+    async generalBulk(seccionId: string, dto: BulkAsistenciaDto, user: AuthUser) {
+        this.requireAuth(user);
+        this.requireHoy(dto.fecha);
+        await this.assertTutorDeSeccion(seccionId, user);
+        if (!dto.alumnos.length) throw new BadRequestException('Lista vacía');
+
+        const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
+        const alumnoIds = dto.alumnos.map(a => a.alumno_id);
+
+        const { validos, invalidos } = await this.filtrarAlumnosEnSeccion(alumnoIds, seccionId, dto.fecha);
+
+        if (invalidos.length) {
+            this.logger.warn(`Bulk general: omitiendo ${invalidos.length} alumnos sin matrícula | sec ${seccionId}`);
+        }
+        if (!validos.length) {
+            throw new BadRequestException('Ningún alumno está matriculado en esta sección para el año actual.');
+        }
+
+        const validosSet = new Set(validos);
+        const records = dto.alumnos
+            .filter(a => validosSet.has(a.alumno_id))
+            .map(a => ({
+                alumno_id: a.alumno_id,
+                seccion_id: seccionId,
+                periodo_id,
+                fecha: dto.fecha,
+                estado: a.estado,
+                observacion: a.observacion ?? null,
+                registrado_por: user.id,
+            }));
+
+        await this.generalRepo.upsert(records, ['alumno_id', 'seccion_id', 'fecha']);
+        return { registrados: records.length, omitidos: invalidos.length };
     }
 
     async generalListBySeccion(seccionId: string, q: ListAsistenciasQueryDto) {
@@ -341,6 +392,7 @@ export class AssistsService {
         this.requireAuth(user);
         const a = await this.generalRepo.findOne({ where: { id } });
         if (!a) throw new NotFoundException(`Asistencia ${id} no encontrada`);
+        this.requireHoy(a.fecha);
         await this.assertTutorDeSeccion(a.seccion_id, user);
         if (dto.estado !== undefined) a.estado = dto.estado;
         if (dto.observacion !== undefined) a.observacion = dto.observacion;
@@ -351,28 +403,10 @@ export class AssistsService {
         this.requireAuth(user);
         const a = await this.generalRepo.findOne({ where: { id } });
         if (!a) throw new NotFoundException(`Asistencia ${id} no encontrada`);
+        this.requireHoy(a.fecha);
         await this.assertTutorDeSeccion(a.seccion_id, user);
         await this.generalRepo.remove(a);
         return { ok: true };
-    }
-
-    async classRegister(cursoId: string, dto: RegisterAsistenciaDto, user: AuthUser) {
-        this.requireAuth(user);
-        await this.assertDocenteDelCurso(cursoId, user);
-        await this.assertAlumnoEnCurso(dto.alumno_id, cursoId);
-        const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
-
-        const record = {
-            alumno_id: dto.alumno_id,
-            curso_id: cursoId,
-            periodo_id,
-            fecha: dto.fecha,
-            estado: dto.estado,
-            observacion: dto.observacion ?? null,
-            registrado_por: user.id,
-        };
-        await this.classRepo.upsert(record, ['alumno_id', 'curso_id', 'fecha']);
-        return record;
     }
 
     async classBulk(cursoId: string, dto: BulkAsistenciaDto, user: AuthUser) {
@@ -407,6 +441,25 @@ export class AssistsService {
 
         await this.classRepo.upsert(records, ['alumno_id', 'curso_id', 'fecha']);
         return { registrados: records.length, omitidos: invalidos.length };
+    }
+
+    async classRegister(cursoId: string, dto: RegisterAsistenciaDto, user: AuthUser) {
+        this.requireAuth(user);
+        await this.assertDocenteDelCurso(cursoId, user);
+        await this.assertAlumnoEnCurso(dto.alumno_id, cursoId);
+        const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
+
+        const record = {
+            alumno_id: dto.alumno_id,
+            curso_id: cursoId,
+            periodo_id,
+            fecha: dto.fecha,
+            estado: dto.estado,
+            observacion: dto.observacion ?? null,
+            registrado_por: user.id,
+        };
+        await this.classRepo.upsert(record, ['alumno_id', 'curso_id', 'fecha']);
+        return record;
     }
 
     async classListByCurso(cursoId: string, q: ListAsistenciasQueryDto) {
@@ -504,25 +557,6 @@ export class AssistsService {
              ORDER BY al.apellido_paterno, al.apellido_materno, al.nombre`,
             [q.curso_id, q.periodo_id],
         );
-    }
-
-    async generalRegister(seccionId: string, dto: RegisterAsistenciaDto, user: AuthUser) {
-        this.requireAuth(user);
-        await this.assertTutorDeSeccion(seccionId, user);
-        const periodo_id = await this.resolvePeriodoId(dto.fecha, dto.periodo_id);
-        await this.assertAlumnoEnSeccion(dto.alumno_id, seccionId, dto.fecha);
-
-        const record = {
-            alumno_id: dto.alumno_id,
-            seccion_id: seccionId,
-            periodo_id,
-            fecha: dto.fecha,
-            estado: dto.estado,
-            observacion: dto.observacion ?? null,
-            registrado_por: user.id,
-        };
-        await this.generalRepo.upsert(record, ['alumno_id', 'seccion_id', 'fecha']);
-        return record;
     }
 
     private async getAnioActual(): Promise<number> {
