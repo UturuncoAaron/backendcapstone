@@ -924,19 +924,17 @@ export class AppointmentsService {
     const previousStatus = appt.estado;
 
     const convocadoAccount = await this.loadAccountSummary(appt.convocadoAId);
-    const callerEsPsicologa = caller.rol === 'psicologa';
     const callerEsPadre = caller.rol === 'padre';
+    const callerEsPsicologa = caller.rol === 'psicologa';
     const convocadoEsAlumno = convocadoAccount?.rol === 'alumno';
+    const convocadoEsPadre = convocadoAccount?.rol === 'padre';
     const hayAlumnoVinculado = !!appt.studentId && convocadoAccount?.rol !== 'padre';
-    const otroEsAlumno = convocadoEsAlumno || hayAlumnoVinculado;
-    const otroEsPsicologa =
-      convocadoAccount?.rol === 'psicologa' ||
-      convocadorAccount?.rol === 'psicologa';
 
-    const nuevoEstado =
-      callerEsPsicologa && otroEsAlumno ? 'confirmada' :
-        callerEsPadre && otroEsPsicologa ? 'confirmada' :
-          'pendiente';
+    const nuevoEstado: AppointmentStatus =
+      callerEsPsicologa && (convocadoEsAlumno || hayAlumnoVinculado) ? 'confirmada' :
+        callerEsPadre ? 'confirmada' :
+          (caller.rol === 'docente' || caller.rol === 'admin') && convocadoEsPadre ? 'pendiente' :
+            'pendiente';
 
     appt.scheduledAt = nuevaFecha;
     appt.estado = nuevoEstado;
