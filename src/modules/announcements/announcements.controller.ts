@@ -18,22 +18,20 @@ import { RequierePermiso } from '../auth/decorators/requiere-permiso.decorator.j
 export class AnnouncementsController {
   constructor(private readonly svc: AnnouncementsService) { }
 
-  // GET /api/comunicados
   @Get()
-  @Roles('alumno', 'docente', 'admin', 'padre', 'psicologa', 'auxiliar')
+  @Roles('alumno', 'docente', 'admin', 'padre', 'psicologa', 'staff')
   findAll(@Query() query: QueryAnnouncementsDto, @CurrentUser() user: AuthUser) {
     query.rol = user.rol;
     query.userId = user.id;
     return this.svc.findAll(query);
   }
 
-  // GET /api/comunicados/todos — solo admin
   @Get('todos')
   @Roles('admin')
   findAllAdmin(
     @Query('size') size?: string,
     @Query('cursor') cursor?: string,
-    @Query('periodo_id') periodo_id?: string,
+    @Query('anio') anio?: string,
     @Query('activo') activo?: string,
     @Query('orden') orden?: string,
     @Query('buscar') buscar?: string,
@@ -41,21 +39,19 @@ export class AnnouncementsController {
     return this.svc.findAllAdmin({
       size: size ? parseInt(size) : undefined,
       cursor,
-      periodo_id,
+      anio: anio ? parseInt(anio) : undefined,
       activo: activo === undefined ? undefined : activo === 'true',
       orden,
       buscar,
     });
   }
 
-  // GET /api/comunicados/:id
   @Get(':id')
-  @Roles('alumno', 'docente', 'admin', 'padre', 'psicologa', 'auxiliar')
+  @Roles('alumno', 'docente', 'admin', 'padre', 'psicologa', 'staff')
   findOne(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
     return this.svc.findOne(id, user.id);
   }
 
-  // POST /api/comunicados
   @Post()
   @UseGuards(JwtAuthGuard, PermisoGuard)
   @RequierePermiso('comunicados', 'crear')
@@ -64,7 +60,6 @@ export class AnnouncementsController {
     return this.svc.create(user, dto);
   }
 
-  // PATCH /api/comunicados/:id
   @Patch(':id')
   @Roles('admin', 'docente', 'psicologa')
   update(
@@ -75,7 +70,6 @@ export class AnnouncementsController {
     return this.svc.update(id, user.id, user.rol, dto);
   }
 
-  // PATCH /api/comunicados/:id/fijar
   @Patch(':id/fijar')
   @Roles('admin')
   fijar(
@@ -85,21 +79,18 @@ export class AnnouncementsController {
     return this.svc.fijar(id, body.fijado, body.fijado_hasta);
   }
 
-  // PATCH /api/comunicados/:id/archivar
   @Patch(':id/archivar')
   @Roles('admin', 'docente', 'psicologa')
   archivar(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
     return this.svc.archivar(id, user.id, user.rol);
   }
 
-  // GET /api/comunicados/:id/lecturas
   @Get(':id/lecturas')
   @Roles('admin', 'docente', 'psicologa')
   getLecturas(@Param('id', ParseUUIDPipe) id: string) {
     return this.svc.getLecturas(id);
   }
 
-  // DELETE /api/comunicados/:id/archivos/:archivoId
   @Delete(':id/archivos/:archivoId')
   @Roles('admin', 'docente', 'psicologa')
   deleteArchivo(

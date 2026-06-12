@@ -86,8 +86,6 @@ export class UpdateAppointmentDto {
 }
 
 export class CancelAppointmentDto {
-  // Spec (Aarón, 2026-05): el motivo de cancelación es OBLIGATORIO para
-  // que ambas partes vean por qué se canceló la cita.
   @IsString()
   @MinLength(3)
   @MaxLength(500)
@@ -101,7 +99,6 @@ export class RejectAppointmentDto {
   motivo: string;
 }
 
-/** Cuerpo común a las acciones que exigen motivo (cancelar/rechazar/aplazar). */
 export class MotivoDto {
   @IsString()
   @MinLength(3)
@@ -156,7 +153,6 @@ const FICHA_CATEGORIES = [
   'otro',
 ] as const;
 
-/** Datos de la cita de seguimiento creada al cerrar la sesión. */
 export class FollowUpScheduleDto {
   @IsDateString()
   scheduledAt: string;
@@ -167,7 +163,6 @@ export class FollowUpScheduleDto {
   @Max(180)
   durationMin?: number;
 
-  /** Si true, la cita de seguimiento incluye al padre → nacerá pendiente. */
   @IsOptional()
   @IsBoolean()
   incluirPadre?: boolean;
@@ -186,13 +181,7 @@ export class FollowUpScheduleDto {
   motivo?: string;
 }
 
-/**
- * Cierre clínico (Slide-over de Psicología): marca la cita actual como
- * realizada, guarda notas clínicas (ficha privada) y opcionalmente crea la
- * cita de seguimiento en una sola transacción.
- */
 export class CloseSessionDto {
-  /** Notas clínicas privadas → se guardan como ficha de psicología. */
   @IsOptional()
   @IsString()
   @MaxLength(5000)
@@ -202,7 +191,6 @@ export class CloseSessionDto {
   @IsIn(FICHA_CATEGORIES)
   fichaCategoria?: (typeof FICHA_CATEGORIES)[number];
 
-  /** Notas posteriores visibles en la cita (resumen administrativo). */
   @IsOptional()
   @IsString()
   @MaxLength(2000)
@@ -265,4 +253,23 @@ export class ReplaceAvailabilityDto {
   @ValidateNested({ each: true })
   @Type(() => SetAvailabilityDto)
   items: SetAvailabilityDto[];
+}
+
+// ── Override de disponibilidad por fecha específica ───────────────
+
+export class OverrideSlotDto {
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/, { message: 'Formato de hora inválido, usa HH:mm' })
+  horaInicio: string;
+
+  @IsString()
+  @Matches(/^\d{2}:\d{2}$/, { message: 'Formato de hora inválido, usa HH:mm' })
+  horaFin: string;
+}
+
+export class ReplaceOverridesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => OverrideSlotDto)
+  slots: OverrideSlotDto[];
 }

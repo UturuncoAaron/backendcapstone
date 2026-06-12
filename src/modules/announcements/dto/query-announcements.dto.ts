@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsBoolean, IsUUID, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsBoolean, IsInt, Min, Max } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 export class QueryAnnouncementsDto {
@@ -14,8 +14,9 @@ export class QueryAnnouncementsDto {
   cursor?: string;
 
   @IsOptional()
-  @IsUUID()
-  periodo_id?: string;
+  @Type(() => Number)
+  @IsInt()
+  anio?: number;
 
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
@@ -31,12 +32,10 @@ export class QueryAnnouncementsDto {
   @IsString()
   buscar?: string;
 
-  /** Interno — seteado por el controller con el rol JWT. */
   @IsOptional()
   @IsString()
   rol?: string;
 
-  /** Interno — seteado por el controller con el userId. */
   @IsOptional()
   @IsString()
   userId?: string;

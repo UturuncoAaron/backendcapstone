@@ -28,36 +28,31 @@ import {
   DeriveAppointmentDto,
   CompleteAppointmentDto,
   CloseSessionDto,
+  ReplaceOverridesDto,
 } from './dto/appointments.dto.js';
 import type { AuthUser } from '../auth/types/auth-user.js';
 
 @Controller('appointments')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AppointmentsController {
-  constructor(private readonly service: AppointmentsService) {}
+  constructor(private readonly service: AppointmentsService) { }
 
   // ══════════════════════════════════════════════════════════════
   // CRUD DE CITAS
   // ══════════════════════════════════════════════════════════════
 
-  // ── Crear cita ──────────────────────────────────────────────────
-  // El alumno sólo puede crear cita con psicología (validado en el service).
-  // `auxiliar` está excluido: el rol no participa de citas.
   @Post()
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   create(@Body() dto: CreateAppointmentDto, @CurrentUser() user: AuthUser) {
     return this.service.createAppointment({ id: user.id, rol: user.rol }, dto);
   }
 
-  // Reglas por rol (lo consume el FE para configurar el dialog). Devuelve
-  // `null` si el target no participa del flujo de citas.
   @Get('rules/:targetId')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   getRules(@Param('targetId', ParseUUIDPipe) targetId: string) {
     return this.service.getRulesForTarget(targetId);
   }
 
-  // ── Mis citas (listado del usuario logueado) ────────────────────
   @Get('mine')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   listMine(
@@ -67,7 +62,6 @@ export class AppointmentsController {
     return this.service.listMine({ id: user.id, rol: user.rol }, q);
   }
 
-  // ── Citas de un alumno específico ───────────────────────────────
   @Get('student/:studentId')
   @Roles('admin', 'psicologa', 'docente')
   listByStudent(
@@ -83,18 +77,15 @@ export class AppointmentsController {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // DISPONIBILIDAD / SLOTS  (rutas estáticas ANTES de ':id')
+  // DISPONIBILIDAD — RUTAS ESTÁTICAS (antes de ':id')
   // ══════════════════════════════════════════════════════════════
 
-  // ── Vista semanal de disponibilidad (bloques + citas de la semana) ─
-  // ── Disponibilidad declarada por el profesional ─────────────────
   @Get('availability/:cuentaId')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   getAvailability(@Param('cuentaId', ParseUUIDPipe) cuentaId: string) {
     return this.service.getAvailability(cuentaId);
   }
 
-  // ── Slots ya ocupados de un profesional en la semana ───────────
   @Get('slots-taken/:cuentaId')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   getSlotsTaken(
@@ -104,7 +95,6 @@ export class AppointmentsController {
     return this.service.getSlotsTaken(cuentaId, date);
   }
 
-  // ── Slots libres calculados (disponibilidad − ocupados − pasados) ─
   @Get('free-slots/:cuentaId')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   getFreeSlots(
@@ -119,9 +109,6 @@ export class AppointmentsController {
     );
   }
 
-  // ── Detalle por bloques + sub-slots de un día (drawer/slide-over) ─
-  // El calendario macro muestra los bloques generales; al abrir un día
-  // se despliega este detalle con los sub-slots de 15/30 min.
   @Get('day-blocks/:cuentaId')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   getDayBlocks(
@@ -129,30 +116,22 @@ export class AppointmentsController {
     @Query('date') date: string,
     @CurrentUser() user: AuthUser,
   ) {
-    // Solo el dueño de la agenda (o admin) ve quién ocupa cada sub-slot.
     const revealOccupants = user.rol === 'admin' || user.id === cuentaId;
     return this.service.getDayBlocks(cuentaId, date, revealOccupants);
   }
 
-  // ── Lista de docentes que el caller puede convocar ─────────────
-  // - padre: solo los docentes que dictan cursos a alguno de sus hijos
-  //          + tutor(es) de su(s) hijo(s)
-  // - psicologa/admin: todos los docentes activos
-  // - resto: 403 / vacío
   @Get('teachers/bookable')
   @Roles('padre', 'psicologa', 'admin')
   getBookableTeachers(@CurrentUser() user: AuthUser) {
     return this.service.listBookableTeachers({ id: user.id, rol: user.rol });
   }
 
-  // ── Administradores/directivos con los que se puede agendar ─────
   @Get('admins/bookable')
   @Roles('padre', 'psicologa', 'admin')
   getBookableAdmins(@CurrentUser() user: AuthUser) {
     return this.service.listBookableAdmins({ id: user.id, rol: user.rol });
   }
 
-  // ── Reemplazar atómicamente toda mi disponibilidad ──────────────
   @Put('availability/bulk')
   @Roles('psicologa', 'docente', 'admin')
   replaceMyAvailability(
@@ -161,6 +140,7 @@ export class AppointmentsController {
   ) {
     return this.service.replaceAvailability(user.id, dto.items);
   }
+
   @Get('count-future')
   @Roles('psicologa', 'docente', 'admin')
   async countFuture(@CurrentUser() user: AuthUser) {
@@ -168,10 +148,6 @@ export class AppointmentsController {
     return { count };
   }
 
-  // ── Borrar un bloque individual de disponibilidad ──────────────
-  // Si hay citas activas en ese bloque, devuelve 409 a menos que
-  // se pase ?confirm=true, en cuyo caso las cancela en cascada y
-  // emite notificación a las partes.
   @Delete('availability/slot/:slotId')
   @Roles('psicologa', 'docente', 'admin')
   deleteAvailabilitySlot(
@@ -186,7 +162,62 @@ export class AppointmentsController {
     );
   }
 
-  // ── Derivación docente → psicóloga ──────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  // OVERRIDES DE DISPONIBILIDAD (por fecha específica)
+  // ══════════════════════════════════════════════════════════════
+
+  /**
+   * GET /appointments/availability/overrides/:cuentaId?weekStart=YYYY-MM-DD
+   * Devuelve los overrides `specific` de la cuenta para la semana indicada.
+   */
+  @Get('availability/overrides/:cuentaId')
+  @Roles('admin', 'psicologa', 'docente')
+  getOverridesForWeek(
+    @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
+    @Query('weekStart') weekStart?: string,
+  ) {
+    return this.service.getOverridesForWeek(cuentaId, weekStart);
+  }
+
+  /**
+   * PUT /appointments/availability/overrides/:cuentaId/:date
+   * Reemplaza los slots del día `date` con los nuevos. Si `slots` está
+   * vacío, el día queda bloqueado. Las citas que no encajan se cancelan.
+   */
+  @Put('availability/overrides/:cuentaId/:date')
+  @Roles('psicologa', 'docente', 'admin')
+  replaceOverridesForDate(
+    @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
+    @Param('date') date: string,
+    @Body() dto: ReplaceOverridesDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.replaceOverridesForDate(
+      { id: user.id, rol: user.rol },
+      cuentaId,
+      date,
+      dto.slots,
+    );
+  }
+
+  /**
+   * DELETE /appointments/availability/overrides/:cuentaId/:date
+   * Elimina el override de una fecha → vuelve al horario base `weekly`.
+   */
+  @Delete('availability/overrides/:cuentaId/:date')
+  @Roles('psicologa', 'docente', 'admin')
+  deleteOverrideForDate(
+    @Param('cuentaId', ParseUUIDPipe) cuentaId: string,
+    @Param('date') date: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.deleteOverrideForDate(
+      { id: user.id, rol: user.rol },
+      cuentaId,
+      date,
+    );
+  }
+
   @Post('derivar')
   @Roles('docente')
   derivar(@Body() dto: DeriveAppointmentDto, @CurrentUser() user: AuthUser) {
@@ -194,11 +225,9 @@ export class AppointmentsController {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // OPERACIONES POR ID DE CITA  (van AL FINAL para no chocar con
-  // las rutas estáticas anteriores)
+  // OPERACIONES POR ID (van AL FINAL)
   // ══════════════════════════════════════════════════════════════
 
-  // ── Detalle ─────────────────────────────────────────────────────
   @Get(':id')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   getOne(
@@ -208,7 +237,6 @@ export class AppointmentsController {
     return this.service.getOne({ id: user.id, rol: user.rol }, id);
   }
 
-  // ── Historial de estados (timeline / drawer en el FE) ──────────
   @Get(':id/estado-log')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   getStatusLog(
@@ -218,7 +246,6 @@ export class AppointmentsController {
     return this.service.getStatusLog({ id: user.id, rol: user.rol }, id);
   }
 
-  // ── Actualizar (estado, reagendar, notas) ───────────────────────
   @Patch(':id')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   update(
@@ -233,7 +260,6 @@ export class AppointmentsController {
     );
   }
 
-  // ── Cancelar (acción explícita con motivo) ──────────────────────
   @Delete(':id')
   @Roles('admin', 'psicologa', 'docente', 'padre', 'alumno')
   cancel(
@@ -247,10 +273,6 @@ export class AppointmentsController {
       dto,
     );
   }
-
-  // ══════════════════════════════════════════════════════════════
-  // RESPUESTA DEL CONVOCADO  (padre / alumno aceptan o rechazan)
-  // ══════════════════════════════════════════════════════════════
 
   @Post(':id/accept')
   @Roles('padre', 'admin')
@@ -275,10 +297,6 @@ export class AppointmentsController {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // ENDPOINTS CANÓNICOS DEL SPEC (PATCH /:id/<accion>)
-  // ══════════════════════════════════════════════════════════════
-
   @Patch(':id/confirmar')
   @Roles('padre', 'alumno', 'admin', 'docente', 'psicologa')
   confirmar(
@@ -288,9 +306,6 @@ export class AppointmentsController {
     return this.service.acceptAppointment({ id: user.id, rol: user.rol }, id);
   }
 
-  // Spec (Aarón, 2026-05): el alumno NO puede aplazar citas.
-  // Sólo puede cancelar con motivo. El guard sirve como primera línea
-  // de defensa; el service repite la validación por seguridad.
   @Patch(':id/aplazar')
   @Roles('padre', 'admin', 'psicologa', 'docente')
   aplazar(
@@ -354,11 +369,6 @@ export class AppointmentsController {
     return this.service.markAsNoAsistio({ id: user.id, rol: user.rol }, id);
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // CIERRE CLÍNICO + SEGUIMIENTO INTELIGENTE (Psicología)
-  // ══════════════════════════════════════════════════════════════
-
-  // Sugerencia de fecha de seguimiento + slots libres precargados.
   @Get(':id/seguimiento-sugerido')
   @Roles('psicologa', 'admin')
   followUpSuggestion(
@@ -371,8 +381,6 @@ export class AppointmentsController {
     );
   }
 
-  // Cierra la cita (realizada) + ficha clínica + cita de seguimiento, todo
-  // en una sola transacción (botón "Guardar Notas y Programar Seguimiento").
   @Post(':id/cerrar-sesion')
   @Roles('psicologa', 'admin')
   closeSession(

@@ -1,5 +1,5 @@
 import {
-  IsString, IsArray, IsOptional, IsBoolean, IsUUID,
+  IsString, IsArray, IsOptional, IsBoolean, IsInt,
   MaxLength, ArrayNotEmpty,
 } from 'class-validator';
 
@@ -29,6 +29,6 @@ export class CreateAnnouncementDto {
   fijado_hasta?: string;
 
   @IsOptional()
-  @IsUUID()
-  periodo_id?: string;
+  @IsInt()
+  anio?: number;
 }

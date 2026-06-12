@@ -28,8 +28,8 @@ export class Announcement {
   @Column({ default: true })
   activo: boolean;
 
-  @Column({ name: 'periodo_id', type: 'uuid', nullable: true })
-  periodo_id: string | null;
+  @Column({ name: 'anio', type: 'smallint' })
+  anio: number;
 
   @Column({ default: false })
   importante: boolean;

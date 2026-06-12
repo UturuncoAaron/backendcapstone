@@ -36,6 +36,7 @@ import {
   DeriveAppointmentDto,
   CompleteAppointmentDto,
   CloseSessionDto,
+  ReplaceOverridesDto,
 } from './dto/appointments.dto.js';
 import {
   ROLES_WITH_AVAILABILITY,
@@ -184,6 +185,8 @@ export class AppointmentsService {
     private readonly events: EventEmitter2,
   ) { }
 
+  private readonly logger = new Logger(AppointmentsService.name);
+
   private async appendStatusLog(
     appointmentId: string,
     previousStatus: AppointmentStatus | null,
@@ -207,11 +210,551 @@ export class AppointmentsService {
       );
     } catch (err) {
       this.logger?.warn?.(
-        `appendStatusLog falló para cita ${appointmentId}: ${err instanceof Error ? err.message : String(err)
-        }`,
+        `appendStatusLog falló para cita ${appointmentId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
+
+  private async resolveBlocksForDate(
+    cuentaId: string,
+    dateIso: string,
+    diaSemana: DiaSemana,
+  ): Promise<{ horaInicio: string; horaFin: string }[]> {
+    // Buscar overrides específicos para esta fecha
+    const overrides = await this.availabilityRepo.find({
+      where: {
+        cuentaId,
+        tipo: 'specific',
+        fechaEspecifica: dateIso,
+        activo: true,
+      },
+      order: { horaInicio: 'ASC' },
+    });
+
+    // Si existe al menos un registro specific para esta fecha, lo usamos
+    // (aunque sea vacío — lo indicamos con un flag aparte)
+    const hasOverride = await this.dataSource.query<{ exists: boolean }[]>(
+      `SELECT EXISTS(
+         SELECT 1 FROM disponibilidad_cuenta
+         WHERE cuenta_id = $1
+           AND tipo = 'specific'
+           AND fecha_especifica = $2
+       ) AS exists`,
+      [cuentaId, dateIso],
+    );
+
+    if (hasOverride[0]?.exists) {
+      return overrides.map((o) => ({
+        horaInicio: o.horaInicio,
+        horaFin: o.horaFin,
+      }));
+    }
+
+    // Fallback: plantilla weekly
+    const weekly = await this.availabilityRepo.find({
+      where: {
+        cuentaId,
+        tipo: 'weekly',
+        diaSemana,
+        activo: true,
+      },
+      order: { horaInicio: 'ASC' },
+    });
+
+    return weekly.map((w) => ({ horaInicio: w.horaInicio, horaFin: w.horaFin }));
+  }
+
+  private cutoffToMinutes(cutoff: string | null | undefined): number | null {
+    if (!cutoff) return null;
+    const [h, m] = cutoff.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return null;
+    return h * 60 + m;
+  }
+
+  private diaSemanaToIsoDow(d: DiaSemana): number {
+    const map: Record<DiaSemana, number> = {
+      lunes: 1,
+      martes: 2,
+      miercoles: 3,
+      jueves: 4,
+      viernes: 5,
+      sabado: 6,
+    };
+    return map[d];
+  }
+
+  private minutesToHHMM(total: number): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+  }
+
+  private hhmmToMinutes(value: string): number {
+    const [h, m] = value.split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m))
+      throw new BadRequestException('Formato de hora inválido, usa HH:mm');
+    return h * 60 + m;
+  }
+
+  private normalizeAvailabilityItem(
+    item: AvailabilityItemInput,
+  ): NormalizedAvailabilityItem {
+    if (!DIAS_SEMANA_INDEXED.includes(item.diaSemana as DiaSemana))
+      throw new BadRequestException('Día de disponibilidad inválido');
+    const start = this.hhmmToMinutes(item.horaInicio);
+    const end = this.hhmmToMinutes(item.horaFin);
+    if (end <= start)
+      throw new BadRequestException(
+        'La hora de fin debe ser posterior a la hora de inicio',
+      );
+    return {
+      diaSemana: item.diaSemana,
+      horaInicio: this.minutesToHHMM(start),
+      horaFin: this.minutesToHHMM(end),
+    };
+  }
+
+  private recipientsOf(appt: Appointment): string[] {
+    const ids = new Set<string>([appt.createdById, appt.convocadoAId]);
+    if (appt.parentId) ids.add(appt.parentId);
+    return Array.from(ids);
+  }
+
+  private baseAppointmentQuery() {
+    return this.appointmentRepo
+      .createQueryBuilder('a')
+      .addSelect('a.lastPostponedById')
+      .leftJoinAndSelect('a.student', 'student')
+      .leftJoinAndSelect('a.parent', 'parent')
+      .leftJoinAndSelect('a.createdBy', 'createdBy')
+      .leftJoinAndSelect('a.convocadoA', 'convocadoA');
+  }
+
+  private assertScheduledAtIsValid(d: Date): void {
+    const now = new Date();
+    if (d.getTime() < now.getTime() + MIN_LEAD_MINUTES * 60_000)
+      throw new BadRequestException(
+        `La cita debe agendarse con al menos ${MIN_LEAD_MINUTES} minutos de anticipación`,
+      );
+    const max = new Date();
+    max.setMonth(max.getMonth() + MAX_FUTURE_MONTHS);
+    if (d > max)
+      throw new BadRequestException(
+        `No se puede agendar a más de ${MAX_FUTURE_MONTHS} meses`,
+      );
+  }
+
+  private assertCanRead(caller: CallerContext, appt: Appointment): void {
+    if (caller.rol === 'admin') return;
+    if (appt.createdById === caller.id) return;
+    if (appt.convocadoAId === caller.id) return;
+    if (caller.rol === 'alumno' && appt.studentId === caller.id) return;
+    if (caller.rol === 'padre' && appt.parentId === caller.id) return;
+    throw new ForbiddenException('No tienes acceso a esta cita');
+  }
+
+  private assertStateTransition(
+    caller: CallerContext,
+    appt: Appointment,
+    next: Appointment['estado'],
+  ): void {
+    if (appt.estado === 'cancelada')
+      throw new BadRequestException(
+        'Una cita cancelada no puede cambiar de estado',
+      );
+    if (next === 'realizada' || next === 'no_asistio') {
+      if (
+        caller.rol !== 'admin' &&
+        appt.createdById !== caller.id &&
+        appt.convocadoAId !== caller.id
+      )
+        throw new ForbiddenException(
+          'Solo el organizador o el convocado puede registrar la asistencia',
+        );
+    }
+  }
+
+  private toLocalDateStr(d: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  private advanceToAllowedDay(d: Date, rule: AppointmentRoleRule): Date {
+    const result = new Date(d);
+    for (let i = 0; i < 7; i++) {
+      if (isDayAllowed(rule, result)) return result;
+      result.setDate(result.getDate() + 1);
+    }
+    return result;
+  }
+
+  private mapTipoToFichaCategoria(
+    provided: string | undefined,
+    tipo: AppointmentType,
+  ): string {
+    const valid = ['conductual', 'academico', 'familiar', 'emocional', 'otro'];
+    if (provided && valid.includes(provided)) return provided;
+    const map: Record<string, string> = {
+      conductual: 'conductual',
+      academico: 'academico',
+      familiar: 'familiar',
+      psicologico: 'emocional',
+      disciplinario: 'conductual',
+      otro: 'otro',
+    };
+    return map[tipo] ?? 'otro';
+  }
+
+  private fitsInAvailability(
+    appt: Appointment,
+    availability: AccountAvailability[],
+  ): boolean {
+    const dt = new Date(appt.scheduledAt);
+    if (!availability.length) return false;
+    const dia = DIAS_SEMANA_INDEXED[dt.getDay()];
+    if (!dia) return false;
+    const startMin = dt.getHours() * 60 + dt.getMinutes();
+    const endMin = startMin + (appt.durationMin ?? 30);
+    return availability.some((a) => {
+      if (a.diaSemana !== dia) return false;
+      const [hI, mI] = a.horaInicio.split(':').map(Number);
+      const [hF, mF] = a.horaFin.split(':').map(Number);
+      return startMin >= hI * 60 + mI && endMin <= hF * 60 + mF;
+    });
+  }
+
+  private async loadAccountSummary(id: string): Promise<AccountSummary | null> {
+    const row = await this.dataSource.query<
+      { id: string; rol: string; cargo: string | null }[]
+    >(
+      `SELECT c.id, c.rol::text AS rol, a.cargo
+         FROM cuentas c LEFT JOIN admins a ON a.id = c.id
+        WHERE c.id = $1 AND c.activo = TRUE LIMIT 1`,
+      [id],
+    );
+    return row[0] ?? null;
+  }
+
+  private toAppointmentRole(account: AccountSummary): AppointmentRole {
+    return resolveAppointmentRole(account.rol as never, account.cargo);
+  }
+
+  private resolveDuration(
+    rule: ReturnType<typeof getAppointmentRule>,
+    requested: number | undefined,
+  ): number {
+    if (rule.fixedDurationMin !== null) return rule.fixedDurationMin;
+    const value = requested ?? rule.slotMinutes;
+    if (value < rule.slotMinutes)
+      throw new BadRequestException(
+        `La duración mínima para ${rule.label} es ${rule.slotMinutes} min`,
+      );
+    if (value % rule.slotMinutes !== 0)
+      throw new BadRequestException(
+        `La duración debe ser múltiplo de ${rule.slotMinutes} min para ${rule.label}`,
+      );
+    const maxBySlots = rule.maxConsecutiveSlots * rule.slotMinutes;
+    const effectiveMax = Math.min(rule.maxDurationMin, maxBySlots);
+    if (value > effectiveMax)
+      throw new BadRequestException(
+        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${rule.maxConsecutiveSlots === 1 ? '' : 's'} consecutivo${rule.maxConsecutiveSlots === 1 ? '' : 's'} (${effectiveMax} min)`,
+      );
+    return value;
+  }
+
+  private async assertCanInvolveStudent(
+    caller: CallerContext,
+    studentId: string,
+  ): Promise<void> {
+    switch (caller.rol) {
+      case 'admin':
+      case 'psicologa':
+      case 'docente':
+      case 'staff':
+        return;
+      case 'padre': {
+        const linked = await this.dataSource.query<unknown[]>(
+          `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
+          [caller.id, studentId],
+        );
+        if (!linked.length)
+          throw new ForbiddenException(
+            'Ese alumno no está vinculado a tu cuenta',
+          );
+        return;
+      }
+      case 'alumno':
+        if (caller.id !== studentId)
+          throw new ForbiddenException(
+            'Un alumno solo puede agendar citas sobre sí mismo',
+          );
+        return;
+      default:
+        throw new ForbiddenException(
+          `Tu rol (${caller.rol}) no puede crear citas`,
+        );
+    }
+  }
+
+  private async assertParentBelongsToStudent(
+    parentId: string,
+    studentId: string,
+  ): Promise<void> {
+    const linked = await this.dataSource.query<unknown[]>(
+      `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
+      [parentId, studentId],
+    );
+    if (!linked.length)
+      throw new BadRequestException(
+        'Ese padre no corresponde al alumno indicado',
+      );
+  }
+
+  private async findParentsOfStudent(studentId: string): Promise<ProfileRow[]> {
+    return this.dataSource.query<ProfileRow[]>(
+      `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno
+         FROM padres p
+         JOIN padre_alumno pa ON pa.padre_id = p.id
+         JOIN cuentas c       ON c.id = p.id
+        WHERE pa.alumno_id = $1 AND c.activo = TRUE`,
+      [studentId],
+    );
+  }
+
+  private async warnIfPsicologaNotLinked(
+    psicologaId: string,
+    studentId: string,
+  ): Promise<void> {
+    const linked = await this.dataSource.query<unknown[]>(
+      `SELECT 1 FROM psicologa_alumno
+        WHERE psicologa_id = $1 AND alumno_id = $2 AND activo = TRUE LIMIT 1`,
+      [psicologaId, studentId],
+    );
+    if (!linked.length) {
+      Logger.warn(
+        `Psicóloga ${psicologaId} sin vínculo activo con alumno ${studentId} al agendar`,
+        AppointmentsService.name,
+      );
+    }
+  }
+
+  private async assertSlotFitsAvailability(
+    cuentaId: string,
+    start: Date,
+    durationMin: number,
+    ignoreAppointmentId?: string,
+    fallback?: { start: string; end: string },
+    cutoff?: string | null,
+  ): Promise<void> {
+    const end = new Date(start.getTime() + durationMin * 60_000);
+    const dayName = WEEK_DAYS[start.getDay()];
+    if (dayName === 'domingo')
+      throw new BadRequestException('No se atiende los domingos');
+
+    const dateIso = this.toLocalDateStr(start);
+    const diaSemana = dayName as DiaSemana;
+
+    // Usa resolveBlocksForDate: specific tiene prioridad sobre weekly
+    const blocks = await this.resolveBlocksForDate(cuentaId, dateIso, diaSemana);
+
+    const virtualBlocks =
+      blocks.length > 0
+        ? blocks
+        : fallback
+          ? [{ horaInicio: fallback.start, horaFin: fallback.end }]
+          : [];
+
+    if (!virtualBlocks.length)
+      throw new BadRequestException(
+        'El profesional no tiene disponibilidad ese día',
+      );
+
+    const cutoffMin = this.cutoffToMinutes(cutoff);
+
+    const fits = virtualBlocks.some((d) => {
+      const [hS, mS] = d.horaInicio.split(':').map(Number);
+      const [hE, mE] = d.horaFin.split(':').map(Number);
+      const blockEndMin =
+        cutoffMin !== null ? Math.min(hE * 60 + mE, cutoffMin) : hE * 60 + mE;
+      const ds = new Date(start);
+      ds.setHours(hS, mS, 0, 0);
+      const de = new Date(start);
+      de.setHours(Math.floor(blockEndMin / 60), blockEndMin % 60, 0, 0);
+      return start >= ds && end <= de;
+    });
+
+    if (!fits) {
+      const ranges = virtualBlocks
+        .map((d) => `${d.horaInicio} - ${d.horaFin}`)
+        .join(', ');
+      const cutoffNote =
+        cutoffMin !== null ? ` (atención hasta las ${cutoff})` : '';
+      throw new BadRequestException(
+        `Horario fuera de la disponibilidad (${ranges})${cutoffNote}`,
+      );
+    }
+
+    const overlapQB = this.appointmentRepo
+      .createQueryBuilder('a')
+      .where(
+        '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
+        { cuentaId },
+      )
+      .andWhere('a.estado IN (:...states)', {
+        states: ['pendiente', 'confirmada'],
+      })
+      .andWhere(
+        `tstzrange(a.fecha_hora, a.fecha_hora + (a.duracion_min || ' minutes')::interval, '[)')
+         && tstzrange(:start, :end, '[)')`,
+        { start, end },
+      );
+    if (ignoreAppointmentId)
+      overlapQB.andWhere('a.id <> :ignoreId', {
+        ignoreId: ignoreAppointmentId,
+      });
+    if ((await overlapQB.getCount()) > 0)
+      throw new ConflictException('Ese horario ya está ocupado');
+  }
+
+  private async upsertPsychologistAssignment(
+    em: EntityManager,
+    psychologistId: string,
+    studentId: string,
+  ): Promise<void> {
+    await em.query(
+      `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde) VALUES ($1, $2, TRUE, CURRENT_DATE)
+       ON CONFLICT (psicologa_id, alumno_id) DO UPDATE SET activo = TRUE, hasta = NULL`,
+      [psychologistId, studentId],
+    );
+  }
+
+  private async autoFinalizePastAppointments(): Promise<void> {
+    try {
+      await this.appointmentRepo.query(
+        `UPDATE citas
+           SET estado = 'realizada'
+         WHERE estado = 'confirmada'
+           AND (fecha_hora + (duracion_min || ' minutes')::interval) < NOW()`,
+      );
+      await this.appointmentRepo.query(
+        `UPDATE citas
+           SET estado = 'no_asistio',
+               cancelled_at = NOW(),
+               cancel_reason = COALESCE(cancel_reason, 'Cita vencida sin confirmar')
+         WHERE estado = 'pendiente'
+           AND (fecha_hora + (duracion_min || ' minutes')::interval) < NOW()`,
+      );
+    } catch (err) {
+      this.logger?.warn?.(
+        `autoFinalizePastAppointments falló: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  private async enrichWithProfileNames(
+    items: Appointment[],
+  ): Promise<Appointment[]> {
+    if (!items.length) return items;
+    const ids = new Set<string>();
+    for (const a of items) {
+      if (a.convocadoAId) ids.add(a.convocadoAId);
+      if (a.createdById) ids.add(a.createdById);
+    }
+    if (!ids.size) return items;
+
+    const rows = await this.dataSource.query<ProfileRow[]>(
+      `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas WHERE id = ANY($1::uuid[])
+       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM alumnos    WHERE id = ANY($1::uuid[])
+       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM padres     WHERE id = ANY($1::uuid[])
+       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM docentes   WHERE id = ANY($1::uuid[])
+       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM staff      WHERE id = ANY($1::uuid[])
+       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM admins     WHERE id = ANY($1::uuid[])`,
+      [Array.from(ids)],
+    );
+    const byId = new Map(rows.map((r) => [r.id, r]));
+
+    for (const a of items) {
+      const target = a as unknown as Record<string, unknown>;
+      if (a.convocadoAId && a.convocadoA) {
+        const p = byId.get(a.convocadoAId);
+        if (p)
+          Object.assign(a.convocadoA as unknown as Record<string, unknown>, {
+            nombre: p.nombre,
+            apellido_paterno: p.apellido_paterno,
+            apellido_materno: p.apellido_materno,
+          });
+      }
+      if (a.createdById && a.createdBy) {
+        const p = byId.get(a.createdById);
+        target['convocadoPor'] = {
+          id: a.createdBy.id,
+          rol: a.createdBy.rol,
+          nombre: p?.nombre ?? '',
+          apellido_paterno: p?.apellido_paterno ?? '',
+          apellido_materno: p?.apellido_materno ?? null,
+        };
+      } else {
+        target['convocadoPor'] = null;
+      }
+    }
+    return items;
+  }
+
+  private mapTeacherRow(r: {
+    id: string;
+    nombre: string;
+    apellido_paterno: string;
+    apellido_materno: string | null;
+    especialidad: string | null;
+    tutoria_seccion_id: string | null;
+    tutoria_seccion_label: string | null;
+  }) {
+    return {
+      id: r.id,
+      nombre: r.nombre,
+      apellido_paterno: r.apellido_paterno,
+      apellido_materno: r.apellido_materno,
+      especialidad: r.especialidad,
+      tutoria_actual: r.tutoria_seccion_id
+        ? {
+          seccion_id: r.tutoria_seccion_id,
+          seccion_label: r.tutoria_seccion_label ?? '',
+        }
+        : null,
+    };
+  }
+
+  private async resolvePsychologistOf(
+    appt: Appointment,
+  ): Promise<string | null> {
+    for (const id of [appt.createdById, appt.convocadoAId]) {
+      if (!id) continue;
+      const acc = await this.loadAccountSummary(id);
+      if (acc?.rol === 'psicologa') return acc.id;
+    }
+    return null;
+  }
+
+  private assertPsicologaParticipant(
+    caller: CallerContext,
+    appt: Appointment,
+  ): void {
+    if (caller.rol !== 'admin' && caller.rol !== 'psicologa')
+      throw new ForbiddenException(
+        'Solo la psicóloga (o admin) puede cerrar la sesión',
+      );
+    if (
+      caller.rol === 'psicologa' &&
+      appt.convocadoAId !== caller.id &&
+      appt.createdById !== caller.id
+    )
+      throw new ForbiddenException(
+        'Solo la psicóloga participante puede cerrar esta cita',
+      );
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // ESTADO LOG
+  // ════════════════════════════════════════════════════════════
 
   async getStatusLog(caller: CallerContext, appointmentId: string) {
     const appt = await this.appointmentRepo.findOne({
@@ -274,10 +817,7 @@ export class AppointmentsService {
       nextStatus: r.next_status,
       changedById: r.changed_by_id,
       changedByName: r.changed_by_nombre
-        ? `${r.changed_by_nombre}${r.changed_by_apellido_paterno
-          ? ' ' + r.changed_by_apellido_paterno
-          : ''
-          }`.trim()
+        ? `${r.changed_by_nombre}${r.changed_by_apellido_paterno ? ' ' + r.changed_by_apellido_paterno : ''}`.trim()
         : null,
       changedByRole: r.changed_by_rol,
       reason: r.razon,
@@ -285,7 +825,9 @@ export class AppointmentsService {
     }));
   }
 
-  private readonly logger = new Logger(AppointmentsService.name);
+  // ════════════════════════════════════════════════════════════
+  // CITAS — CRUD
+  // ════════════════════════════════════════════════════════════
 
   async createAppointment(
     caller: CallerContext,
@@ -325,6 +867,7 @@ export class AppointmentsService {
       if (conflict)
         throw new ConflictException('Ya tienes una cita en ese horario con otro profesional.');
     }
+
     if (!canInvite(caller.rol as CallerRol, convocadoA.rol as CallerRol)) {
       const permitidos = allowedRecipientsFor(caller.rol as CallerRol);
       const detalle = permitidos.length
@@ -355,14 +898,14 @@ export class AppointmentsService {
       else if (padres.length > 1) availableParents = padres;
     }
 
-    if (dto.studentId)
-      await this.assertCanInvolveStudent(caller, dto.studentId);
+    if (dto.studentId) await this.assertCanInvolveStudent(caller, dto.studentId);
     if (dto.parentId && dto.studentId)
       await this.assertParentBelongsToStudent(dto.parentId, dto.studentId);
     if (convocadoA.rol === 'psicologa' && dto.studentId)
       await this.warnIfPsicologaNotLinked(convocadoA.id, dto.studentId);
     if (caller.rol === 'psicologa' && dto.studentId)
       await this.warnIfPsicologaNotLinked(caller.id, dto.studentId);
+
     const callerHasSchedule = callerOwnsSchedule(caller.rol as CallerRol);
     const ruleAccount: AccountSummary = callerHasSchedule
       ? { id: caller.id, rol: caller.rol, cargo: null }
@@ -441,22 +984,11 @@ export class AppointmentsService {
         priorNotes: dto.priorNotes ?? null,
       });
       const saved = await em.save(appointment);
-      await this.appendStatusLog(
-        saved.id,
-        null,
-        saved.estado,
-        caller.id,
-        null,
-        em,
-      );
+      await this.appendStatusLog(saved.id, null, saved.estado, caller.id, null, em);
 
       if (dto.studentId) {
         if (convocadoA.rol === 'psicologa')
-          await this.upsertPsychologistAssignment(
-            em,
-            convocadoA.id,
-            dto.studentId,
-          );
+          await this.upsertPsychologistAssignment(em, convocadoA.id, dto.studentId);
         if (caller.rol === 'psicologa')
           await this.upsertPsychologistAssignment(em, caller.id, dto.studentId);
       }
@@ -473,36 +1005,10 @@ export class AppointmentsService {
       } satisfies AppointmentCreatedEvent);
 
       if (availableParents) {
-        (
-          saved as Appointment & { availableParents?: ProfileRow[] }
-        ).availableParents = availableParents;
+        (saved as Appointment & { availableParents?: ProfileRow[] }).availableParents = availableParents;
       }
       return saved;
     });
-  }
-
-  private async autoFinalizePastAppointments(): Promise<void> {
-    try {
-      await this.appointmentRepo.query(
-        `UPDATE citas
-           SET estado = 'realizada'
-         WHERE estado = 'confirmada'
-           AND (fecha_hora + (duracion_min || ' minutes')::interval) < NOW()`,
-      );
-      await this.appointmentRepo.query(
-        `UPDATE citas
-           SET estado = 'no_asistio',
-               cancelled_at = NOW(),
-               cancel_reason = COALESCE(cancel_reason, 'Cita vencida sin confirmar')
-         WHERE estado = 'pendiente'
-           AND (fecha_hora + (duracion_min || ' minutes')::interval) < NOW()`,
-      );
-    } catch (err) {
-      this.logger?.warn?.(
-        `autoFinalizePastAppointments falló: ${err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
   }
 
   async listMine(caller: CallerContext, q: ListAppointmentsQueryDto) {
@@ -546,13 +1052,7 @@ export class AppointmentsService {
 
     const ids = idRows.map((r) => r.id);
     if (!ids.length)
-      return {
-        data: [],
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      };
+      return { data: [], total, page, limit, totalPages: Math.ceil(total / limit) };
 
     const items = await this.baseAppointmentQuery()
       .where('a.id IN (:...ids)', { ids })
@@ -604,13 +1104,7 @@ export class AppointmentsService {
 
     const ids = idRows.map((r) => r.id);
     if (!ids.length)
-      return {
-        data: [],
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      };
+      return { data: [], total, page, limit, totalPages: Math.ceil(total / limit) };
 
     const items = await this.baseAppointmentQuery()
       .where('a.id IN (:...ids)', { ids })
@@ -754,13 +1248,7 @@ export class AppointmentsService {
       reason: motivo,
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentCancelledEvent);
-    await this.appendStatusLog(
-      saved.id,
-      previousStatus,
-      'cancelada',
-      caller.id,
-      motivo,
-    );
+    await this.appendStatusLog(saved.id, previousStatus, 'cancelada', caller.id, motivo);
     return saved;
   }
 
@@ -816,13 +1304,7 @@ export class AppointmentsService {
       nextStatus: 'confirmada',
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentStatusChangedEvent);
-    await this.appendStatusLog(
-      saved.id,
-      'pendiente',
-      'confirmada',
-      caller.id,
-      null,
-    );
+    await this.appendStatusLog(saved.id, 'pendiente', 'confirmada', caller.id, null);
     return saved;
   }
 
@@ -858,13 +1340,7 @@ export class AppointmentsService {
       reason: motivo.trim(),
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentCancelledEvent);
-    await this.appendStatusLog(
-      saved.id,
-      'pendiente',
-      'rechazada',
-      caller.id,
-      motivo.trim(),
-    );
+    await this.appendStatusLog(saved.id, 'pendiente', 'rechazada', caller.id, motivo.trim());
     return saved;
   }
 
@@ -924,17 +1400,16 @@ export class AppointmentsService {
     const previousStatus = appt.estado;
 
     const convocadoAccount = await this.loadAccountSummary(appt.convocadoAId);
-    const callerEsPadre = caller.rol === 'padre';
-    const callerEsPsicologa = caller.rol === 'psicologa';
-    const convocadoEsAlumno = convocadoAccount?.rol === 'alumno';
-    const convocadoEsPadre = convocadoAccount?.rol === 'padre';
-    const hayAlumnoVinculado = !!appt.studentId && convocadoAccount?.rol !== 'padre';
+    const otherPartyRol = caller.id === appt.createdById
+      ? convocadoAccount?.rol
+      : convocadorAccount?.rol;
 
     const nuevoEstado: AppointmentStatus =
-      callerEsPsicologa && (convocadoEsAlumno || hayAlumnoVinculado) ? 'confirmada' :
-        callerEsPadre ? 'confirmada' :
-          (caller.rol === 'docente' || caller.rol === 'admin') && convocadoEsPadre ? 'pendiente' :
-            'pendiente';
+      caller.rol === 'padre'
+        ? 'confirmada'
+        : caller.rol === 'psicologa' && otherPartyRol === 'alumno'
+          ? 'confirmada'
+          : 'pendiente';
 
     appt.scheduledAt = nuevaFecha;
     appt.estado = nuevoEstado;
@@ -1003,13 +1478,7 @@ export class AppointmentsService {
       nextStatus: 'realizada',
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentStatusChangedEvent);
-    await this.appendStatusLog(
-      saved.id,
-      previousStatus,
-      'realizada',
-      caller.id,
-      null,
-    );
+    await this.appendStatusLog(saved.id, previousStatus, 'realizada', caller.id, null);
     return saved;
   }
 
@@ -1047,13 +1516,7 @@ export class AppointmentsService {
       nextStatus: 'no_asistio',
       notifyAccountIds: this.recipientsOf(saved),
     } satisfies AppointmentStatusChangedEvent);
-    await this.appendStatusLog(
-      saved.id,
-      previousStatus,
-      'no_asistio',
-      caller.id,
-      null,
-    );
+    await this.appendStatusLog(saved.id, previousStatus, 'no_asistio', caller.id, null);
 
     if (saved.studentId) {
       const padres = await this.findParentsOfStudent(saved.studentId);
@@ -1113,20 +1576,13 @@ export class AppointmentsService {
     );
 
     const docenteRows = await this.dataSource.query<
-      {
-        nombre: string;
-        apellido_paterno: string;
-        apellido_materno: string | null;
-      }[]
+      { nombre: string; apellido_paterno: string; apellido_materno: string | null }[]
     >(
       `SELECT nombre, apellido_paterno, apellido_materno FROM docentes WHERE id = $1`,
       [caller.id],
     );
     const docenteNombre = docenteRows[0]
-      ? `${docenteRows[0].nombre} ${docenteRows[0].apellido_paterno}${docenteRows[0].apellido_materno
-        ? ' ' + docenteRows[0].apellido_materno
-        : ''
-        }`.trim()
+      ? `${docenteRows[0].nombre} ${docenteRows[0].apellido_paterno}${docenteRows[0].apellido_materno ? ' ' + docenteRows[0].apellido_materno : ''}`.trim()
       : 'Docente';
 
     return this.dataSource.transaction('SERIALIZABLE', async (em) => {
@@ -1151,6 +1607,7 @@ export class AppointmentsService {
         throw new ConflictException(
           'Ese horario ya está ocupado para la psicóloga',
         );
+
       const appointment = em.create(Appointment, {
         createdById: caller.id,
         convocadoAId: psicologaSummary.id,
@@ -1175,11 +1632,7 @@ export class AppointmentsService {
         em,
       );
 
-      await this.upsertPsychologistAssignment(
-        em,
-        psicologaSummary.id,
-        dto.alumnoId,
-      );
+      await this.upsertPsychologistAssignment(em, psicologaSummary.id, dto.alumnoId);
 
       this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CREATED, {
         appointmentId: saved.id,
@@ -1196,48 +1649,9 @@ export class AppointmentsService {
     });
   }
 
-  private async resolvePsychologistOf(
-    appt: Appointment,
-  ): Promise<string | null> {
-    for (const id of [appt.createdById, appt.convocadoAId]) {
-      if (!id) continue;
-      const acc = await this.loadAccountSummary(id);
-      if (acc?.rol === 'psicologa') return acc.id;
-    }
-    return null;
-  }
-
-  private assertPsicologaParticipant(
-    caller: CallerContext,
-    appt: Appointment,
-  ): void {
-    if (caller.rol !== 'admin' && caller.rol !== 'psicologa')
-      throw new ForbiddenException(
-        'Solo la psicóloga (o admin) puede cerrar la sesión',
-      );
-    if (
-      caller.rol === 'psicologa' &&
-      appt.convocadoAId !== caller.id &&
-      appt.createdById !== caller.id
-    )
-      throw new ForbiddenException(
-        'Solo la psicóloga participante puede cerrar esta cita',
-      );
-  }
-
-  private toLocalDateStr(d: Date): string {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  }
-
-  private advanceToAllowedDay(d: Date, rule: AppointmentRoleRule): Date {
-    const result = new Date(d);
-    for (let i = 0; i < 7; i++) {
-      if (isDayAllowed(rule, result)) return result;
-      result.setDate(result.getDate() + 1);
-    }
-    return result;
-  }
+  // ════════════════════════════════════════════════════════════
+  // SEGUIMIENTO / CIERRE CLÍNICO
+  // ════════════════════════════════════════════════════════════
 
   async getFollowUpSuggestion(caller: CallerContext, appointmentId: string) {
     const appt = await this.appointmentRepo.findOne({
@@ -1264,7 +1678,6 @@ export class AppointmentsService {
     const suggestedDate = this.toLocalDateStr(suggested);
 
     const slots = await this.getFreeSlots(psychologistId, suggestedDate);
-
     const parents = appt.studentId
       ? await this.findParentsOfStudent(appt.studentId)
       : [];
@@ -1372,9 +1785,7 @@ export class AppointmentsService {
     }
 
     return this.dataSource.transaction('SERIALIZABLE', async (em) => {
-      const current = await em.findOne(Appointment, {
-        where: { id: appointmentId },
-      });
+      const current = await em.findOne(Appointment, { where: { id: appointmentId } });
       if (!current) throw new NotFoundException('Cita no encontrada');
       const previousStatus = current.estado;
       current.estado = 'realizada';
@@ -1422,16 +1833,12 @@ export class AppointmentsService {
              && tstzrange(:start, :end, '[)')`,
             {
               start: plan.scheduledAt,
-              end: new Date(
-                plan.scheduledAt.getTime() + plan.durationMin * 60_000,
-              ),
+              end: new Date(plan.scheduledAt.getTime() + plan.durationMin * 60_000),
             },
           )
           .getOne();
         if (conflict)
-          throw new ConflictException(
-            'El horario de seguimiento ya está ocupado',
-          );
+          throw new ConflictException('El horario de seguimiento ya está ocupado');
 
         const nueva = em.create(Appointment, {
           createdById: psychologistId,
@@ -1456,11 +1863,7 @@ export class AppointmentsService {
           'Cita de seguimiento (cierre clínico)',
           em,
         );
-        await this.upsertPsychologistAssignment(
-          em,
-          psychologistId,
-          closed.studentId,
-        );
+        await this.upsertPsychologistAssignment(em, psychologistId, closed.studentId);
 
         this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CREATED, {
           appointmentId: followUp.id,
@@ -1486,22 +1889,9 @@ export class AppointmentsService {
     });
   }
 
-  private mapTipoToFichaCategoria(
-    provided: string | undefined,
-    tipo: AppointmentType,
-  ): string {
-    const valid = ['conductual', 'academico', 'familiar', 'emocional', 'otro'];
-    if (provided && valid.includes(provided)) return provided;
-    const map: Record<string, string> = {
-      conductual: 'conductual',
-      academico: 'academico',
-      familiar: 'familiar',
-      psicologico: 'emocional',
-      disciplinario: 'conductual',
-      otro: 'otro',
-    };
-    return map[tipo] ?? 'otro';
-  }
+  // ════════════════════════════════════════════════════════════
+  // DISPONIBILIDAD — WEEKLY (horario base)
+  // ════════════════════════════════════════════════════════════
 
   async getAvailability(cuentaId: string): Promise<AccountAvailability[]> {
     return this.availabilityRepo.find({
@@ -1510,17 +1900,282 @@ export class AppointmentsService {
     });
   }
 
+  /**
+   * Reemplaza atómicamente el horario base `weekly` de la cuenta.
+   * NO cancela citas — las citas existentes se gestionan a través de
+   * overrides `specific` cuando el usuario bloquea un día puntual.
+   */
+  async replaceAvailability(
+    cuentaId: string,
+    items: AvailabilityItemInput[],
+  ): Promise<{ saved: AccountAvailability[] }> {
+    const normalized = (items ?? []).map((it) =>
+      this.normalizeAvailabilityItem(it),
+    );
+
+    return this.dataSource.transaction(async (em) => {
+      await em.query(
+        `DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1 AND tipo = 'weekly'`,
+        [cuentaId],
+      );
+
+      let saved: AccountAvailability[] = [];
+      if (normalized.length > 0) {
+        saved = await em.save(
+          normalized.map((it) =>
+            em.create(AccountAvailability, {
+              cuentaId,
+              diaSemana: it.diaSemana as DiaSemana,
+              horaInicio: it.horaInicio,
+              horaFin: it.horaFin,
+              activo: true,
+              tipo: 'weekly',
+              fechaEspecifica: null,
+            }),
+          ),
+        );
+      }
+
+      return { saved };
+    });
+  }
+
+  async getOverridesForWeek(
+    cuentaId: string,
+    weekStart?: string,
+  ): Promise<{ date: string; slots: { id: string; horaInicio: string; horaFin: string }[] }[]> {
+    const ref = weekStart ? parseLocalDate(weekStart) : new Date();
+    if (isNaN(ref.getTime()))
+      throw new BadRequestException('weekStart inválido, usa YYYY-MM-DD');
+
+    const dow = ref.getDay();
+    const monday = new Date(ref);
+    monday.setDate(ref.getDate() - (dow === 0 ? 6 : dow - 1));
+    monday.setHours(0, 0, 0, 0);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const toIso = (d: Date) =>
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const mondayIso = toIso(monday);
+    const sundayIso = toIso(sunday);
+
+    const rows = await this.dataSource.query<
+      { id: string; fecha_especifica: string; hora_inicio: string; hora_fin: string }[]
+    >(
+      `SELECT id, fecha_especifica::text, hora_inicio::text, hora_fin::text
+         FROM disponibilidad_cuenta
+        WHERE cuenta_id = $1
+          AND tipo = 'specific'
+          AND activo = TRUE
+          AND fecha_especifica BETWEEN $2 AND $3
+        ORDER BY fecha_especifica, hora_inicio`,
+      [cuentaId, mondayIso, sundayIso],
+    );
+
+    // Agrupar por fecha
+    const byDate = new Map<string, { id: string; horaInicio: string; horaFin: string }[]>();
+    for (const r of rows) {
+      const date = r.fecha_especifica;
+      if (!byDate.has(date)) byDate.set(date, []);
+      byDate.get(date)!.push({
+        id: r.id,
+        horaInicio: r.hora_inicio,
+        horaFin: r.hora_fin,
+      });
+    }
+
+    // Incluir también fechas que tienen override vacío (bloqueado todo el día)
+    // consultando qué fechas de la semana tienen registro aunque sea vacío
+    const blockedDays = await this.dataSource.query<{ fecha_especifica: string }[]>(
+      `SELECT DISTINCT fecha_especifica::text
+         FROM disponibilidad_cuenta
+        WHERE cuenta_id = $1
+          AND tipo = 'specific'
+          AND fecha_especifica BETWEEN $2 AND $3`,
+      [cuentaId, mondayIso, sundayIso],
+    );
+
+    for (const { fecha_especifica } of blockedDays) {
+      if (!byDate.has(fecha_especifica)) {
+        byDate.set(fecha_especifica, []);
+      }
+    }
+
+    return Array.from(byDate.entries()).map(([date, slots]) => ({ date, slots }));
+  }
+
+  async replaceOverridesForDate(
+    caller: CallerContext,
+    cuentaId: string,
+    dateIso: string,
+    slots: { horaInicio: string; horaFin: string }[],
+  ): Promise<{
+    saved: AccountAvailability[];
+    cancelledAppointments: AffectedAppointmentSummary[];
+  }> {
+    if (caller.rol !== 'admin' && caller.id !== cuentaId)
+      throw new ForbiddenException(
+        'No puedes modificar la disponibilidad de otra persona',
+      );
+
+    const ref = parseLocalDate(dateIso);
+    if (isNaN(ref.getTime()))
+      throw new BadRequestException('Fecha inválida, usa YYYY-MM-DD');
+
+    const dayIdx = ref.getDay();
+    if (dayIdx === 0)
+      throw new BadRequestException('No se puede configurar disponibilidad para domingos');
+
+    const diaSemana = DIAS_SEMANA_INDEXED[dayIdx] as DiaSemana;
+
+    const normalized = slots.map((s) => {
+      const start = this.hhmmToMinutes(s.horaInicio);
+      const end = this.hhmmToMinutes(s.horaFin);
+      if (end <= start)
+        throw new BadRequestException(
+          'La hora de fin debe ser posterior a la hora de inicio',
+        );
+      return {
+        horaInicio: this.minutesToHHMM(start),
+        horaFin: this.minutesToHHMM(end),
+      };
+    });
+
+    return this.dataSource.transaction(async (em) => {
+      await em.query(
+        `DELETE FROM disponibilidad_cuenta
+          WHERE cuenta_id = $1 AND tipo = 'specific' AND fecha_especifica = $2`,
+        [cuentaId, dateIso],
+      );
+
+      let saved: AccountAvailability[] = [];
+      if (normalized.length > 0) {
+        const entities = normalized.map((it) =>
+          em.create(AccountAvailability, {
+            cuentaId,
+            diaSemana,
+            horaInicio: it.horaInicio,
+            horaFin: it.horaFin,
+            activo: true,
+            tipo: 'specific' as const,
+            fechaEspecifica: dateIso,
+          }),
+        );
+        saved = await em.save(AccountAvailability, entities);
+      } else {
+        await em.query(
+          `INSERT INTO disponibilidad_cuenta
+             (cuenta_id, dia_semana, hora_inicio, hora_fin, activo, tipo, fecha_especifica)
+           VALUES ($1, $2, '00:00', '00:00', FALSE, 'specific', $3)`,
+          [cuentaId, diaSemana, dateIso],
+        );
+      }
+
+      const affectedAppts = await em
+        .createQueryBuilder(Appointment, 'a')
+        .leftJoinAndSelect('a.student', 'student')
+        .where('(a.convocado_a_id = :cid OR a.convocado_por_id = :cid)', { cid: cuentaId })
+        .andWhere('a.estado IN (:...states)', { states: ['pendiente', 'confirmada'] })
+        .andWhere("a.scheduledAt AT TIME ZONE 'America/Lima' >= :inicioDia::timestamp", { inicioDia: `${dateIso} 00:00:00` })
+        .andWhere("a.scheduledAt AT TIME ZONE 'America/Lima' <= :finDia::timestamp", { finDia: `${dateIso} 23:59:59` })
+        .getMany();
+
+      const cancelled: AffectedAppointmentSummary[] = [];
+
+      for (const appt of affectedAppts) {
+        const dateInLima = new Date(
+          new Date(appt.scheduledAt).toLocaleString('en-US', { timeZone: 'America/Lima' })
+        );
+
+        const apptStartMin = dateInLima.getHours() * 60 + dateInLima.getMinutes();
+        const apptEndMin = apptStartMin + appt.durationMin;
+
+        const fits = normalized.some((slot) => {
+          const slotStart = this.hhmmToMinutes(slot.horaInicio);
+          const slotEnd = this.hhmmToMinutes(slot.horaFin);
+          return apptStartMin >= slotStart && apptEndMin <= slotEnd;
+        });
+
+        if (!fits) {
+          const previousStatus = appt.estado;
+          appt.estado = 'cancelada';
+          appt.cancelledAt = new Date();
+          appt.cancelledById = caller.id;
+          appt.cancelReason =
+            'Cancelada por cambio de disponibilidad del profesional para este día';
+          await em.save(Appointment, appt);
+
+          this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CANCELLED, {
+            appointmentId: appt.id,
+            actorId: caller.id,
+            reason: appt.cancelReason,
+            notifyAccountIds: this.recipientsOf(appt),
+          } satisfies AppointmentCancelledEvent);
+
+          await this.appendStatusLog(
+            appt.id,
+            previousStatus,
+            'cancelada',
+            caller.id,
+            appt.cancelReason,
+            em,
+          );
+
+          cancelled.push({
+            id: appt.id,
+            scheduledAt: appt.scheduledAt,
+            durationMin: appt.durationMin,
+            estado: 'cancelada',
+            motivo: appt.motivo,
+            studentName: appt.student
+              ? `${appt.student.nombre ?? ''} ${appt.student.apellido_paterno ?? ''}`.trim()
+              : null,
+          });
+        }
+      }
+
+      return { saved, cancelledAppointments: cancelled };
+    });
+  }
+
+  /**
+   * Elimina todos los overrides `specific` de una fecha concreta,
+   * volviendo al horario base `weekly`.
+   */
+  async deleteOverrideForDate(
+    caller: CallerContext,
+    cuentaId: string,
+    dateIso: string,
+  ): Promise<{ deleted: true }> {
+    if (caller.rol !== 'admin' && caller.id !== cuentaId)
+      throw new ForbiddenException(
+        'No puedes modificar la disponibilidad de otra persona',
+      );
+
+    await this.dataSource.query(
+      `DELETE FROM disponibilidad_cuenta
+        WHERE cuenta_id = $1 AND tipo = 'specific' AND fecha_especifica = $2`,
+      [cuentaId, dateIso],
+    );
+
+    return { deleted: true };
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // SLOTS
+  // ════════════════════════════════════════════════════════════
+
   async getSlotsTaken(cuentaId: string, date: string) {
     if (!date)
-      throw new BadRequestException(
-        'El parámetro date es requerido (YYYY-MM-DD)',
-      );
+      throw new BadRequestException('El parámetro date es requerido (YYYY-MM-DD)');
 
     const ref = parseLocalDate(date);
     if (isNaN(ref.getTime()))
-      throw new BadRequestException(
-        'Formato de fecha inválido, usa YYYY-MM-DD',
-      );
+      throw new BadRequestException('Formato de fecha inválido, usa YYYY-MM-DD');
 
     const day = ref.getDay();
     const diffToMonday = day === 0 ? -6 : 1 - day;
@@ -1540,9 +2195,7 @@ export class AppointmentsService {
         '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
         { cuentaId },
       )
-      .andWhere('a.estado IN (:...states)', {
-        states: ['pendiente', 'confirmada'],
-      })
+      .andWhere('a.estado IN (:...states)', { states: ['pendiente', 'confirmada'] })
       .andWhere('a.fecha_hora >= :monday', { monday })
       .andWhere('a.fecha_hora <= :sunday', { sunday })
       .getMany();
@@ -1557,20 +2210,18 @@ export class AppointmentsService {
 
   async getFreeSlots(cuentaId: string, date: string, slotMinutes?: number) {
     if (!date)
-      throw new BadRequestException(
-        'El parámetro date es requerido (YYYY-MM-DD)',
-      );
+      throw new BadRequestException('El parámetro date es requerido (YYYY-MM-DD)');
 
     const ref = parseLocalDate(date);
     if (isNaN(ref.getTime()))
-      throw new BadRequestException(
-        'Formato de fecha inválido, usa YYYY-MM-DD',
-      );
+      throw new BadRequestException('Formato de fecha inválido, usa YYYY-MM-DD');
 
     const dayIdx = ref.getDay();
     if (dayIdx === 0) return [];
 
     const dayName = WEEK_DAYS[dayIdx] as DiaSemana;
+    const dateIso = this.toLocalDateStr(ref);
+
     const account = await this.loadAccountSummary(cuentaId);
     if (!account) throw new NotFoundException('Cuenta no encontrada');
 
@@ -1580,24 +2231,18 @@ export class AppointmentsService {
     const rule = role ? getAppointmentRule(role) : null;
     const effectiveSlot = slotMinutes ?? rule?.slotMinutes ?? 30;
 
-    const bloques = await this.availabilityRepo.find({
-      where: {
-        cuentaId,
-        diaSemana: dayName,
-        activo: true,
-        tipo: 'weekly',
-      },
-      order: { horaInicio: 'ASC' },
-    });
+    // Usa resolveBlocksForDate: specific tiene prioridad sobre weekly
+    const blocks = await this.resolveBlocksForDate(cuentaId, dateIso, dayName);
 
     let ranges: { s: number; e: number }[];
-    if (bloques.length > 0) {
-      ranges = bloques.map((b) => {
+    if (blocks.length > 0) {
+      ranges = blocks.map((b) => {
         const [hS, mS] = b.horaInicio.split(':').map(Number);
         const [hE, mE] = b.horaFin.split(':').map(Number);
         return { s: hS * 60 + mS, e: hE * 60 + mE };
       });
     } else if (rule) {
+      // Sin bloques y sin override → usar defaultHours del rol
       const [hS, mS] = rule.defaultHours.start.split(':').map(Number);
       const [hE, mE] = rule.defaultHours.end.split(':').map(Number);
       ranges = [{ s: hS * 60 + mS, e: hE * 60 + mE }];
@@ -1628,9 +2273,7 @@ export class AppointmentsService {
         '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
         { cuentaId },
       )
-      .andWhere('a.estado IN (:...states)', {
-        states: ['pendiente', 'confirmada'],
-      })
+      .andWhere('a.estado IN (:...states)', { states: ['pendiente', 'confirmada'] })
       .andWhere('a.fecha_hora >= :dayStart', { dayStart })
       .andWhere('a.fecha_hora <= :dayEnd', { dayEnd })
       .getMany();
@@ -1640,6 +2283,7 @@ export class AppointmentsService {
       const s = d.getHours() * 60 + d.getMinutes();
       return { s, e: s + (c.durationMin ?? 30) };
     });
+
     const now = new Date();
     const isToday = ref.toDateString() === now.toDateString();
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
@@ -1680,6 +2324,8 @@ export class AppointmentsService {
     fixedDurationMin: number | null;
     maxConsecutiveSlots: number;
     attentionEnd: string | null;
+    hasOverride: boolean;
+    isBlocked: boolean;
     blocks: Array<{
       start: string;
       end: string;
@@ -1695,18 +2341,12 @@ export class AppointmentsService {
     }>;
   }> {
     if (!date)
-      throw new BadRequestException(
-        'El parámetro date es requerido (YYYY-MM-DD)',
-      );
+      throw new BadRequestException('El parámetro date es requerido (YYYY-MM-DD)');
     const ref = parseLocalDate(date);
     if (isNaN(ref.getTime()))
-      throw new BadRequestException(
-        'Formato de fecha inválido, usa YYYY-MM-DD',
-      );
-
+      throw new BadRequestException('Formato de fecha inválido, usa YYYY-MM-DD');
     const account = await this.loadAccountSummary(cuentaId);
     if (!account) throw new NotFoundException('Cuenta no encontrada');
-
     const role = hasAvailability(account.rol)
       ? this.toAppointmentRole(account)
       : null;
@@ -1715,6 +2355,7 @@ export class AppointmentsService {
 
     const dayIdx = ref.getDay();
     const diaSemana = DIAS_SEMANA_INDEXED[dayIdx];
+    const dateIso = this.toLocalDateStr(ref);
 
     const empty = {
       cuentaId,
@@ -1726,36 +2367,43 @@ export class AppointmentsService {
       fixedDurationMin: rule?.fixedDurationMin ?? null,
       maxConsecutiveSlots: rule?.maxConsecutiveSlots ?? 1,
       attentionEnd: rule?.attentionEnd ?? null,
+      hasOverride: false,
+      isBlocked: false, // <-- Por defecto inicializa en false
       blocks: [],
     };
     if (!diaSemana) return empty;
 
-    const bloques = await this.availabilityRepo.find({
-      where: {
-        cuentaId,
-        diaSemana,
-        activo: true,
-        tipo: 'weekly',
-      },
-      order: { horaInicio: 'ASC' },
-    });
+    const overrideCheck = await this.dataSource.query<{ exists: boolean }[]>(
+      `SELECT EXISTS(
+         SELECT 1 FROM disponibilidad_cuenta
+         WHERE cuenta_id = $1 AND tipo = 'specific' AND fecha_especifica = $2
+       ) AS exists`,
+      [cuentaId, dateIso],
+    );
+    const hasOverride = overrideCheck[0]?.exists ?? false;
+
+    const blocks = await this.resolveBlocksForDate(cuentaId, dateIso, diaSemana);
+
+    // DETECCIÓN DEL BLOQUEO: Si tiene un override pero el arreglo viene vacío o con marcador 00:00
+    // Significa que el profesional bloqueó explícitamente el día completo.
+    const isDayExplicitlyBlocked = hasOverride && (blocks.length === 0 || (blocks.length === 1 && blocks[0].horaInicio === '00:00' && blocks[0].horaFin === '00:00'));
+
+    if (isDayExplicitlyBlocked) {
+      return { ...empty, hasOverride: true, isBlocked: true };
+    }
 
     const toMin = (hhmm: string) => {
       const [h, m] = hhmm.split(':').map(Number);
       return h * 60 + m;
     };
+
     let ranges: { s: number; e: number }[];
-    if (bloques.length > 0) {
-      ranges = bloques.map((b) => ({
-        s: toMin(b.horaInicio),
-        e: toMin(b.horaFin),
-      }));
-    } else if (rule) {
-      ranges = [
-        { s: toMin(rule.defaultHours.start), e: toMin(rule.defaultHours.end) },
-      ];
+    if (blocks.length > 0) {
+      ranges = blocks.map((b) => ({ s: toMin(b.horaInicio), e: toMin(b.horaFin) }));
+    } else if (rule && !hasOverride) {
+      ranges = [{ s: toMin(rule.defaultHours.start), e: toMin(rule.defaultHours.end) }];
     } else {
-      return empty;
+      return { ...empty, hasOverride, isBlocked: false };
     }
 
     const cutoffMin = this.cutoffToMinutes(rule?.attentionEnd);
@@ -1764,12 +2412,10 @@ export class AppointmentsService {
     ranges = ranges
       .filter((r) => r.e - r.s >= slotMinutes)
       .sort((a, b) => a.s - b.s);
-
     const dayStart = new Date(ref);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(ref);
     dayEnd.setHours(23, 59, 59, 999);
-
     type OccRow = {
       id: string;
       fecha_hora: Date;
@@ -1793,14 +2439,12 @@ export class AppointmentsService {
       const s = d.getHours() * 60 + d.getMinutes();
       return { s, e: s + (c.duracion_min ?? slotMinutes), row: c };
     });
-
     const now = new Date();
     const isToday = ref.toDateString() === now.toDateString();
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
     const pad = (n: number) => String(n).padStart(2, '0');
     const toHHMM = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
-
-    const blocks = ranges.map((block) => {
+    const resultBlocks = ranges.map((block) => {
       const subSlots: {
         start: string;
         end: string;
@@ -1838,87 +2482,50 @@ export class AppointmentsService {
       };
     });
 
-    return { ...empty, blocks };
+    return { ...empty, hasOverride, isBlocked: false, blocks: resultBlocks };
   }
 
-  async replaceAvailability(
-    cuentaId: string,
-    items: AvailabilityItemInput[],
-  ): Promise<{ saved: AccountAvailability[]; cancelledCount: number }> {
-    const normalized = (items ?? []).map((it) =>
-      this.normalizeAvailabilityItem(it),
-    );
+  async getPublicWeeklyAvailability(cuentaId: string, weekStart?: string) {
+    const ref = weekStart ? parseLocalDate(weekStart) : new Date();
+    if (isNaN(ref.getTime()))
+      throw new BadRequestException(
+        'weekStart inválido, usa YYYY-MM-DD o DD/MM/YYYY',
+      );
 
-    return this.dataSource.transaction(async (em) => {
-      await em.query(`DELETE FROM disponibilidad_cuenta WHERE cuenta_id = $1`, [
-        cuentaId,
-      ]);
+    const day = ref.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(ref);
+    monday.setDate(ref.getDate() + diffToMonday);
+    monday.setHours(0, 0, 0, 0);
 
-      let saved: AccountAvailability[] = [];
-      if (normalized.length > 0) {
-        saved = await em.save(
-          normalized.map((it) =>
-            em.create(AccountAvailability, {
-              cuentaId,
-              diaSemana: it.diaSemana as DiaSemana,
-              horaInicio: it.horaInicio,
-              horaFin: it.horaFin,
-              activo: true,
-              tipo: 'weekly',
-              fechaEspecifica: null,
-            }),
-          ),
-        );
-      }
+    const account = await this.loadAccountSummary(cuentaId);
+    if (!account) throw new NotFoundException('Cuenta no encontrada');
 
-      const futureAppts = await em
-        .getRepository(Appointment)
-        .createQueryBuilder('a')
-        .where(
-          '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
-          { cuentaId },
-        )
-        .andWhere('a.fecha_hora > NOW()')
-        .andWhere('a.estado IN (:...states)', {
-          states: ['pendiente', 'confirmada'],
-        })
-        .getMany();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const toDateStr = (d: Date) =>
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
-      const cancelled: { appt: Appointment; previous: AppointmentStatus }[] =
-        [];
-      for (const appt of futureAppts) {
-        if (this.fitsInAvailability(appt, saved)) continue;
-        const previous = appt.estado;
-        appt.estado = 'cancelada';
-        appt.cancelledAt = new Date();
-        appt.cancelledById = cuentaId;
-        appt.cancelReason =
-          'Cancelada automáticamente al actualizar la disponibilidad del profesional';
-        cancelled.push({ appt, previous });
-      }
+    const days: {
+      date: string;
+      diaSemana: DiaSemana;
+      slots: { start: string; end: string; available: boolean }[];
+    }[] = [];
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dateStr = toDateStr(d);
+      const diaSemana = DIAS_SEMANA_INDEXED[d.getDay()];
+      if (!diaSemana) continue;
+      const slots = await this.getFreeSlots(cuentaId, dateStr);
+      days.push({ date: dateStr, diaSemana, slots });
+    }
 
-      if (cancelled.length) {
-        await em.getRepository(Appointment).save(cancelled.map((x) => x.appt));
-        for (const { appt, previous } of cancelled) {
-          this.events.emit(NOTIFICATION_EVENT_NAMES.APPOINTMENT_CANCELLED, {
-            appointmentId: appt.id,
-            actorId: cuentaId,
-            reason: appt.cancelReason,
-            notifyAccountIds: this.recipientsOf(appt),
-          } satisfies AppointmentCancelledEvent);
-          await this.appendStatusLog(
-            appt.id,
-            previous,
-            'cancelada',
-            cuentaId,
-            appt.cancelReason,
-            em,
-          );
-        }
-      }
-      return { saved, cancelledCount: cancelled.length };
-    });
+    return { cuentaId, rol: account.rol, weekStart: toDateStr(monday), days };
   }
+
+  // ════════════════════════════════════════════════════════════
+  // DISPONIBILIDAD — OTROS
+  // ════════════════════════════════════════════════════════════
 
   async countFutureAppointments(cuentaId: string): Promise<number> {
     return this.appointmentRepo
@@ -1928,9 +2535,7 @@ export class AppointmentsService {
         { cuentaId },
       )
       .andWhere('a.fecha_hora > NOW()')
-      .andWhere('a.estado IN (:...states)', {
-        states: ['pendiente', 'confirmada'],
-      })
+      .andWhere('a.estado IN (:...states)', { states: ['pendiente', 'confirmada'] })
       .getCount();
   }
 
@@ -1957,9 +2562,7 @@ export class AppointmentsService {
       .where('(a.convocado_a_id = :cid OR a.convocado_por_id = :cid)', {
         cid: slot.cuentaId,
       })
-      .andWhere('a.estado IN (:...states)', {
-        states: ['pendiente', 'confirmada'],
-      })
+      .andWhere('a.estado IN (:...states)', { states: ['pendiente', 'confirmada'] })
       .andWhere('a.fecha_hora > NOW()')
       .andWhere(
         `EXTRACT(ISODOW FROM a.fecha_hora) = :dow
@@ -2005,8 +2608,7 @@ export class AppointmentsService {
           appt.estado = 'cancelada';
           appt.cancelledAt = new Date();
           appt.cancelledById = caller.id;
-          appt.cancelReason =
-            'Cancelada por cambio de disponibilidad del profesional';
+          appt.cancelReason = 'Cancelada por cambio de disponibilidad del profesional';
         }
         await em.getRepository(Appointment).save(affected);
         cancelledCount = affected.length;
@@ -2033,93 +2635,9 @@ export class AppointmentsService {
     });
   }
 
-  async getPublicWeeklyAvailability(cuentaId: string, weekStart?: string) {
-    const ref = weekStart ? parseLocalDate(weekStart) : new Date();
-    if (isNaN(ref.getTime()))
-      throw new BadRequestException(
-        'weekStart inválido, usa YYYY-MM-DD o DD/MM/YYYY',
-      );
-
-    const day = ref.getDay();
-    const diffToMonday = day === 0 ? -6 : 1 - day;
-    const monday = new Date(ref);
-    monday.setDate(ref.getDate() + diffToMonday);
-    monday.setHours(0, 0, 0, 0);
-
-    const account = await this.loadAccountSummary(cuentaId);
-    if (!account) throw new NotFoundException('Cuenta no encontrada');
-
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const toDateStr = (d: Date) =>
-      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-    const days: {
-      date: string;
-      diaSemana: DiaSemana;
-      slots: { start: string; end: string; available: boolean }[];
-    }[] = [];
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      const dateStr = toDateStr(d);
-      const diaSemana = DIAS_SEMANA_INDEXED[d.getDay()];
-      if (!diaSemana) continue;
-      const slots = await this.getFreeSlots(cuentaId, dateStr);
-      days.push({ date: dateStr, diaSemana, slots });
-    }
-
-    return { cuentaId, rol: account.rol, weekStart: toDateStr(monday), days };
-  }
-
-  private cutoffToMinutes(cutoff: string | null | undefined): number | null {
-    if (!cutoff) return null;
-    const [h, m] = cutoff.split(':').map(Number);
-    if (Number.isNaN(h) || Number.isNaN(m)) return null;
-    return h * 60 + m;
-  }
-
-  private diaSemanaToIsoDow(d: DiaSemana): number {
-    const map: Record<DiaSemana, number> = {
-      lunes: 1,
-      martes: 2,
-      miercoles: 3,
-      jueves: 4,
-      viernes: 5,
-      sabado: 6,
-    };
-    return map[d];
-  }
-
-  private minutesToHHMM(total: number): string {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
-  }
-
-  private hhmmToMinutes(value: string): number {
-    const [h, m] = value.split(':').map(Number);
-    if (Number.isNaN(h) || Number.isNaN(m))
-      throw new BadRequestException('Formato de hora inválido, usa HH:mm');
-    return h * 60 + m;
-  }
-
-  private normalizeAvailabilityItem(
-    item: AvailabilityItemInput,
-  ): NormalizedAvailabilityItem {
-    if (!DIAS_SEMANA_INDEXED.includes(item.diaSemana as DiaSemana))
-      throw new BadRequestException('Día de disponibilidad inválido');
-    const start = this.hhmmToMinutes(item.horaInicio);
-    const end = this.hhmmToMinutes(item.horaFin);
-    if (end <= start)
-      throw new BadRequestException(
-        'La hora de fin debe ser posterior a la hora de inicio',
-      );
-
-    return {
-      diaSemana: item.diaSemana,
-      horaInicio: this.minutesToHHMM(start),
-      horaFin: this.minutesToHHMM(end),
-    };
-  }
+  // ════════════════════════════════════════════════════════════
+  // DIRECTORIOS
+  // ════════════════════════════════════════════════════════════
 
   async getRulesForTarget(targetId?: string) {
     if (!targetId) return null;
@@ -2127,8 +2645,7 @@ export class AppointmentsService {
     if (!acc || acc.rol === 'alumno' || acc.rol === 'padre') return null;
     const role = this.toAppointmentRole(acc);
     const rule = getAppointmentRule(role);
-    const availabilityBlockMin =
-      role === 'docente' ? 45 : (rule.slotMinutes ?? 15);
+    const availabilityBlockMin = role === 'docente' ? 45 : (rule.slotMinutes ?? 15);
 
     return {
       role,
@@ -2224,366 +2741,5 @@ export class AppointmentsService {
          JOIN cuentas c ON c.id = a.id AND c.activo = TRUE
         ORDER BY a.apellido_paterno, a.apellido_materno, a.nombre`,
     );
-  }
-
-  private mapTeacherRow(r: {
-    id: string;
-    nombre: string;
-    apellido_paterno: string;
-    apellido_materno: string | null;
-    especialidad: string | null;
-    tutoria_seccion_id: string | null;
-    tutoria_seccion_label: string | null;
-  }) {
-    return {
-      id: r.id,
-      nombre: r.nombre,
-      apellido_paterno: r.apellido_paterno,
-      apellido_materno: r.apellido_materno,
-      especialidad: r.especialidad,
-      tutoria_actual: r.tutoria_seccion_id
-        ? {
-          seccion_id: r.tutoria_seccion_id,
-          seccion_label: r.tutoria_seccion_label ?? '',
-        }
-        : null,
-    };
-  }
-
-  private async loadAccountSummary(id: string): Promise<AccountSummary | null> {
-    const row = await this.dataSource.query<
-      { id: string; rol: string; cargo: string | null }[]
-    >(
-      `SELECT c.id, c.rol::text AS rol, a.cargo
-         FROM cuentas c LEFT JOIN admins a ON a.id = c.id
-        WHERE c.id = $1 AND c.activo = TRUE LIMIT 1`,
-      [id],
-    );
-    return row[0] ?? null;
-  }
-
-  private toAppointmentRole(account: AccountSummary): AppointmentRole {
-    return resolveAppointmentRole(account.rol as never, account.cargo);
-  }
-
-  private resolveDuration(
-    rule: ReturnType<typeof getAppointmentRule>,
-    requested: number | undefined,
-  ): number {
-    if (rule.fixedDurationMin !== null) return rule.fixedDurationMin;
-    const value = requested ?? rule.slotMinutes;
-    if (value < rule.slotMinutes)
-      throw new BadRequestException(
-        `La duración mínima para ${rule.label} es ${rule.slotMinutes} min`,
-      );
-    if (value % rule.slotMinutes !== 0)
-      throw new BadRequestException(
-        `La duración debe ser múltiplo de ${rule.slotMinutes} min para ${rule.label}`,
-      );
-    const maxBySlots = rule.maxConsecutiveSlots * rule.slotMinutes;
-    const effectiveMax = Math.min(rule.maxDurationMin, maxBySlots);
-    if (value > effectiveMax)
-      throw new BadRequestException(
-        `Una cita con ${rule.label} puede ocupar a lo sumo ${rule.maxConsecutiveSlots} slot${rule.maxConsecutiveSlots === 1 ? '' : 's'
-        } consecutivo${rule.maxConsecutiveSlots === 1 ? '' : 's'} (${effectiveMax} min)`,
-      );
-    return value;
-  }
-
-  private recipientsOf(appt: Appointment): string[] {
-    const ids = new Set<string>([appt.createdById, appt.convocadoAId]);
-    if (appt.parentId) ids.add(appt.parentId);
-    return Array.from(ids);
-  }
-
-  private baseAppointmentQuery() {
-    return this.appointmentRepo
-      .createQueryBuilder('a')
-      .addSelect('a.lastPostponedById')
-      .leftJoinAndSelect('a.student', 'student')
-      .leftJoinAndSelect('a.parent', 'parent')
-      .leftJoinAndSelect('a.createdBy', 'createdBy')
-      .leftJoinAndSelect('a.convocadoA', 'convocadoA');
-  }
-
-  private assertScheduledAtIsValid(d: Date): void {
-    const now = new Date();
-    if (d.getTime() < now.getTime() + MIN_LEAD_MINUTES * 60_000)
-      throw new BadRequestException(
-        `La cita debe agendarse con al menos ${MIN_LEAD_MINUTES} minutos de anticipación`,
-      );
-    const max = new Date();
-    max.setMonth(max.getMonth() + MAX_FUTURE_MONTHS);
-    if (d > max)
-      throw new BadRequestException(
-        `No se puede agendar a más de ${MAX_FUTURE_MONTHS} meses`,
-      );
-  }
-
-  private assertCanRead(caller: CallerContext, appt: Appointment): void {
-    if (caller.rol === 'admin') return;
-    if (appt.createdById === caller.id) return;
-    if (appt.convocadoAId === caller.id) return;
-    if (caller.rol === 'alumno' && appt.studentId === caller.id) return;
-    if (caller.rol === 'padre' && appt.parentId === caller.id) return;
-    throw new ForbiddenException('No tienes acceso a esta cita');
-  }
-
-  private assertStateTransition(
-    caller: CallerContext,
-    appt: Appointment,
-    next: Appointment['estado'],
-  ): void {
-    if (appt.estado === 'cancelada')
-      throw new BadRequestException(
-        'Una cita cancelada no puede cambiar de estado',
-      );
-    if (next === 'realizada' || next === 'no_asistio') {
-      if (
-        caller.rol !== 'admin' &&
-        appt.createdById !== caller.id &&
-        appt.convocadoAId !== caller.id
-      )
-        throw new ForbiddenException(
-          'Solo el organizador o el convocado puede registrar la asistencia',
-        );
-    }
-  }
-
-  private async assertCanInvolveStudent(
-    caller: CallerContext,
-    studentId: string,
-  ): Promise<void> {
-    switch (caller.rol) {
-      case 'admin':
-      case 'psicologa':
-      case 'docente':
-      case 'staff':
-        return;
-      case 'padre': {
-        const linked = await this.dataSource.query<unknown[]>(
-          `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
-          [caller.id, studentId],
-        );
-        if (!linked.length)
-          throw new ForbiddenException(
-            'Ese alumno no está vinculado a tu cuenta',
-          );
-        return;
-      }
-      case 'alumno':
-        if (caller.id !== studentId)
-          throw new ForbiddenException(
-            'Un alumno solo puede agendar citas sobre sí mismo',
-          );
-        return;
-      default:
-        throw new ForbiddenException(
-          `Tu rol (${caller.rol}) no puede crear citas`,
-        );
-    }
-  }
-
-  private async assertParentBelongsToStudent(
-    parentId: string,
-    studentId: string,
-  ): Promise<void> {
-    const linked = await this.dataSource.query<unknown[]>(
-      `SELECT 1 FROM padre_alumno WHERE padre_id = $1 AND alumno_id = $2 LIMIT 1`,
-      [parentId, studentId],
-    );
-    if (!linked.length)
-      throw new BadRequestException(
-        'Ese padre no corresponde al alumno indicado',
-      );
-  }
-
-  private async findParentsOfStudent(studentId: string): Promise<ProfileRow[]> {
-    return this.dataSource.query<ProfileRow[]>(
-      `SELECT p.id, p.nombre, p.apellido_paterno, p.apellido_materno
-         FROM padres p
-         JOIN padre_alumno pa ON pa.padre_id = p.id
-         JOIN cuentas c       ON c.id = p.id
-        WHERE pa.alumno_id = $1 AND c.activo = TRUE`,
-      [studentId],
-    );
-  }
-
-  private async warnIfPsicologaNotLinked(
-    psicologaId: string,
-    studentId: string,
-  ): Promise<void> {
-    const linked = await this.dataSource.query<unknown[]>(
-      `SELECT 1 FROM psicologa_alumno
-        WHERE psicologa_id = $1 AND alumno_id = $2 AND activo = TRUE LIMIT 1`,
-      [psicologaId, studentId],
-    );
-    if (!linked.length) {
-      Logger.warn(
-        `Psicóloga ${psicologaId} sin vínculo activo con alumno ${studentId} al agendar`,
-        AppointmentsService.name,
-      );
-    }
-  }
-
-  private async assertSlotFitsAvailability(
-    cuentaId: string,
-    start: Date,
-    durationMin: number,
-    ignoreAppointmentId?: string,
-    fallback?: { start: string; end: string },
-    cutoff?: string | null,
-  ): Promise<void> {
-    const end = new Date(start.getTime() + durationMin * 60_000);
-    const dayName = WEEK_DAYS[start.getDay()];
-    if (dayName === 'domingo')
-      throw new BadRequestException('No se atiende los domingos');
-
-    const bloques = await this.availabilityRepo.find({
-      where: {
-        cuentaId,
-        diaSemana: dayName,
-        activo: true,
-        tipo: 'weekly',
-      },
-      order: { horaInicio: 'ASC' },
-    });
-
-    const virtualBlocks =
-      bloques.length > 0
-        ? bloques.map((d) => ({ horaInicio: d.horaInicio, horaFin: d.horaFin }))
-        : fallback
-          ? [{ horaInicio: fallback.start, horaFin: fallback.end }]
-          : [];
-
-    if (!virtualBlocks.length)
-      throw new BadRequestException(
-        'El profesional no tiene disponibilidad ese día',
-      );
-
-    const cutoffMin = this.cutoffToMinutes(cutoff);
-
-    const fits = virtualBlocks.some((d) => {
-      const [hS, mS] = d.horaInicio.split(':').map(Number);
-      const [hE, mE] = d.horaFin.split(':').map(Number);
-      const blockEndMin =
-        cutoffMin !== null ? Math.min(hE * 60 + mE, cutoffMin) : hE * 60 + mE;
-      const ds = new Date(start);
-      ds.setHours(hS, mS, 0, 0);
-      const de = new Date(start);
-      de.setHours(Math.floor(blockEndMin / 60), blockEndMin % 60, 0, 0);
-      return start >= ds && end <= de;
-    });
-
-    if (!fits) {
-      const ranges = virtualBlocks
-        .map((d) => `${d.horaInicio} - ${d.horaFin}`)
-        .join(', ');
-      const cutoffNote =
-        cutoffMin !== null ? ` (atención hasta las ${cutoff})` : '';
-      throw new BadRequestException(
-        `Horario fuera de la disponibilidad (${ranges})${cutoffNote}`,
-      );
-    }
-
-    const overlapQB = this.appointmentRepo
-      .createQueryBuilder('a')
-      .where(
-        '(a.convocado_a_id = :cuentaId OR a.convocado_por_id = :cuentaId)',
-        { cuentaId },
-      )
-      .andWhere('a.estado IN (:...states)', {
-        states: ['pendiente', 'confirmada'],
-      })
-      .andWhere(
-        `tstzrange(a.fecha_hora, a.fecha_hora + (a.duracion_min || ' minutes')::interval, '[)')
-         && tstzrange(:start, :end, '[)')`,
-        { start, end },
-      );
-    if (ignoreAppointmentId)
-      overlapQB.andWhere('a.id <> :ignoreId', {
-        ignoreId: ignoreAppointmentId,
-      });
-    if ((await overlapQB.getCount()) > 0)
-      throw new ConflictException('Ese horario ya está ocupado');
-  }
-
-  private async upsertPsychologistAssignment(
-    em: EntityManager,
-    psychologistId: string,
-    studentId: string,
-  ): Promise<void> {
-    await em.query(
-      `INSERT INTO psicologa_alumno (psicologa_id, alumno_id, activo, desde) VALUES ($1, $2, TRUE, CURRENT_DATE)
-       ON CONFLICT (psicologa_id, alumno_id) DO UPDATE SET activo = TRUE, hasta = NULL`,
-      [psychologistId, studentId],
-    );
-  }
-
-  private fitsInAvailability(
-    appt: Appointment,
-    availability: AccountAvailability[],
-  ): boolean {
-    const dt = new Date(appt.scheduledAt);
-    if (!availability.length) return false;
-    const dia = DIAS_SEMANA_INDEXED[dt.getDay()];
-    if (!dia) return false;
-    const startMin = dt.getHours() * 60 + dt.getMinutes();
-    const endMin = startMin + (appt.durationMin ?? 30);
-    return availability.some((a) => {
-      if (a.diaSemana !== dia) return false;
-      const [hI, mI] = a.horaInicio.split(':').map(Number);
-      const [hF, mF] = a.horaFin.split(':').map(Number);
-      return startMin >= hI * 60 + mI && endMin <= hF * 60 + mF;
-    });
-  }
-
-  private async enrichWithProfileNames(
-    items: Appointment[],
-  ): Promise<Appointment[]> {
-    if (!items.length) return items;
-    const ids = new Set<string>();
-    for (const a of items) {
-      if (a.convocadoAId) ids.add(a.convocadoAId);
-      if (a.createdById) ids.add(a.createdById);
-    }
-    if (!ids.size) return items;
-
-    const rows = await this.dataSource.query<ProfileRow[]>(
-      `SELECT id, nombre, apellido_paterno, apellido_materno FROM psicologas WHERE id = ANY($1::uuid[])
-       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM alumnos    WHERE id = ANY($1::uuid[])
-       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM padres     WHERE id = ANY($1::uuid[])
-       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM docentes   WHERE id = ANY($1::uuid[])
-       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM staff      WHERE id = ANY($1::uuid[])
-       UNION ALL SELECT id, nombre, apellido_paterno, apellido_materno FROM admins     WHERE id = ANY($1::uuid[])`,
-      [Array.from(ids)],
-    );
-    const byId = new Map(rows.map((r) => [r.id, r]));
-
-    for (const a of items) {
-      const target = a as unknown as Record<string, unknown>;
-      if (a.convocadoAId && a.convocadoA) {
-        const p = byId.get(a.convocadoAId);
-        if (p)
-          Object.assign(a.convocadoA as unknown as Record<string, unknown>, {
-            nombre: p.nombre,
-            apellido_paterno: p.apellido_paterno,
-            apellido_materno: p.apellido_materno,
-          });
-      }
-      if (a.createdById && a.createdBy) {
-        const p = byId.get(a.createdById);
-        target['convocadoPor'] = {
-          id: a.createdBy.id,
-          rol: a.createdBy.rol,
-          nombre: p?.nombre ?? '',
-          apellido_paterno: p?.apellido_paterno ?? '',
-          apellido_materno: p?.apellido_materno ?? null,
-        };
-      } else {
-        target['convocadoPor'] = null;
-      }
-    }
-    return items;
   }
 }

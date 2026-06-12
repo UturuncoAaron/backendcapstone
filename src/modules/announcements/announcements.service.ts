@@ -41,10 +41,6 @@ export class AnnouncementsService {
     private readonly ds: DataSource,
   ) { }
 
-  // ══════════════════════════════════════════════════════════════
-  // VALIDAR DESTINATARIOS
-  // ══════════════════════════════════════════════════════════════
-
   async validateDestinatarios(dests: string[]): Promise<void> {
     const invalid: string[] = [];
     for (const d of dests) {
@@ -69,17 +65,13 @@ export class AnnouncementsService {
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // CREAR
-  // ══════════════════════════════════════════════════════════════
-
   async create(user: { id: string; rol: string }, dto: CreateAnnouncementDto) {
-    let periodoId = dto.periodo_id ?? null;
-    if (!periodoId) {
-      const [activo] = await this.ds.query<{ id: string }[]>(
-        `SELECT id FROM periodos WHERE activo = TRUE LIMIT 1`,
+    let anioLectivo = dto.anio ?? null;
+    if (!anioLectivo) {
+      const [activo] = await this.ds.query<{ anio: number }[]>(
+        `SELECT anio FROM anios_lectivos WHERE estado = 'en_curso' LIMIT 1`,
       );
-      periodoId = activo?.id ?? null;
+      anioLectivo = activo?.anio ?? new Date().getFullYear();
     }
 
     const fijado = user.rol === 'admin' ? (dto.fijado ?? false) : false;
@@ -93,7 +85,7 @@ export class AnnouncementsService {
       importante: dto.importante ?? false,
       fijado,
       fijado_hasta: fijadoHasta ? new Date(fijadoHasta) : null,
-      periodo_id: periodoId,
+      anio: anioLectivo,
     });
     const saved = await this.repo.save(announcement);
 
@@ -108,10 +100,6 @@ export class AnnouncementsService {
     return saved;
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // VISIBILIDAD SQL
-  // ══════════════════════════════════════════════════════════════
-
   private buildVisibilidadSql(
     userId: string,
     rol: string,
@@ -121,8 +109,8 @@ export class AnnouncementsService {
     if (rol === 'admin') return 'TRUE';
 
     const parts: string[] = [];
-
     parts.push(`('todos' = ANY(c.destinatarios))`);
+
     if (rol !== 'admin') {
       const rolPlural: Record<string, string> = {
         alumno: 'alumnos',
@@ -178,10 +166,6 @@ export class AnnouncementsService {
     return `(${parts.join(' OR ')})`;
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // FIND ALL (cursor-based)
-  // ══════════════════════════════════════════════════════════════
-
   async findAll(query: QueryAnnouncementsDto) {
     const size = Math.min(50, Math.max(1, query.size ?? 20));
     const params: any[] = [];
@@ -195,9 +179,9 @@ export class AnnouncementsService {
       params.push(query.cursor);
       whereExtra += ` AND c.created_at < $${params.length}`;
     }
-    if (query.periodo_id) {
-      params.push(query.periodo_id);
-      whereExtra += ` AND c.periodo_id = $${params.length}`;
+    if (query.anio) {
+      params.push(query.anio);
+      whereExtra += ` AND c.anio = $${params.length}`;
     }
     if (query.importante) {
       whereExtra += ` AND c.importante = TRUE`;
@@ -217,7 +201,7 @@ export class AnnouncementsService {
 
     const sql = `
       SELECT c.*,
-             p.nombre AS bimestre_label,
+             alec.anio AS anio_label,
              EXISTS (
                SELECT 1 FROM comunicados_lecturas cl
                WHERE cl.comunicado_id = c.id AND cl.cuenta_id = $${params.length + 1}
@@ -229,7 +213,7 @@ export class AnnouncementsService {
              COALESCE(adm.apellido_paterno, doc.apellido_paterno, psi.apellido_paterno, ax.apellido_paterno) AS autor_apellido,
              adm.foto_storage_key AS autor_foto
       FROM comunicados c
-      LEFT JOIN periodos p ON p.id = c.periodo_id
+      LEFT JOIN anios_lectivos alec ON alec.anio = c.anio
       INNER JOIN cuentas cu ON cu.id = c.created_by
       LEFT JOIN admins     adm ON adm.id = c.created_by
       LEFT JOIN docentes   doc ON doc.id = c.created_by
@@ -241,7 +225,7 @@ export class AnnouncementsService {
       ORDER BY
         CASE WHEN c.fijado = TRUE
               AND (c.fijado_hasta IS NULL OR c.fijado_hasta > NOW())
-             THEN 0 ELSE 1 END,
+              THEN 0 ELSE 1 END,
         c.created_at DESC
       LIMIT $${params.length + 2}
     `;
@@ -270,8 +254,8 @@ export class AnnouncementsService {
       activo: r.activo,
       vistas: r.vistas,
       leido_por_mi: r.leido_por_mi,
-      periodo_id: r.periodo_id,
-      bimestre_label: r.bimestre_label ?? null,
+      anio: r.anio,
+      anio_label: r.anio_label ? String(r.anio_label) : null,
       created_at: r.created_at,
       updated_at: r.updated_at,
       creado_por: {
@@ -332,14 +316,10 @@ export class AnnouncementsService {
     return r?.count ?? 0;
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // DETALLE
-  // ══════════════════════════════════════════════════════════════
-
   async findOne(id: string, userId?: string) {
     const sql = `
       SELECT c.*,
-             p.nombre AS bimestre_label,
+             alec.anio AS anio_label,
              (SELECT COUNT(*) FROM attachments a
               WHERE a.owner_type = 'announcement' AND a.owner_id = c.id) AS total_archivos,
              cu.rol AS autor_rol,
@@ -349,7 +329,7 @@ export class AnnouncementsService {
              (SELECT COUNT(*) FROM comunicados_lecturas cl
               WHERE cl.comunicado_id = c.id) AS lecturas_total
       FROM comunicados c
-      LEFT JOIN periodos p ON p.id = c.periodo_id
+      LEFT JOIN anios_lectivos alec ON alec.anio = c.anio
       INNER JOIN cuentas cu ON cu.id = c.created_by
       LEFT JOIN admins     adm ON adm.id = c.created_by
       LEFT JOIN docentes   doc ON doc.id = c.created_by
@@ -377,14 +357,14 @@ export class AnnouncementsService {
       titulo: r.titulo,
       contenido_preview: (r.contenido ?? '').replace(/<[^>]*>/g, '').substring(0, 200),
       contenido_completo: r.contenido,
-      importante: r.importante,
+      important: r.importante,
       fijado: r.fijado,
       fijado_hasta: r.fijado_hasta,
       destinatarios: r.destinatarios,
       activo: r.activo,
       vistas: Number(r.vistas) + (userId ? 1 : 0),
-      periodo_id: r.periodo_id,
-      bimestre_label: r.bimestre_label ?? null,
+      anio: r.anio,
+      anio_label: r.anio_label ? String(r.anio_label) : null,
       created_at: r.created_at,
       updated_at: r.updated_at,
       creado_por: {
@@ -405,10 +385,6 @@ export class AnnouncementsService {
       lecturas_total: Number(r.lecturas_total ?? 0),
     };
   }
-
-  // ══════════════════════════════════════════════════════════════
-  // UPDATE
-  // ══════════════════════════════════════════════════════════════
 
   async update(
     id: string, userId: string, rol: string,
@@ -439,10 +415,6 @@ export class AnnouncementsService {
     return this.repo.save(a);
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // FIJAR
-  // ══════════════════════════════════════════════════════════════
-
   async fijar(id: string, fijado: boolean, fijado_hasta?: string) {
     const a = await this.repo.findOne({ where: { id } });
     if (!a) throw new NotFoundException(`Comunicado ${id} no encontrado`);
@@ -450,10 +422,6 @@ export class AnnouncementsService {
     a.fijado_hasta = fijado_hasta ? new Date(fijado_hasta) : null;
     return this.repo.save(a);
   }
-
-  // ══════════════════════════════════════════════════════════════
-  // ARCHIVAR
-  // ══════════════════════════════════════════════════════════════
 
   async archivar(id: string, userId: string, rol: string) {
     const a = await this.repo.findOne({ where: { id } });
@@ -464,10 +432,6 @@ export class AnnouncementsService {
     a.activo = false;
     return this.repo.save(a);
   }
-
-  // ══════════════════════════════════════════════════════════════
-  // LECTURAS
-  // ══════════════════════════════════════════════════════════════
 
   async getLecturas(id: string) {
     const rows = await this.ds.query(
@@ -496,12 +460,8 @@ export class AnnouncementsService {
     }));
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // ADMIN: TODOS
-  // ══════════════════════════════════════════════════════════════
-
   async findAllAdmin(query: {
-    size?: number; cursor?: string; periodo_id?: string;
+    size?: number; cursor?: string; anio?: number;
     activo?: boolean; orden?: string; buscar?: string;
   }) {
     const size = Math.min(50, Math.max(1, query.size ?? 20));
@@ -512,9 +472,9 @@ export class AnnouncementsService {
       params.push(query.cursor);
       whereExtra += ` AND c.created_at < $${params.length}`;
     }
-    if (query.periodo_id) {
-      params.push(query.periodo_id);
-      whereExtra += ` AND c.periodo_id = $${params.length}`;
+    if (query.anio) {
+      params.push(query.anio);
+      whereExtra += ` AND c.anio = $${params.length}`;
     }
     if (query.activo !== undefined && query.activo !== null) {
       params.push(query.activo);
@@ -534,7 +494,7 @@ export class AnnouncementsService {
 
     const sql = `
       SELECT c.*,
-             p.nombre AS bimestre_label,
+             alec.anio AS anio_label,
              (SELECT COUNT(*) FROM attachments a
               WHERE a.owner_type = 'announcement' AND a.owner_id = c.id) AS total_archivos,
              cu.rol AS autor_rol,
@@ -543,7 +503,7 @@ export class AnnouncementsService {
              (SELECT COUNT(*) FROM comunicados_lecturas cl
               WHERE cl.comunicado_id = c.id) AS lecturas_total
       FROM comunicados c
-      LEFT JOIN periodos p ON p.id = c.periodo_id
+      LEFT JOIN anios_lectivos alec ON alec.anio = c.anio
       INNER JOIN cuentas cu ON cu.id = c.created_by
       LEFT JOIN admins     adm ON adm.id = c.created_by
       LEFT JOIN docentes   doc ON doc.id = c.created_by
@@ -575,8 +535,8 @@ export class AnnouncementsService {
       activo: r.activo,
       vistas: r.vistas,
       lecturas_total: Number(r.lecturas_total ?? 0),
-      periodo_id: r.periodo_id,
-      bimestre_label: r.bimestre_label ?? null,
+      anio: r.anio,
+      anio_label: r.anio_label ? String(r.anio_label) : null,
       created_at: r.created_at,
       updated_at: r.updated_at,
       creado_por: {
@@ -601,10 +561,6 @@ export class AnnouncementsService {
       next_cursor: rows.length > 0 ? rows[rows.length - 1].created_at : null,
     };
   }
-
-  // ══════════════════════════════════════════════════════════════
-  // ELIMINAR ARCHIVO
-  // ══════════════════════════════════════════════════════════════
 
   async deleteArchivo(comunicadoId: string, archivoId: string, userId: string, rol: string) {
     const a = await this.repo.findOne({ where: { id: comunicadoId } });

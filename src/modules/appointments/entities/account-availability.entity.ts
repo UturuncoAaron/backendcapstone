@@ -20,7 +20,7 @@ export const DIAS_SEMANA = [
 ] as const;
 export type DiaSemana = (typeof DIAS_SEMANA)[number];
 
-export type AvailabilityTipo = 'weekly';
+export type AvailabilityTipo = 'weekly' | 'specific';
 
 @Entity('disponibilidad_cuenta')
 @Index('idx_disp_cuenta_activo', ['cuentaId', 'diaSemana'], {
